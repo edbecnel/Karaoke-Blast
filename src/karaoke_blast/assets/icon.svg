@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <rect width="512" height="512" rx="112" fill="#1a1a2e"/>
+  <rect x="24" y="24" width="464" height="464" rx="96" stroke="#2d2d42" stroke-width="8"/>
+
+  <!-- exhaust / blast -->
+  <path d="M176 332 C148 360 128 392 120 432 L168 404 C184 372 204 348 228 328 Z" fill="#ff6b81" opacity="0.9"/>
+  <path d="M228 328 C252 348 272 372 288 404 L336 432 C328 392 308 360 280 332 Z" fill="#e94560" opacity="0.85"/>
+
+  <!-- music note (flame accent) -->
+  <path
+    d="M300 404 C300 428 282 446 258 446 C234 446 216 428 216 404 C216 380 234 362 258 362 C266 362 274 364 280 368 L280 300 L332 288 L332 320 L300 326 Z"
+    fill="#ffffff"
+  />
+  <ellipse cx="258" cy="404" rx="28" ry="24" fill="#ffb3c1"/>
+
+  <!-- rocket body -->
+  <path
+    d="M248 96 L312 300 L280 320 L232 320 L200 300 Z"
+    fill="#e94560"
+  />
+  <path
+    d="M248 96 L280 300 L264 312 L232 312 L216 300 Z"
+    fill="#ff6b81"
+    opacity="0.55"
+  />
+
+  <!-- nose cone -->
+  <path d="M232 128 L248 72 L264 128 Z" fill="#ffffff"/>
+
+  <!-- window -->
+  <circle cx="248" cy="210" r="28" fill="#2d2d42"/>
+  <circle cx="248" cy="210" r="20" fill="#7ee787" opacity="0.9"/>
+  <circle cx="240" cy="202" r="6" fill="#ffffff" opacity="0.65"/>
+
+  <!-- fins -->
+  <path d="M200 300 L168 348 L196 332 Z" fill="#2d2d42"/>
+  <path d="M312 300 L344 348 L316 332 Z" fill="#2d2d42"/>
+
+  <!-- stars -->
+  <circle cx="120" cy="140" r="6" fill="#ffb3c1" opacity="0.8"/>
+  <circle cx="392" cy="168" r="5" fill="#ffffff" opacity="0.55"/>
+  <circle cx="368" cy="108" r="4" fill="#ff6b81" opacity="0.7"/>
+</svg>

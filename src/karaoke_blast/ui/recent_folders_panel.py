@@ -1,0 +1,78 @@
+"""Recent folders list on the startup screen."""
+
+from pathlib import Path
+
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtWidgets import (
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+
+LIST_STYLE = """
+QListWidget {
+    background-color: rgba(255, 255, 255, 12);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 30);
+    border-radius: 6px;
+    font-size: 13px;
+    outline: none;
+    padding: 4px;
+}
+QListWidget::item {
+    padding: 10px 12px;
+    border-radius: 4px;
+}
+QListWidget::item:selected {
+    background-color: rgba(233, 69, 96, 140);
+}
+QListWidget::item:hover {
+    background-color: rgba(255, 255, 255, 25);
+}
+"""
+
+
+class RecentFoldersPanel(QWidget):
+    """Shows recently opened folders for quick selection."""
+
+    folder_selected = pyqtSignal(object)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self._heading = QLabel("Recent Folders")
+        self._heading.setStyleSheet("color: #ccc; font-size: 14px; font-weight: bold;")
+        self._heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._heading)
+
+        self._list = QListWidget()
+        self._list.setStyleSheet(LIST_STYLE)
+        self._list.setMaximumWidth(520)
+        self._list.setMinimumHeight(120)
+        self._list.setMaximumHeight(280)
+        self._list.itemClicked.connect(self._on_item_clicked)
+        layout.addWidget(self._list, alignment=Qt.AlignmentFlag.AlignCenter)
+
+    def set_folders(self, folders: list[Path]) -> None:
+        self._list.clear()
+        if not folders:
+            self.hide()
+            return
+
+        for folder in folders:
+            item = QListWidgetItem(folder.name)
+            item.setData(Qt.ItemDataRole.UserRole, folder)
+            item.setToolTip(str(folder))
+            self._list.addItem(item)
+
+        self.show()
+
+    def _on_item_clicked(self, item: QListWidgetItem) -> None:
+        folder = item.data(Qt.ItemDataRole.UserRole)
+        if folder is not None:
+            self.folder_selected.emit(folder)
