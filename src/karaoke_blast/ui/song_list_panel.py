@@ -276,7 +276,7 @@ class SongListPanel(QWidget):
         self._apply_filter()
 
     def _update_now_playing_filter_state(self) -> None:
-        has_queue = bool(self._queue_indices)
+        has_queue = bool(self._play_order_indices())
         self._now_playing_btn.setEnabled(has_queue)
         if not has_queue:
             self._clear_now_playing_filter()
@@ -333,46 +333,69 @@ class SongListPanel(QWidget):
             self._rebuild_queue_ui()
         self._apply_filter()
 
+    def _display_queue_indices(self) -> list[int]:
+        return [
+            index
+            for index in self._queue_indices
+            if index != self._current_index and 0 <= index < len(self._paths)
+        ]
+
     def _rebuild_queue_ui(self) -> None:
         while self._queue_items_layout.count():
             child = self._queue_items_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
 
-        if not self._queue_indices:
+        order = self._play_order_indices()
+        if not order:
             self._queue_section.hide()
             return
 
-        self._queue_title.setText(f"Queue ({len(self._queue_indices)})")
-        for position, index in enumerate(self._queue_indices, start=1):
+        display_queue = self._display_queue_indices()
+        self._queue_title.setText(f"Now playing + queue ({len(order)})")
+        for index in order:
             if index >= len(self._paths):
                 continue
+            is_current = self._current_index is not None and index == self._current_index
             row = QWidget()
-            row.setStyleSheet(
-                "background-color: rgba(233, 69, 96, 30); border-radius: 4px;"
-            )
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(8, 4, 4, 4)
             row_layout.setSpacing(6)
 
-            label = QLabel(f"{position}. {display_name(self._paths[index])}")
-            label.setStyleSheet("color: #ffb3c1; font-size: 12px;")
+            if is_current:
+                row.setStyleSheet(
+                    "background-color: rgba(126, 231, 135, 30); border-radius: 4px;"
+                )
+                label = QLabel(f"▶ {display_name(self._paths[index])}")
+                label.setStyleSheet("color: #7ee787; font-size: 12px; font-weight: bold;")
+            else:
+                row.setStyleSheet(
+                    "background-color: rgba(233, 69, 96, 30); border-radius: 4px;"
+                )
+                queue_pos = display_queue.index(index) + 1
+                label = QLabel(f"⏭ {queue_pos} · {display_name(self._paths[index])}")
+                label.setStyleSheet("color: #ffb3c1; font-size: 12px;")
+
             label.setToolTip(str(self._paths[index]))
             row_layout.addWidget(label, 1)
 
-            remove_btn = QPushButton("×")
-            remove_btn.setToolTip("Remove from queue")
-            remove_btn.setFixedSize(22, 22)
-            remove_btn.setStyleSheet(
-                "QPushButton { background: transparent; color: #ccc; border: none;"
-                " font-size: 16px; border-radius: 3px; }"
-                "QPushButton:hover { background: rgba(255,255,255,30); color: white; }"
-            )
-            remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            remove_btn.clicked.connect(
-                lambda _checked=False, idx=index: self.remove_from_queue_requested.emit(idx)
-            )
-            row_layout.addWidget(remove_btn)
+            if not is_current:
+                remove_btn = QPushButton("×")
+                remove_btn.setToolTip("Remove from queue")
+                remove_btn.setFixedSize(22, 22)
+                remove_btn.setStyleSheet(
+                    "QPushButton { background: transparent; color: #ccc; border: none;"
+                    " font-size: 16px; border-radius: 3px; }"
+                    "QPushButton:hover { background: rgba(255,255,255,30); color: white; }"
+                )
+                remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                remove_btn.clicked.connect(
+                    lambda _checked=False, idx=index: self.remove_from_queue_requested.emit(
+                        idx
+                    )
+                )
+                row_layout.addWidget(remove_btn)
+
             self._queue_items_layout.addWidget(row)
 
         self._queue_section.show()
@@ -407,17 +430,21 @@ class SongListPanel(QWidget):
     def set_current_index(self, index: int) -> None:
         self._current_index = index
         self._list.blockSignals(True)
+        self._update_now_playing_filter_state()
+        if not self._now_playing_only:
+            self._rebuild_queue_ui()
         self._apply_filter()
         self._list.blockSignals(False)
+
+    def playing_index(self) -> int | None:
+        return self._current_index
 
     def _play_order_indices(self) -> list[int]:
         """Current song first, then queued songs in FIFO order."""
         order: list[int] = []
         if self._current_index is not None and 0 <= self._current_index < len(self._paths):
             order.append(self._current_index)
-        for index in self._queue_indices:
-            if index != self._current_index and 0 <= index < len(self._paths):
-                order.append(index)
+        order.extend(self._display_queue_indices())
         return order
 
     def _apply_filter(self) -> None:
@@ -432,6 +459,7 @@ class SongListPanel(QWidget):
         self._list.clear()
 
         visible = 0
+        display_queue = self._display_queue_indices()
         for i in candidate_indices:
             path = self._paths[i]
             name = display_name(path).lower()
@@ -447,20 +475,20 @@ class SongListPanel(QWidget):
             title = display_name(path)
             if self._current_index is not None and i == self._current_index:
                 title = f"▶ {title}"
-            elif i in self._queue_indices:
-                queue_pos = self._queue_indices.index(i) + 1
+            elif i in display_queue:
+                queue_pos = display_queue.index(i) + 1
                 title = f"⏭ {queue_pos} · {title}"
             item = QListWidgetItem(title)
             item.setData(Qt.ItemDataRole.UserRole, i)
             tip = f"{display_name(path)}\n{path}\nModified: {mtime.strftime('%Y-%m-%d %H:%M')}"
             if self._current_index is not None and i == self._current_index:
                 tip = f"Now playing\n{tip}"
-            elif i in self._queue_indices:
-                tip = f"Queued (#{self._queue_indices.index(i) + 1})\n{tip}"
+            elif i in display_queue:
+                tip = f"Queued (#{display_queue.index(i) + 1})\n{tip}"
             item.setToolTip(tip)
             if self._current_index is not None and i == self._current_index:
                 item.setForeground(QColor("#7ee787"))
-            elif i in self._queue_indices:
+            elif i in display_queue:
                 item.setForeground(QColor("#ffb3c1"))
             self._list.addItem(item)
             visible += 1

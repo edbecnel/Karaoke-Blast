@@ -19,6 +19,7 @@ class Settings:
     def __init__(self) -> None:
         self.controls_auto_hide: bool = True
         self.volume: int = 80
+        self.muted: bool = False
         self.load()
 
     def load(self) -> None:
@@ -32,6 +33,8 @@ class Settings:
             volume = data.get("volume")
             if isinstance(volume, int) and 0 <= volume <= 100:
                 self.volume = volume
+            if isinstance(data.get("muted"), bool):
+                self.muted = data["muted"]
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning("Could not load settings: %s", exc)
 
@@ -39,6 +42,7 @@ class Settings:
         data = {
             "controls_auto_hide": self.controls_auto_hide,
             "volume": self.volume,
+            "muted": self.muted,
         }
         try:
             _settings_file().write_text(

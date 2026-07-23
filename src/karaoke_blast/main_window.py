@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 
 from PyQt6.QtCore import QEvent, Qt, QTimer
-from PyQt6.QtGui import QKeyEvent
+from PyQt6.QtGui import QCloseEvent, QKeyEvent
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -24,6 +24,7 @@ from karaoke_blast.player.controls_bar import ControlsBar
 from karaoke_blast.player.video_widget import VideoWidget
 from karaoke_blast.player.vlc_player import SEEK_STEP_MS, VlcPlayer
 from karaoke_blast.storage.folder_history import FolderHistory
+from karaoke_blast.storage.folder_queues import FolderQueues
 from karaoke_blast.storage.settings import Settings
 from karaoke_blast.ui.recent_folders_panel import RecentFoldersPanel
 from karaoke_blast.ui.song_list_panel import PANEL_DEFAULT_WIDTH, SongListPanel
@@ -35,6 +36,12 @@ logger = logging.getLogger(__name__)
 
 OVERLAY_HIDE_MS = 4000
 CONTROLS_HIDE_MS = 3000
+
+
+def _same_paths(left: list[Path], right: list[Path]) -> bool:
+    if len(left) != len(right):
+        return False
+    return all(a.resolve() == b.resolve() for a, b in zip(left, right, strict=True))
 
 
 class MainWindow(QWidget):
@@ -55,6 +62,7 @@ class MainWindow(QWidget):
         self._saved_splitter_sizes: list[int] | None = None
         self._play_queue = PlayQueue()
         self._folder_history = FolderHistory()
+        self._folder_queues = FolderQueues()
         self._settings = Settings()
 
         self._stack = QStackedWidget()
@@ -97,15 +105,16 @@ class MainWindow(QWidget):
             self._on_playback_error, Qt.ConnectionType.QueuedConnection
         )
 
-        self._apply_saved_volume()
+        self._apply_saved_audio()
         return True
 
-    def _apply_saved_volume(self) -> None:
+    def _apply_saved_audio(self) -> None:
         if self._vlc is None:
             return
-        volume = self._settings.volume
-        self._vlc.set_volume(volume)
-        self._controls.set_volume(volume)
+        self._vlc.set_volume(self._settings.volume)
+        self._controls.set_volume(self._settings.volume)
+        self._vlc.set_mute(self._settings.muted)
+        self._controls.set_muted(self._settings.muted)
 
     def _build_empty_state(self) -> QWidget:
         page = QWidget()
@@ -204,6 +213,7 @@ class MainWindow(QWidget):
 
         self._controls = ControlsBar()
         self._controls.set_volume(self._settings.volume)
+        self._controls.set_muted(self._settings.muted)
         self._controls.installEventFilter(self)
         self._controls.set_pinned(not self._settings.controls_auto_hide)
         if self._settings.controls_auto_hide:
@@ -254,9 +264,26 @@ class MainWindow(QWidget):
         w = self._video_container.width()
         h = self._video_container.height()
         self._video_widget.setGeometry(0, 0, w, h)
-        if self._status_label.isVisible():
-            self._status_label.setGeometry(0, 0, w, h)
+        self._reposition_status_label()
         self._reposition_overlay()
+
+    def _reposition_status_label(self, *, show: bool = False) -> None:
+        w = self._video_container.width()
+        h = self._video_container.height()
+        if w <= 0 or h <= 0:
+            return
+        should_show = show or self._status_label.isVisible()
+        if self._status_label.isVisible():
+            self._status_label.hide()
+            self._video_container.update()
+        self._status_label.setGeometry(0, 0, w, h)
+        if should_show:
+            self._status_label.show()
+            self._status_label.raise_()
+
+    def _show_status_message(self, message: str) -> None:
+        self._status_label.setText(message)
+        self._reposition_status_label(show=True)
 
     def mouseMoveEvent(self, event) -> None:
         super().mouseMoveEvent(event)
@@ -364,8 +391,11 @@ class MainWindow(QWidget):
         self._refresh_recent_folders()
         self._sort_strategy = SortStrategy.NAME_ASC
         sorted_paths = sort_paths(self._raw_paths, self._sort_strategy)
-        self._playlist = Playlist(paths=sorted_paths, index=0)
-        self._play_queue.clear()
+        restored_index = self._restore_folder_current(sorted_paths)
+        self._playlist = Playlist(
+            paths=sorted_paths,
+            index=restored_index if restored_index is not None else 0,
+        )
         self._stopped = True
         self._overlay.hide()
         self._status_label.hide()
@@ -378,17 +408,24 @@ class MainWindow(QWidget):
             return
         self._vlc.stop()
         self._song_list.set_sort_strategy(self._sort_strategy)
-        self._song_list.set_songs(sorted_paths)
+        self._restore_folder_queue(sorted_paths)
+        self._song_list.set_songs(sorted_paths, current_index=restored_index)
         self._update_queue_display()
         self._show_song_list()
-        self._reposition_video_ui()
-        self._show_ready_to_play()
         self._show_controls()
+        self._reposition_video_ui()
+        QTimer.singleShot(0, self._show_ready_to_play)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
         if self._vlc is not None:
             self._vlc.bind_output()
+        if hasattr(self, "_status_label") and self._status_label.isVisible():
+            QTimer.singleShot(0, self._reposition_status_label)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self._save_folder_state()
+        super().closeEvent(event)
 
     def _show_toast(self, message: str, duration_ms: int = 4000) -> None:
         """Show a temporary overlay message."""
@@ -413,16 +450,23 @@ class MainWindow(QWidget):
             )
             QTimer.singleShot(0, self._advance_to_next_track)
             return
+        queue_changed = False
+        if self._play_queue.contains(self._playlist.index):
+            self._play_queue.remove(self._playlist.index)
+            queue_changed = True
         self._stopped = False
         self._status_label.hide()
         self._show_overlay()
         self._show_controls()
         self._vlc.play(current)
-        self._apply_saved_volume()
-        QTimer.singleShot(0, self._apply_saved_volume)
-        QTimer.singleShot(100, self._apply_saved_volume)
-        self._sync_mute_state()
+        self._apply_saved_audio()
+        QTimer.singleShot(0, self._apply_saved_audio)
+        QTimer.singleShot(100, self._apply_saved_audio)
         self._song_list.set_current_index(self._playlist.index)
+        if queue_changed:
+            self._update_queue_display()
+        else:
+            self._save_folder_state()
         self._raise_ui_layers()
 
     def _on_song_selected(self, index: int) -> None:
@@ -501,21 +545,13 @@ class MainWindow(QWidget):
         self._overlay.hide()
 
     def _show_ready_to_play(self) -> None:
-        self._status_label.setText("Select a song to play")
-        self._status_label.setGeometry(
-            0, 0, self._video_container.width(), self._video_container.height()
-        )
-        self._status_label.show()
-        self._status_label.raise_()
+        self._show_status_message("Select a song to play")
 
     def _show_end_of_playlist(self) -> None:
         if self._vlc is not None:
             self._vlc.stop()
         self._stopped = True
-        self._status_label.setText("End of playlist")
-        self._status_label.setGeometry(0, 0, self._video_container.width(), self._video_container.height())
-        self._status_label.show()
-        self._status_label.raise_()
+        self._show_status_message("End of playlist")
         self._show_controls()
 
     def _on_end_reached(self) -> None:
@@ -549,7 +585,7 @@ class MainWindow(QWidget):
     def _on_play_next_requested(self, index: int) -> None:
         if index < 0 or index >= self._playlist.count:
             return
-        if index == self._playlist.index:
+        if not self._stopped and index == self._playlist.index:
             return
         if self._play_queue.enqueue(index):
             self._update_queue_display()
@@ -564,6 +600,75 @@ class MainWindow(QWidget):
 
     def _update_queue_display(self) -> None:
         self._song_list.set_queue_indices(self._play_queue.indices())
+        self._save_folder_state()
+
+    def _restore_folder_current(self, playlist_paths: list[Path]) -> int | None:
+        if self._folder is None:
+            return None
+        saved_path = self._folder_queues.get_current(self._folder)
+        if saved_path is None:
+            return None
+        try:
+            resolved = saved_path.resolve()
+        except OSError:
+            resolved = None
+        by_path = {path.resolve(): index for index, path in enumerate(playlist_paths)}
+        if resolved is None or not resolved.is_file():
+            self._folder_queues.set(
+                self._folder,
+                queue=self._folder_queues.get_queue(self._folder),
+                current=None,
+            )
+            return None
+        index = by_path.get(resolved)
+        if index is None:
+            self._folder_queues.set(
+                self._folder,
+                queue=self._folder_queues.get_queue(self._folder),
+                current=None,
+            )
+            return None
+        return index
+
+    def _restore_folder_queue(self, playlist_paths: list[Path]) -> None:
+        if self._folder is None:
+            return
+        saved_paths = self._folder_queues.get(self._folder)
+        by_path = {path.resolve(): index for index, path in enumerate(playlist_paths)}
+        self._play_queue.clear()
+        valid_paths: list[Path] = []
+        for saved_path in saved_paths:
+            try:
+                resolved = saved_path.resolve()
+            except OSError:
+                continue
+            if not resolved.is_file():
+                continue
+            index = by_path.get(resolved)
+            if index is None:
+                continue
+            self._play_queue.enqueue(index)
+            valid_paths.append(resolved)
+        if not _same_paths(valid_paths, saved_paths):
+            self._folder_queues.set(
+                self._folder,
+                queue=valid_paths,
+                current=self._folder_queues.get_current(self._folder),
+            )
+
+    def _save_folder_state(self) -> None:
+        if self._folder is None:
+            return
+        queue = [
+            self._playlist.paths[index]
+            for index in self._play_queue.indices()
+            if 0 <= index < len(self._playlist.paths)
+        ]
+        current: Path | None = None
+        playing_index = self._song_list.playing_index()
+        if playing_index is not None and 0 <= playing_index < len(self._playlist.paths):
+            current = self._playlist.paths[playing_index]
+        self._folder_queues.set(self._folder, queue=queue, current=current)
 
     def _remap_play_queue(self, old_paths: list[Path], new_paths: list[Path]) -> None:
         queued_paths = [
@@ -578,7 +683,14 @@ class MainWindow(QWidget):
         if self._vlc is None:
             return
         if self._stopped or self._playlist.current() is None:
-            self._play_current()
+            if (
+                self._stopped
+                and self._play_queue
+                and self._song_list.playing_index() is None
+            ):
+                self._advance_to_next_track()
+            else:
+                self._play_current()
         else:
             self._vlc.resume()
         self._show_overlay()
@@ -592,6 +704,7 @@ class MainWindow(QWidget):
         if self._vlc is not None:
             self._vlc.stop()
         self._stopped = True
+        self._save_folder_state()
         self._show_controls()
 
     def _on_rewind(self) -> None:
@@ -606,23 +719,23 @@ class MainWindow(QWidget):
 
     def _on_volume_changed(self, volume: int) -> None:
         self._settings.volume = volume
+        if volume > 0 and self._settings.muted:
+            self._settings.muted = False
         self._settings.save()
         if self._vlc is not None:
             self._vlc.set_volume(volume)
-            if volume > 0 and self._vlc.is_muted():
+            if not self._settings.muted:
                 self._vlc.set_mute(False)
-        self._sync_mute_state()
+        self._controls.set_volume(volume)
+        self._controls.set_muted(self._settings.muted)
 
     def _on_mute_toggled(self) -> None:
         if self._vlc is None:
             return
-        muted = self._vlc.toggle_mute()
-        self._controls.set_muted(muted)
-
-    def _sync_mute_state(self) -> None:
-        if self._vlc is None:
-            return
-        self._controls.set_muted(self._vlc.is_muted())
+        self._settings.muted = not self._settings.muted
+        self._settings.save()
+        self._vlc.set_mute(self._settings.muted)
+        self._controls.set_muted(self._settings.muted)
 
     def _next_track(self) -> None:
         self._advance_to_next_track()
