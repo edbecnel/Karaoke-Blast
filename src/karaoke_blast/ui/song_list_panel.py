@@ -238,7 +238,7 @@ class SongListPanel(QWidget):
         layout.addWidget(self._list)
 
         self._paths: list[Path] = []
-        self._current_index = 0
+        self._current_index: int | None = None
         self._selected_index: int | None = None
         self._queue_indices: list[int] = []
         self._now_playing_only = False
@@ -254,7 +254,11 @@ class SongListPanel(QWidget):
 
     def _on_now_playing_filter_toggled(self, checked: bool) -> None:
         self._now_playing_only = checked
+        self._search.setEnabled(not checked)
         if checked:
+            self._search.blockSignals(True)
+            self._search.clear()
+            self._search.blockSignals(False)
             self._queue_section.hide()
         else:
             self._rebuild_queue_ui()
@@ -264,10 +268,12 @@ class SongListPanel(QWidget):
         if not self._now_playing_only:
             return
         self._now_playing_only = False
+        self._search.setEnabled(True)
         self._now_playing_btn.blockSignals(True)
         self._now_playing_btn.setChecked(False)
         self._now_playing_btn.blockSignals(False)
         self._rebuild_queue_ui()
+        self._apply_filter()
 
     def _update_now_playing_filter_state(self) -> None:
         has_queue = bool(self._queue_indices)
@@ -379,7 +385,11 @@ class SongListPanel(QWidget):
             self._sort_combo.blockSignals(False)
 
     def set_songs(
-        self, paths: list[Path], *, current_index: int = 0, clear_search: bool = True
+        self,
+        paths: list[Path],
+        *,
+        current_index: int | None = None,
+        clear_search: bool = True,
     ) -> None:
         self._paths = paths
         self._current_index = current_index
@@ -388,22 +398,22 @@ class SongListPanel(QWidget):
             self._search.blockSignals(True)
             self._search.clear()
             self._search.blockSignals(False)
-        self._rebuild_queue_ui()
+        if self._now_playing_only:
+            self._queue_section.hide()
+        else:
+            self._rebuild_queue_ui()
         self._apply_filter()
 
     def set_current_index(self, index: int) -> None:
         self._current_index = index
         self._list.blockSignals(True)
-        if self._now_playing_only:
-            self._apply_filter()
-        else:
-            self._sync_list_selection()
+        self._apply_filter()
         self._list.blockSignals(False)
 
     def _play_order_indices(self) -> list[int]:
         """Current song first, then queued songs in FIFO order."""
         order: list[int] = []
-        if 0 <= self._current_index < len(self._paths):
+        if self._current_index is not None and 0 <= self._current_index < len(self._paths):
             order.append(self._current_index)
         for index in self._queue_indices:
             if index != self._current_index and 0 <= index < len(self._paths):
@@ -412,7 +422,7 @@ class SongListPanel(QWidget):
 
     def _apply_filter(self) -> None:
         query = self._search.text().strip().lower()
-        now_playing_only = self._now_playing_only and bool(self._queue_indices)
+        now_playing_only = self._now_playing_only
         if now_playing_only:
             candidate_indices = self._play_order_indices()
         else:
@@ -426,11 +436,16 @@ class SongListPanel(QWidget):
             path = self._paths[i]
             name = display_name(path).lower()
             filename = path.name.lower()
-            if query and query not in name and query not in filename:
+            if (
+                not now_playing_only
+                and query
+                and query not in name
+                and query not in filename
+            ):
                 continue
             mtime = datetime.fromtimestamp(path.stat().st_mtime)
             title = display_name(path)
-            if i == self._current_index:
+            if self._current_index is not None and i == self._current_index:
                 title = f"▶ {title}"
             elif i in self._queue_indices:
                 queue_pos = self._queue_indices.index(i) + 1
@@ -438,12 +453,12 @@ class SongListPanel(QWidget):
             item = QListWidgetItem(title)
             item.setData(Qt.ItemDataRole.UserRole, i)
             tip = f"{display_name(path)}\n{path}\nModified: {mtime.strftime('%Y-%m-%d %H:%M')}"
-            if i == self._current_index:
+            if self._current_index is not None and i == self._current_index:
                 tip = f"Now playing\n{tip}"
             elif i in self._queue_indices:
                 tip = f"Queued (#{self._queue_indices.index(i) + 1})\n{tip}"
             item.setToolTip(tip)
-            if i == self._current_index:
+            if self._current_index is not None and i == self._current_index:
                 item.setForeground(QColor("#7ee787"))
             elif i in self._queue_indices:
                 item.setForeground(QColor("#ffb3c1"))
@@ -476,6 +491,8 @@ class SongListPanel(QWidget):
                 self._list.setCurrentRow(row)
                 self._list.scrollToItem(item)
                 return
+        self._list.clearSelection()
+        self._list.setCurrentRow(-1)
 
     def show_panel(self) -> None:
         self.show()

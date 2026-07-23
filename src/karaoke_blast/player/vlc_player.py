@@ -109,7 +109,9 @@ class VlcPlayer(QObject):
 
     def get_volume(self) -> int:
         volume = self._player.audio_get_volume()
-        return max(0, volume)
+        if volume < 0:
+            return -1
+        return volume
 
     def set_volume(self, volume: int) -> None:
         self._player.audio_set_volume(max(0, min(100, volume)))

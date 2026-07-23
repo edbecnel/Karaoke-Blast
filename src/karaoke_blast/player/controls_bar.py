@@ -22,6 +22,14 @@ PLAY_STYLE = (
     "QPushButton:hover { background: #ff6b81; }"
 )
 
+PIN_STYLE = (
+    "QPushButton { background: transparent; color: white; border: none;"
+    " font-size: 18px; min-width: 40px; min-height: 36px; border-radius: 4px; }"
+    "QPushButton:hover { background: rgba(255, 255, 255, 40); }"
+    "QPushButton:pressed { background: rgba(255, 255, 255, 70); }"
+    "QPushButton:checked { background: rgba(233, 69, 96, 120); }"
+)
+
 SLIDER_STYLE = (
     "QSlider::groove:horizontal { height: 4px; background: rgba(255,255,255,80);"
     " border-radius: 2px; }"
@@ -44,6 +52,7 @@ class ControlsBar(QWidget):
     volume_changed = pyqtSignal(int)
     mute_toggled = pyqtSignal()
     list_toggled = pyqtSignal()
+    pin_toggled = pyqtSignal(bool)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -84,6 +93,11 @@ class ControlsBar(QWidget):
         self._list_btn = self._make_button("☰", "Song list (L)")
         self._list_btn.clicked.connect(self.list_toggled)
         layout.addWidget(self._list_btn)
+
+        self._pin_btn = self._make_button("📌", "Pin controls (always visible)", style=PIN_STYLE)
+        self._pin_btn.setCheckable(True)
+        self._pin_btn.toggled.connect(self._on_pin_toggled)
+        layout.addWidget(self._pin_btn)
         layout.addStretch()
 
         self._mute_btn = self._make_button("🔊", "Mute / unmute")
@@ -109,6 +123,23 @@ class ControlsBar(QWidget):
         btn.setStyleSheet(style)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         return btn
+
+    def _on_pin_toggled(self, pinned: bool) -> None:
+        self._pin_btn.setToolTip(
+            "Unpin controls (auto-hide)" if pinned else "Pin controls (always visible)"
+        )
+        self.pin_toggled.emit(pinned)
+
+    def set_pinned(self, pinned: bool) -> None:
+        self._pin_btn.blockSignals(True)
+        self._pin_btn.setChecked(pinned)
+        self._pin_btn.blockSignals(False)
+        self._pin_btn.setToolTip(
+            "Unpin controls (auto-hide)" if pinned else "Pin controls (always visible)"
+        )
+
+    def is_pinned(self) -> bool:
+        return self._pin_btn.isChecked()
 
     def _on_volume_slider(self, value: int) -> None:
         self._volume_label.setText(f"{value}%")

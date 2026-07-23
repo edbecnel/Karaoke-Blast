@@ -3,7 +3,7 @@
 import logging
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import QEvent, Qt, QTimer
 from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import (
     QApplication,
@@ -24,6 +24,7 @@ from karaoke_blast.player.controls_bar import ControlsBar
 from karaoke_blast.player.video_widget import VideoWidget
 from karaoke_blast.player.vlc_player import SEEK_STEP_MS, VlcPlayer
 from karaoke_blast.storage.folder_history import FolderHistory
+from karaoke_blast.storage.settings import Settings
 from karaoke_blast.ui.recent_folders_panel import RecentFoldersPanel
 from karaoke_blast.ui.song_list_panel import PANEL_DEFAULT_WIDTH, SongListPanel
 from karaoke_blast.utils.display import display_name
@@ -54,6 +55,7 @@ class MainWindow(QWidget):
         self._saved_splitter_sizes: list[int] | None = None
         self._play_queue = PlayQueue()
         self._folder_history = FolderHistory()
+        self._settings = Settings()
 
         self._stack = QStackedWidget()
         self._empty_state = self._build_empty_state()
@@ -95,10 +97,15 @@ class MainWindow(QWidget):
             self._on_playback_error, Qt.ConnectionType.QueuedConnection
         )
 
-        volume = self._vlc.get_volume() or 80
-        self._controls.set_volume(volume)
-        self._vlc.set_volume(volume)
+        self._apply_saved_volume()
         return True
+
+    def _apply_saved_volume(self) -> None:
+        if self._vlc is None:
+            return
+        volume = self._settings.volume
+        self._vlc.set_volume(volume)
+        self._controls.set_volume(volume)
 
     def _build_empty_state(self) -> QWidget:
         page = QWidget()
@@ -169,6 +176,7 @@ class MainWindow(QWidget):
         self._video_container = QWidget()
         self._video_container.setStyleSheet("background-color: black;")
         self._video_container.setMouseTracking(True)
+        self._video_container.installEventFilter(self)
 
         self._video_widget = VideoWidget(self._video_container)
 
@@ -195,7 +203,11 @@ class MainWindow(QWidget):
         self._splitter.setSizes([0, 800])
 
         self._controls = ControlsBar()
-        self._controls.hide()
+        self._controls.set_volume(self._settings.volume)
+        self._controls.installEventFilter(self)
+        self._controls.set_pinned(not self._settings.controls_auto_hide)
+        if self._settings.controls_auto_hide:
+            self._controls.hide()
         self._wire_controls()
 
         layout.addWidget(self._splitter, 1)
@@ -213,6 +225,16 @@ class MainWindow(QWidget):
         self._controls.volume_changed.connect(self._on_volume_changed)
         self._controls.mute_toggled.connect(self._on_mute_toggled)
         self._controls.list_toggled.connect(self._toggle_song_list)
+        self._controls.pin_toggled.connect(self._on_controls_pin_toggled)
+
+    def eventFilter(self, obj, event) -> bool:
+        if (
+            event.type() == QEvent.Type.MouseMove
+            and obj in (self._video_container, self._controls)
+            and self._stack.currentWidget() == self._player_page
+        ):
+            self._show_controls()
+        return super().eventFilter(obj, event)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -286,7 +308,18 @@ class MainWindow(QWidget):
         self._song_list.hide()
 
     def _hide_controls(self) -> None:
+        if not self._settings.controls_auto_hide:
+            return
         self._controls.hide()
+
+    def _on_controls_pin_toggled(self, pinned: bool) -> None:
+        self._settings.controls_auto_hide = not pinned
+        self._settings.save()
+        if pinned:
+            self._controls_timer.stop()
+            self._show_controls()
+        else:
+            self._controls_timer.start(CONTROLS_HIDE_MS)
 
     def _raise_ui_layers(self) -> None:
         if self._status_label.isVisible():
@@ -299,7 +332,10 @@ class MainWindow(QWidget):
             return
         self._controls.show()
         self._reposition_video_ui()
-        self._controls_timer.start(CONTROLS_HIDE_MS)
+        if self._settings.controls_auto_hide:
+            self._controls_timer.start(CONTROLS_HIDE_MS)
+        else:
+            self._controls_timer.stop()
 
     def _open_folder_dialog(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Open Video Folder")
@@ -330,7 +366,8 @@ class MainWindow(QWidget):
         sorted_paths = sort_paths(self._raw_paths, self._sort_strategy)
         self._playlist = Playlist(paths=sorted_paths, index=0)
         self._play_queue.clear()
-        self._stopped = False
+        self._stopped = True
+        self._overlay.hide()
         self._status_label.hide()
         self._stack.setCurrentWidget(self._player_page)
         self.showFullScreen()
@@ -339,18 +376,27 @@ class MainWindow(QWidget):
             self._stack.setCurrentWidget(self._empty_state)
             self.showNormal()
             return
+        self._vlc.stop()
         self._song_list.set_sort_strategy(self._sort_strategy)
         self._song_list.set_songs(sorted_paths)
         self._update_queue_display()
         self._show_song_list()
         self._reposition_video_ui()
+        self._show_ready_to_play()
         self._show_controls()
-        self._play_current()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
         if self._vlc is not None:
             self._vlc.bind_output()
+
+    def _show_toast(self, message: str, duration_ms: int = 4000) -> None:
+        """Show a temporary overlay message."""
+        self._overlay.setText(message)
+        self._overlay.show()
+        self._overlay.raise_()
+        self._reposition_overlay()
+        self._overlay_timer.start(duration_ms)
 
     def _play_current(self) -> None:
         if self._vlc is None:
@@ -359,11 +405,22 @@ class MainWindow(QWidget):
         if current is None:
             self._show_end_of_playlist()
             return
+        if not current.exists():
+            logger.warning("File not found, skipping: %s", current)
+            self._show_toast(
+                f'"{display_name(current)}" not found — try refreshing the song list',
+                duration_ms=5000,
+            )
+            QTimer.singleShot(0, self._advance_to_next_track)
+            return
         self._stopped = False
         self._status_label.hide()
         self._show_overlay()
         self._show_controls()
         self._vlc.play(current)
+        self._apply_saved_volume()
+        QTimer.singleShot(0, self._apply_saved_volume)
+        QTimer.singleShot(100, self._apply_saved_volume)
         self._sync_mute_state()
         self._song_list.set_current_index(self._playlist.index)
         self._raise_ui_layers()
@@ -442,6 +499,14 @@ class MainWindow(QWidget):
 
     def _hide_overlay(self) -> None:
         self._overlay.hide()
+
+    def _show_ready_to_play(self) -> None:
+        self._status_label.setText("Select a song to play")
+        self._status_label.setGeometry(
+            0, 0, self._video_container.width(), self._video_container.height()
+        )
+        self._status_label.show()
+        self._status_label.raise_()
 
     def _show_end_of_playlist(self) -> None:
         if self._vlc is not None:
@@ -540,6 +605,8 @@ class MainWindow(QWidget):
         self._show_overlay()
 
     def _on_volume_changed(self, volume: int) -> None:
+        self._settings.volume = volume
+        self._settings.save()
         if self._vlc is not None:
             self._vlc.set_volume(volume)
             if volume > 0 and self._vlc.is_muted():
@@ -556,9 +623,6 @@ class MainWindow(QWidget):
         if self._vlc is None:
             return
         self._controls.set_muted(self._vlc.is_muted())
-        volume = self._vlc.get_volume()
-        if volume >= 0:
-            self._controls.set_volume(volume)
 
     def _next_track(self) -> None:
         self._advance_to_next_track()
@@ -611,6 +675,12 @@ class MainWindow(QWidget):
 
         if key == Qt.Key.Key_L:
             self._toggle_song_list()
+            return
+
+        if key == Qt.Key.Key_P:
+            pinned = not self._controls.is_pinned()
+            self._controls.set_pinned(pinned)
+            self._on_controls_pin_toggled(pinned)
             return
 
         if key in (Qt.Key.Key_F, Qt.Key.Key_F11):
