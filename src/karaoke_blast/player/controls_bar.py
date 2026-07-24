@@ -78,6 +78,11 @@ def _transport_icons() -> dict[str, str]:
     }
 
 
+def _pause_icon() -> str:
+    """⏸ renders with a light-blue emoji background on Windows."""
+    return "||" if sys.platform == "win32" else "⏸"
+
+
 def _apply_windows_button_style(btn: QPushButton) -> None:
     """Windows native styles ignore transparent button sheets; Fusion honors them."""
     if sys.platform != "win32":
@@ -198,7 +203,7 @@ class ControlsBar(QWidget):
 
     def set_playing(self, playing: bool) -> None:
         if playing:
-            self._play_pause_btn.setText("⏸")
+            self._play_pause_btn.setText(_pause_icon())
             self._play_pause_btn.setToolTip("Pause (Space)")
         else:
             self._play_pause_btn.setText("▶")
