@@ -1,5 +1,7 @@
 """On-screen playback controls."""
 
+import sys
+
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QHBoxLayout,
@@ -9,25 +11,62 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+# Fully specify border + background so Windows native chrome does not show through.
 BUTTON_STYLE = (
-    "QPushButton { background: transparent; color: white; border: none;"
-    " font-size: 18px; min-width: 40px; min-height: 36px; border-radius: 4px; }"
-    "QPushButton:hover { background: rgba(255, 255, 255, 40); }"
-    "QPushButton:pressed { background: rgba(255, 255, 255, 70); }"
+    "QPushButton {"
+    " background-color: transparent; color: white; border: none;"
+    " font-size: 18px; min-width: 40px; min-height: 36px;"
+    " padding: 4px; border-radius: 4px;"
+    "}"
+    "QPushButton:hover { background-color: rgba(255, 255, 255, 40); }"
+    "QPushButton:pressed { background-color: rgba(255, 255, 255, 70); }"
+    "QPushButton:focus { outline: none; border: none; }"
+)
+
+# Windows-only: Mac already gets a 3D look from the rewind/forward emoji glyphs.
+SEEK_STYLE = (
+    "QPushButton {"
+    " color: #1e2430; border: 1px solid #6e7788; border-radius: 6px;"
+    " border-top-color: #d8dee8; border-left-color: #c4cbd8;"
+    " border-right-color: #6e7788; border-bottom-color: #535b6a;"
+    " background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+    "  stop:0 #d5dbe6, stop:0.45 #b4bccb, stop:1 #8f98a9);"
+    " font-size: 16px; min-width: 40px; min-height: 36px; padding: 2px 6px;"
+    "}"
+    "QPushButton:hover {"
+    " background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+    "  stop:0 #e2e7f0, stop:0.45 #c2cad8, stop:1 #9da6b6);"
+    "}"
+    "QPushButton:pressed {"
+    " border-top-color: #535b6a; border-left-color: #6e7788;"
+    " border-right-color: #c4cbd8; border-bottom-color: #d8dee8;"
+    " background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+    "  stop:0 #8f98a9, stop:0.55 #b4bccb, stop:1 #d5dbe6);"
+    "}"
+    "QPushButton:focus { outline: none; }"
 )
 
 PLAY_STYLE = (
-    "QPushButton { background: #e94560; color: white; border: none;"
-    " font-size: 18px; min-width: 44px; min-height: 36px; border-radius: 6px; }"
-    "QPushButton:hover { background: #ff6b81; }"
+    "QPushButton {"
+    " background-color: #e94560; color: white; border: none;"
+    " font-size: 18px; min-width: 44px; min-height: 36px;"
+    " padding: 4px; border-radius: 6px;"
+    "}"
+    "QPushButton:hover { background-color: #ff6b81; }"
+    "QPushButton:pressed { background-color: #d63850; }"
+    "QPushButton:focus { outline: none; border: none; }"
 )
 
 PIN_STYLE = (
-    "QPushButton { background: transparent; color: white; border: none;"
-    " font-size: 18px; min-width: 40px; min-height: 36px; border-radius: 4px; }"
-    "QPushButton:hover { background: rgba(255, 255, 255, 40); }"
-    "QPushButton:pressed { background: rgba(255, 255, 255, 70); }"
-    "QPushButton:checked { background: rgba(233, 69, 96, 120); }"
+    "QPushButton {"
+    " background-color: transparent; color: white; border: none;"
+    " font-size: 18px; min-width: 40px; min-height: 36px;"
+    " padding: 4px; border-radius: 4px;"
+    "}"
+    "QPushButton:hover { background-color: rgba(255, 255, 255, 40); }"
+    "QPushButton:pressed { background-color: rgba(255, 255, 255, 70); }"
+    "QPushButton:checked { background-color: rgba(233, 69, 96, 120); }"
+    "QPushButton:focus { outline: none; border: none; }"
 )
 
 SLIDER_STYLE = (
@@ -37,6 +76,10 @@ SLIDER_STYLE = (
     " border-radius: 7px; }"
     "QSlider::sub-page:horizontal { background: #e94560; border-radius: 2px; }"
 )
+
+
+def _seek_button_style() -> str:
+    return SEEK_STYLE if sys.platform == "win32" else BUTTON_STYLE
 
 
 class ControlsBar(QWidget):
@@ -56,9 +99,12 @@ class ControlsBar(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setObjectName("controlsBar")
         self.setStyleSheet(
-            "background-color: rgba(0, 0, 0, 180);"
+            "#controlsBar {"
+            " background-color: rgba(0, 0, 0, 180);"
             " border-top: 1px solid rgba(255, 255, 255, 30);"
+            "}"
         )
         self.setFixedHeight(56)
 
@@ -66,11 +112,18 @@ class ControlsBar(QWidget):
         layout.setContentsMargins(16, 8, 16, 8)
         layout.setSpacing(4)
 
+        seek_style = _seek_button_style()
         self._prev_btn = self._make_button("⏮", "Previous song")
-        self._rewind_btn = self._make_button("⏪", "Rewind 10 seconds")
-        self._play_pause_btn = self._make_button("▶", "Play (Space)", style=PLAY_STYLE)
+        self._rewind_btn = self._make_button(
+            "⏪", "Rewind 10 seconds", style=seek_style, flat=False
+        )
+        self._play_pause_btn = self._make_button(
+            "▶", "Play (Space)", style=PLAY_STYLE, flat=False
+        )
         self._stop_btn = self._make_button("⏹", "Stop")
-        self._forward_btn = self._make_button("⏩", "Fast forward 10 seconds")
+        self._forward_btn = self._make_button(
+            "⏩", "Fast forward 10 seconds", style=seek_style, flat=False
+        )
         self._next_btn = self._make_button("⏭", "Next song")
 
         self._prev_btn.clicked.connect(self.previous_clicked)
@@ -95,7 +148,9 @@ class ControlsBar(QWidget):
         self._fullscreen_btn.clicked.connect(self.fullscreen_toggled)
         layout.addWidget(self._fullscreen_btn)
 
-        self._pin_btn = self._make_button("📌", "Pin controls (always visible)", style=PIN_STYLE)
+        self._pin_btn = self._make_button(
+            "📌", "Pin controls (always visible)", style=PIN_STYLE
+        )
         self._pin_btn.setCheckable(True)
         self._pin_btn.toggled.connect(self._on_pin_toggled)
         layout.addWidget(self._pin_btn)
@@ -115,12 +170,25 @@ class ControlsBar(QWidget):
 
         self._volume_label = QLabel("80%")
         self._volume_label.setStyleSheet("color: white; font-size: 12px; min-width: 36px;")
-        self._volume_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self._volume_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
         layout.addWidget(self._volume_label)
 
-    def _make_button(self, text: str, tooltip: str, *, style: str = BUTTON_STYLE) -> QPushButton:
+    def _make_button(
+        self,
+        text: str,
+        tooltip: str,
+        *,
+        style: str = BUTTON_STYLE,
+        flat: bool = True,
+    ) -> QPushButton:
         btn = QPushButton(text)
         btn.setToolTip(tooltip)
+        btn.setFlat(flat)
+        btn.setAutoDefault(False)
+        btn.setDefault(False)
+        btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         btn.setStyleSheet(style)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         return btn
