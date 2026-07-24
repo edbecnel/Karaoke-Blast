@@ -25,7 +25,7 @@ karaoke-blast = "karaoke_blast.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"karaoke_blast.assets" = ["*.png"]
+"karaoke_blast.assets" = ["*.png", "*.ico"]
 
 [tool.ruff]
 line-length = 100

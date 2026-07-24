@@ -1,5 +1,6 @@
 """Load bundled icons and other static assets."""
 
+import sys
 from importlib.resources import files
 from pathlib import Path
 
@@ -15,6 +16,10 @@ def _asset_path(name: str) -> Path:
 
 def icon_path() -> Path:
     return _asset_path("icon.png")
+
+
+def icon_ico_path() -> Path:
+    return _asset_path("icon.ico")
 
 
 def logo_path() -> Path:
@@ -38,12 +43,22 @@ def _scaled_square_pixmap(path: Path, size: int) -> QPixmap:
     )
 
 
-def app_icon() -> QIcon:
+def _icon_from_png() -> QIcon:
     path = icon_path()
     icon = QIcon()
     for size in _ICON_SIZES:
         icon.addPixmap(_scaled_square_pixmap(path, size))
     return icon
+
+
+def app_icon() -> QIcon:
+    if sys.platform == "win32":
+        ico_path = icon_ico_path()
+        if ico_path.is_file():
+            icon = QIcon(str(ico_path))
+            if not icon.isNull():
+                return icon
+    return _icon_from_png()
 
 
 def icon_pixmap(size: int = 128) -> QPixmap:

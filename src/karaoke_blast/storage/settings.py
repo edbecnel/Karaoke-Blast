@@ -22,6 +22,7 @@ class Settings:
         self.muted: bool = False
         self.launch_window_width: int | None = None
         self.launch_window_height: int | None = None
+        self.queue_section_ratio: float | None = None
         self.load()
 
     def load(self) -> None:
@@ -42,6 +43,9 @@ class Settings:
             if isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0:
                 self.launch_window_width = width
                 self.launch_window_height = height
+            ratio = data.get("queue_section_ratio")
+            if isinstance(ratio, (int, float)) and 0.1 <= float(ratio) <= 0.85:
+                self.queue_section_ratio = float(ratio)
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning("Could not load settings: %s", exc)
 
@@ -52,6 +56,7 @@ class Settings:
             "muted": self.muted,
             "launch_window_width": self.launch_window_width,
             "launch_window_height": self.launch_window_height,
+            "queue_section_ratio": self.queue_section_ratio,
         }
         try:
             _settings_file().write_text(

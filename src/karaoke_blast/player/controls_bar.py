@@ -53,6 +53,7 @@ class ControlsBar(QWidget):
     mute_toggled = pyqtSignal()
     list_toggled = pyqtSignal()
     pin_toggled = pyqtSignal(bool)
+    fullscreen_toggled = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -93,6 +94,10 @@ class ControlsBar(QWidget):
         self._list_btn = self._make_button("☰", "Song list (L)")
         self._list_btn.clicked.connect(self.list_toggled)
         layout.addWidget(self._list_btn)
+
+        self._fullscreen_btn = self._make_button("⛶", "Full screen (F)")
+        self._fullscreen_btn.clicked.connect(self.fullscreen_toggled)
+        layout.addWidget(self._fullscreen_btn)
 
         self._pin_btn = self._make_button("📌", "Pin controls (always visible)", style=PIN_STYLE)
         self._pin_btn.setCheckable(True)
@@ -140,6 +145,14 @@ class ControlsBar(QWidget):
 
     def is_pinned(self) -> bool:
         return self._pin_btn.isChecked()
+
+    def set_fullscreen(self, fullscreen: bool) -> None:
+        if fullscreen:
+            self._fullscreen_btn.setText("⤡")
+            self._fullscreen_btn.setToolTip("Exit full screen (Esc)")
+        else:
+            self._fullscreen_btn.setText("⛶")
+            self._fullscreen_btn.setToolTip("Full screen (F)")
 
     def _on_volume_slider(self, value: int) -> None:
         self._volume_label.setText(f"{value}%")

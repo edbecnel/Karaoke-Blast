@@ -21,7 +21,7 @@ from karaoke_blast.models.playlist import Playlist
 from karaoke_blast.models.sort_strategy import SortStrategy, sort_paths
 from karaoke_blast.player.controls_bar import ControlsBar
 from karaoke_blast.player.seek_bar import SeekBar
-from karaoke_blast.player.video_widget import VideoWidget
+from karaoke_blast.player.video_widget import VideoClickOverlay, VideoWidget
 from karaoke_blast.player.vlc_player import SEEK_STEP_MS, VlcPlayer
 from karaoke_blast.storage.folder_history import FolderHistory
 from karaoke_blast.storage.folder_queues import FolderQueues
@@ -227,6 +227,8 @@ class MainWindow(QWidget):
         self._song_list.close_requested.connect(self._hide_song_list)
         self._song_list.refresh_requested.connect(self._refresh_song_list)
         self._song_list.resize_dragged.connect(self._on_panel_resize_drag)
+        self._song_list.queue_split_changed.connect(self._on_queue_split_changed)
+        self._song_list.set_queue_section_ratio(self._settings.queue_section_ratio)
 
         self._video_container = QWidget()
         self._video_container.setStyleSheet("background-color: black;")
@@ -234,6 +236,10 @@ class MainWindow(QWidget):
         self._video_container.installEventFilter(self)
 
         self._video_widget = VideoWidget(self._video_container)
+
+        self._video_click_overlay = VideoClickOverlay(self._video_container)
+        self._video_click_overlay.double_clicked.connect(self._toggle_fullscreen)
+        self._video_click_overlay.installEventFilter(self)
 
         self._overlay = QLabel(self._video_container)
         self._overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -290,11 +296,13 @@ class MainWindow(QWidget):
         self._controls.mute_toggled.connect(self._on_mute_toggled)
         self._controls.list_toggled.connect(self._toggle_song_list)
         self._controls.pin_toggled.connect(self._on_controls_pin_toggled)
+        self._controls.fullscreen_toggled.connect(self._toggle_fullscreen)
 
     def eventFilter(self, obj, event) -> bool:
         if (
             event.type() == QEvent.Type.MouseMove
-            and obj in (self._video_container, self._controls, self._seek_bar)
+            and obj
+            in (self._video_container, self._video_click_overlay, self._controls, self._seek_bar)
             and self._stack.currentWidget() == self._player_page
         ):
             self._show_controls()
@@ -320,6 +328,19 @@ class MainWindow(QWidget):
         ):
             QTimer.singleShot(0, self._rearm_panel_resize)
             QTimer.singleShot(100, self._rearm_panel_resize)
+        if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "_controls"):
+            self._sync_fullscreen_control()
+
+    def _toggle_fullscreen(self) -> None:
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+        self._sync_fullscreen_control()
+
+    def _sync_fullscreen_control(self) -> None:
+        if hasattr(self, "_controls"):
+            self._controls.set_fullscreen(self.isFullScreen())
 
     def _on_panel_resize_drag(self, delta: int) -> None:
         sizes = self._splitter.sizes()
@@ -343,6 +364,10 @@ class MainWindow(QWidget):
         if self._vlc is not None:
             self._vlc.bind_output()
 
+    def _on_queue_split_changed(self, ratio: float) -> None:
+        self._settings.queue_section_ratio = ratio
+        self._settings.save()
+
     def _on_splitter_moved(self, _pos: int, _index: int) -> None:
         sizes = self._splitter.sizes()
         self._list_visible = sizes[0] > 0 and self._song_list.isVisible()
@@ -356,7 +381,10 @@ class MainWindow(QWidget):
         # Keep VLC's native view a few pixels off the divider so it cannot
         # swallow hover on the panel grip / splitter in fullscreen.
         left = 4 if self._list_visible else 0
-        self._video_widget.setGeometry(left, 0, max(0, w - left), h)
+        video_rect = (left, 0, max(0, w - left), h)
+        self._video_widget.setGeometry(*video_rect)
+        self._video_click_overlay.setGeometry(*video_rect)
+        self._video_click_overlay.raise_()
         self._reposition_status_label()
         self._reposition_overlay()
         if self._list_visible:
@@ -529,6 +557,7 @@ class MainWindow(QWidget):
         self._status_label.hide()
         self._stack.setCurrentWidget(self._player_page)
         self.showFullScreen()
+        self._sync_fullscreen_control()
         QApplication.processEvents()
         if not self._ensure_vlc():
             self._stack.setCurrentWidget(self._empty_state)
@@ -935,15 +964,13 @@ class MainWindow(QWidget):
             return
 
         if key in (Qt.Key.Key_F, Qt.Key.Key_F11):
-            if self.isFullScreen():
-                self.showNormal()
-            else:
-                self.showFullScreen()
+            self._toggle_fullscreen()
             return
 
         if key == Qt.Key.Key_Escape:
             if self.isFullScreen():
                 self.showNormal()
+                self._sync_fullscreen_control()
             else:
                 self.close()
             return

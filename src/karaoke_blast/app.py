@@ -26,8 +26,23 @@ from karaoke_blast.utils.resources import app_icon
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
+_APP_USER_MODEL_ID = "edbecnel.KaraokeBlast.1"
+
+
+def _configure_windows_app_id() -> None:
+    """Use our icon in the taskbar instead of the Python launcher icon."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(_APP_USER_MODEL_ID)
+    except (AttributeError, OSError) as exc:
+        logging.getLogger(__name__).warning("Could not set Windows AppUserModelID: %s", exc)
+
 
 def run(initial_folder: Path | None = None) -> int:
+    _configure_windows_app_id()
     app = QApplication(sys.argv)
     app.setApplicationName("Karaoke Blast")
     icon = app_icon()

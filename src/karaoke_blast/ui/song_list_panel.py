@@ -3,7 +3,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QColor, QPalette
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QPushButton,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -25,6 +26,11 @@ from karaoke_blast.utils.display import display_name
 PANEL_DEFAULT_WIDTH = 320
 PANEL_MIN_WIDTH = 200
 PANEL_MAX_WIDTH = 700
+QUEUE_SECTION_DEFAULT_RATIO = 0.28
+QUEUE_SECTION_MIN_RATIO = 0.12
+QUEUE_SECTION_MAX_RATIO = 0.75
+QUEUE_SECTION_MIN_HEIGHT = 72
+LIST_MIN_HEIGHT = 80
 
 LIST_STYLE = """
 QListWidget {
@@ -119,6 +125,16 @@ QLineEdit:focus {
 }
 """
 
+QUEUE_SPLITTER_STYLE = """
+QSplitter::handle:vertical {
+    background: rgba(255, 255, 255, 30);
+    height: 4px;
+}
+QSplitter::handle:vertical:hover {
+    background: rgba(233, 69, 96, 160);
+}
+"""
+
 
 class SongListPanel(QWidget):
     """Left sidebar listing songs in the current folder."""
@@ -132,6 +148,7 @@ class SongListPanel(QWidget):
     close_requested = pyqtSignal()
     refresh_requested = pyqtSignal()
     resize_dragged = pyqtSignal(int)
+    queue_split_changed = pyqtSignal(float)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -248,29 +265,44 @@ class SongListPanel(QWidget):
         self._queue_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._queue_list.customContextMenuRequested.connect(self._show_queue_context_menu)
         self._queue_list.queue_reordered.connect(self.queue_reordered.emit)
-        queue_outer.addWidget(self._queue_list)
-
-        layout.addWidget(self._queue_section)
+        queue_outer.addWidget(self._queue_list, 1)
+        self._queue_section.setMinimumHeight(QUEUE_SECTION_MIN_HEIGHT)
 
         self._list = PlayOrderListWidget()
         self._list.queue_reordered.connect(self.queue_reordered.emit)
         self._list.setStyleSheet(LIST_STYLE)
         self._list.setTextElideMode(Qt.TextElideMode.ElideRight)
         self._list.setMouseTracking(True)
+        self._list.setMinimumHeight(LIST_MIN_HEIGHT)
         self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._list.customContextMenuRequested.connect(self._show_context_menu)
         self._list.itemClicked.connect(self._on_item_clicked)
-        layout.addWidget(self._list)
+
+        self._list_splitter = QSplitter(Qt.Orientation.Vertical)
+        self._list_splitter.setStyleSheet(QUEUE_SPLITTER_STYLE)
+        self._list_splitter.setHandleWidth(4)
+        self._list_splitter.setChildrenCollapsible(False)
+        self._list_splitter.addWidget(self._queue_section)
+        self._list_splitter.addWidget(self._list)
+        self._list_splitter.setStretchFactor(0, 0)
+        self._list_splitter.setStretchFactor(1, 1)
+        self._list_splitter.splitterMoved.connect(self._on_queue_splitter_moved)
+        layout.addWidget(self._list_splitter, 1)
 
         self._paths: list[Path] = []
         self._current_index: int | None = None
         self._selected_index: int | None = None
         self._queue_indices: list[int] = []
         self._now_playing_only = False
+        self._queue_section_ratio: float | None = None
 
         self._edge_grip = PanelEdgeGrip(self)
         self._edge_grip.dragged.connect(self.resize_dragged.emit)
         self._edge_grip.raise_()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        QTimer.singleShot(0, self._apply_queue_split_sizes)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -290,6 +322,46 @@ class SongListPanel(QWidget):
             self.height(),
         )
 
+    def set_queue_section_ratio(self, ratio: float | None) -> None:
+        self._queue_section_ratio = ratio
+        self._apply_queue_split_sizes()
+
+    def _queue_split_ratio(self) -> float:
+        if self._queue_section_ratio is not None:
+            return max(
+                QUEUE_SECTION_MIN_RATIO,
+                min(QUEUE_SECTION_MAX_RATIO, self._queue_section_ratio),
+            )
+        return QUEUE_SECTION_DEFAULT_RATIO
+
+    def _apply_queue_split_sizes(self) -> None:
+        total = self._list_splitter.height()
+        if total <= 0:
+            return
+        if not self._queue_section.isVisible():
+            self._list_splitter.setSizes([0, total])
+            return
+
+        ratio = self._queue_split_ratio()
+        top = max(QUEUE_SECTION_MIN_HEIGHT, int(total * ratio))
+        bottom = max(LIST_MIN_HEIGHT, total - top)
+        if bottom < LIST_MIN_HEIGHT:
+            bottom = LIST_MIN_HEIGHT
+            top = max(QUEUE_SECTION_MIN_HEIGHT, total - bottom)
+        self._list_splitter.setSizes([top, bottom])
+
+    def _on_queue_splitter_moved(self, _pos: int, _index: int) -> None:
+        if not self._queue_section.isVisible():
+            return
+        sizes = self._list_splitter.sizes()
+        total = sum(sizes)
+        if total <= 0 or sizes[0] <= 0:
+            return
+        ratio = sizes[0] / total
+        ratio = max(QUEUE_SECTION_MIN_RATIO, min(QUEUE_SECTION_MAX_RATIO, ratio))
+        self._queue_section_ratio = ratio
+        self.queue_split_changed.emit(ratio)
+
     def _on_refresh_clicked(self, _checked: bool = False) -> None:
         self.refresh_requested.emit()
 
@@ -307,6 +379,7 @@ class SongListPanel(QWidget):
             self._search.clear()
             self._search.blockSignals(False)
             self._queue_section.hide()
+            self._apply_queue_split_sizes()
         else:
             self._rebuild_queue_ui()
         self._apply_filter()
@@ -385,6 +458,7 @@ class SongListPanel(QWidget):
         self._update_now_playing_filter_state()
         if self._now_playing_only:
             self._queue_section.hide()
+            self._apply_queue_split_sizes()
         else:
             self._rebuild_queue_ui()
         self._apply_filter()
@@ -400,6 +474,7 @@ class SongListPanel(QWidget):
         order = self._play_order_indices()
         if not order:
             self._queue_section.hide()
+            self._apply_queue_split_sizes()
             return
 
         display_queue = self._display_queue_indices()
@@ -410,9 +485,8 @@ class SongListPanel(QWidget):
             current_index=self._current_index,
             queue_indices=self._queue_indices,
         )
-        row_height = 34
-        self._queue_list.setFixedHeight(max(1, self._queue_list.count()) * row_height + 6)
         self._queue_section.show()
+        self._apply_queue_split_sizes()
 
     def set_sort_strategy(self, strategy: SortStrategy) -> None:
         index = self._sort_combo.findData(strategy)
@@ -437,6 +511,7 @@ class SongListPanel(QWidget):
             self._search.blockSignals(False)
         if self._now_playing_only:
             self._queue_section.hide()
+            self._apply_queue_split_sizes()
         else:
             self._rebuild_queue_ui()
         self._apply_filter()
