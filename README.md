@@ -36,6 +36,7 @@ python -m karaoke_blast --folder /path/to/videos
 
 | Key | Action |
 |---|---|
+| `Space` or `K` | Play / pause |
 | `S` | Stop |
 | `→` or `N` | Next song |
 | `←` or `P` | Previous song |
@@ -50,7 +51,7 @@ python -m karaoke_blast --folder /path/to/videos
 | `Esc` | Exit full screen (or quit if already windowed) |
 | `Q` | Quit |
 
-Move the mouse during playback to reveal the on-screen control bar. Use **▶** and **⏸** on the control bar to play and pause.
+Move the mouse during playback to reveal the on-screen control bar. Use **▶** and **⏸** on the control bar, or press `Space` / `K`, to play and pause.
 
 ## Song List
 

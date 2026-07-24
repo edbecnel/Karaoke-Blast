@@ -857,6 +857,12 @@ class MainWindow(QWidget):
             self._vlc.pause()
         self._show_overlay()
 
+    def _toggle_play_pause(self) -> None:
+        if self._vlc is not None and self._vlc.is_playing():
+            self._on_pause()
+        else:
+            self._on_play()
+
     def _on_stop(self) -> None:
         if self._vlc is not None:
             self._vlc.stop()
@@ -906,6 +912,10 @@ class MainWindow(QWidget):
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         key = event.key()
+
+        if key in (Qt.Key.Key_Space, Qt.Key.Key_K):
+            self._toggle_play_pause()
+            return
 
         if key == Qt.Key.Key_S:
             self._on_stop()
