@@ -42,8 +42,7 @@ SLIDER_STYLE = (
 class ControlsBar(QWidget):
     """Bottom playback control bar."""
 
-    play_clicked = pyqtSignal()
-    pause_clicked = pyqtSignal()
+    play_pause_clicked = pyqtSignal()
     stop_clicked = pyqtSignal()
     previous_clicked = pyqtSignal()
     next_clicked = pyqtSignal()
@@ -69,24 +68,21 @@ class ControlsBar(QWidget):
 
         self._prev_btn = self._make_button("⏮", "Previous song")
         self._rewind_btn = self._make_button("⏪", "Rewind 10 seconds")
-        self._play_btn = self._make_button("▶", "Play", style=PLAY_STYLE)
-        self._pause_btn = self._make_button("⏸", "Pause")
+        self._play_pause_btn = self._make_button("▶", "Play (Space)", style=PLAY_STYLE)
         self._stop_btn = self._make_button("⏹", "Stop")
         self._forward_btn = self._make_button("⏩", "Fast forward 10 seconds")
         self._next_btn = self._make_button("⏭", "Next song")
 
         self._prev_btn.clicked.connect(self.previous_clicked)
         self._rewind_btn.clicked.connect(self.rewind_clicked)
-        self._play_btn.clicked.connect(self.play_clicked)
-        self._pause_btn.clicked.connect(self.pause_clicked)
+        self._play_pause_btn.clicked.connect(self.play_pause_clicked)
         self._stop_btn.clicked.connect(self.stop_clicked)
         self._forward_btn.clicked.connect(self.forward_clicked)
         self._next_btn.clicked.connect(self.next_clicked)
 
         layout.addWidget(self._prev_btn)
         layout.addWidget(self._rewind_btn)
-        layout.addWidget(self._play_btn)
-        layout.addWidget(self._pause_btn)
+        layout.addWidget(self._play_pause_btn)
         layout.addWidget(self._stop_btn)
         layout.addWidget(self._forward_btn)
         layout.addWidget(self._next_btn)
@@ -128,6 +124,14 @@ class ControlsBar(QWidget):
         btn.setStyleSheet(style)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         return btn
+
+    def set_playing(self, playing: bool) -> None:
+        if playing:
+            self._play_pause_btn.setText("⏸")
+            self._play_pause_btn.setToolTip("Pause (Space)")
+        else:
+            self._play_pause_btn.setText("▶")
+            self._play_pause_btn.setToolTip("Play (Space)")
 
     def _on_pin_toggled(self, pinned: bool) -> None:
         self._pin_btn.setToolTip(

@@ -4,11 +4,12 @@ import logging
 from pathlib import Path
 
 from PyQt6.QtCore import QEvent, Qt, QTimer
-from PyQt6.QtGui import QCloseEvent, QKeyEvent
+from PyQt6.QtGui import QCloseEvent, QKeyEvent, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QStackedWidget,
@@ -85,6 +86,7 @@ class MainWindow(QWidget):
         layout.addWidget(self._stack)
 
         self._vlc: VlcPlayer | None = None
+        self._setup_shortcuts()
 
         self._overlay_timer = QTimer(self)
         self._overlay_timer.setSingleShot(True)
@@ -281,8 +283,7 @@ class MainWindow(QWidget):
         return page
 
     def _wire_controls(self) -> None:
-        self._controls.play_clicked.connect(self._on_play)
-        self._controls.pause_clicked.connect(self._on_pause)
+        self._controls.play_pause_clicked.connect(self._toggle_play_pause)
         self._controls.stop_clicked.connect(self._on_stop)
         self._controls.previous_clicked.connect(self._previous_track)
         self._controls.next_clicked.connect(self._next_track)
@@ -556,6 +557,7 @@ class MainWindow(QWidget):
             self.showNormal()
             return
         self._vlc.stop()
+        self._controls.set_playing(False)
         self._song_list.set_sort_strategy(self._sort_strategy)
         self._restore_folder_queue(sorted_paths)
         self._song_list.set_songs(sorted_paths, current_index=restored_index)
@@ -609,6 +611,7 @@ class MainWindow(QWidget):
         self._show_overlay()
         self._show_controls()
         self._vlc.play(current)
+        self._controls.set_playing(True)
         self._apply_saved_audio()
         QTimer.singleShot(0, self._apply_saved_audio)
         QTimer.singleShot(100, self._apply_saved_audio)
@@ -702,6 +705,7 @@ class MainWindow(QWidget):
         if self._vlc is not None:
             self._vlc.stop()
         self._stopped = True
+        self._controls.set_playing(False)
         self._stop_seek_updates()
         self._seek_bar.reset()
         self._show_status_message("End of playlist")
@@ -850,11 +854,13 @@ class MainWindow(QWidget):
                 self._play_current()
         else:
             self._vlc.resume()
+            self._controls.set_playing(True)
         self._show_overlay()
 
     def _on_pause(self) -> None:
         if self._vlc is not None:
             self._vlc.pause()
+        self._controls.set_playing(False)
         self._show_overlay()
 
     def _toggle_play_pause(self) -> None:
@@ -863,10 +869,24 @@ class MainWindow(QWidget):
         else:
             self._on_play()
 
+    def _setup_shortcuts(self) -> None:
+        # Window-level so Space works even when a child (list/button) has focus.
+        space = QShortcut(QKeySequence(Qt.Key.Key_Space), self)
+        space.setContext(Qt.ShortcutContext.WindowShortcut)
+        space.activated.connect(self._on_space_shortcut)
+
+    def _on_space_shortcut(self) -> None:
+        focus = QApplication.focusWidget()
+        if isinstance(focus, QLineEdit):
+            focus.insert(" ")
+            return
+        self._toggle_play_pause()
+
     def _on_stop(self) -> None:
         if self._vlc is not None:
             self._vlc.stop()
         self._stopped = True
+        self._controls.set_playing(False)
         self._stop_seek_updates()
         self._seek_bar.reset()
         self._save_folder_state()
@@ -912,10 +932,6 @@ class MainWindow(QWidget):
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         key = event.key()
-
-        if key in (Qt.Key.Key_Space, Qt.Key.Key_K):
-            self._toggle_play_pause()
-            return
 
         if key == Qt.Key.Key_S:
             self._on_stop()
