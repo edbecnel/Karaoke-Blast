@@ -80,7 +80,7 @@ def _transport_icons() -> dict[str, str]:
 
 def _pause_icon() -> str:
     """⏸ renders with a light-blue emoji background on Windows."""
-    return "||" if sys.platform == "win32" else "⏸"
+    return "Ⅱ" if sys.platform == "win32" else "⏸"
 
 
 def _apply_windows_button_style(btn: QPushButton) -> None:
