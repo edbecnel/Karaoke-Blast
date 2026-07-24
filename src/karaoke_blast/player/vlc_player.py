@@ -107,6 +107,19 @@ class VlcPlayer(QObject):
             new_time = min(new_time, length)
         self._player.set_time(int(new_time))
 
+    def get_time(self) -> int:
+        return self._player.get_time()
+
+    def get_length(self) -> int:
+        return self._player.get_length()
+
+    def set_time(self, position_ms: int) -> None:
+        length = self._player.get_length()
+        new_time = max(0, position_ms)
+        if length > 0:
+            new_time = min(new_time, length)
+        self._player.set_time(int(new_time))
+
     def get_volume(self) -> int:
         volume = self._player.audio_get_volume()
         if volume < 0:

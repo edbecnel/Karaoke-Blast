@@ -21,6 +21,7 @@ from karaoke_blast.models.play_queue import PlayQueue
 from karaoke_blast.models.playlist import Playlist
 from karaoke_blast.models.sort_strategy import SortStrategy, sort_paths
 from karaoke_blast.player.controls_bar import ControlsBar
+from karaoke_blast.player.seek_bar import SeekBar
 from karaoke_blast.player.video_widget import VideoWidget
 from karaoke_blast.player.vlc_player import SEEK_STEP_MS, VlcPlayer
 from karaoke_blast.storage.folder_history import FolderHistory
@@ -87,6 +88,10 @@ class MainWindow(QWidget):
         self._controls_timer = QTimer(self)
         self._controls_timer.setSingleShot(True)
         self._controls_timer.timeout.connect(self._hide_controls)
+
+        self._seek_timer = QTimer(self)
+        self._seek_timer.setInterval(250)
+        self._seek_timer.timeout.connect(self._update_seek_position)
 
         self._launch_geometry_timer = QTimer(self)
         self._launch_geometry_timer.setSingleShot(True)
@@ -212,6 +217,7 @@ class MainWindow(QWidget):
         self._song_list.play_next_requested.connect(self._on_play_next_requested)
         self._song_list.remove_from_queue_requested.connect(self._on_remove_from_queue)
         self._song_list.clear_queue_requested.connect(self._on_clear_queue)
+        self._song_list.queue_reordered.connect(self._on_queue_reordered)
         self._song_list.sort_changed.connect(self._on_sort_changed)
         self._song_list.close_requested.connect(self._hide_song_list)
         self._song_list.refresh_requested.connect(self._refresh_song_list)
@@ -254,7 +260,15 @@ class MainWindow(QWidget):
             self._controls.hide()
         self._wire_controls()
 
+        self._seek_bar = SeekBar()
+        self._seek_bar.installEventFilter(self)
+        self._seek_bar.seek_requested.connect(self._on_seek_requested)
+        self._seek_bar.interaction_started.connect(self._show_controls)
+        if self._settings.controls_auto_hide:
+            self._seek_bar.hide()
+
         layout.addWidget(self._splitter, 1)
+        layout.addWidget(self._seek_bar)
         layout.addWidget(self._controls)
         return page
 
@@ -274,7 +288,7 @@ class MainWindow(QWidget):
     def eventFilter(self, obj, event) -> bool:
         if (
             event.type() == QEvent.Type.MouseMove
-            and obj in (self._video_container, self._controls)
+            and obj in (self._video_container, self._controls, self._seek_bar)
             and self._stack.currentWidget() == self._player_page
         ):
             self._show_controls()
@@ -373,6 +387,10 @@ class MainWindow(QWidget):
     def _hide_controls(self) -> None:
         if not self._settings.controls_auto_hide:
             return
+        if self._seek_bar.is_scrubbing():
+            self._controls_timer.start(CONTROLS_HIDE_MS)
+            return
+        self._seek_bar.hide()
         self._controls.hide()
 
     def _on_controls_pin_toggled(self, pinned: bool) -> None:
@@ -393,12 +411,37 @@ class MainWindow(QWidget):
     def _show_controls(self) -> None:
         if self._stack.currentWidget() != self._player_page:
             return
+        self._seek_bar.show()
         self._controls.show()
         self._reposition_video_ui()
         if self._settings.controls_auto_hide:
             self._controls_timer.start(CONTROLS_HIDE_MS)
         else:
             self._controls_timer.stop()
+
+    def _start_seek_updates(self) -> None:
+        self._update_seek_position()
+        self._seek_timer.start()
+
+    def _stop_seek_updates(self) -> None:
+        self._seek_timer.stop()
+
+    def _update_seek_position(self) -> None:
+        if self._vlc is None or self._stopped or self._seek_bar.is_scrubbing():
+            return
+        length = self._vlc.get_length()
+        if length > 0:
+            self._seek_bar.set_duration(length)
+            position = self._vlc.get_time()
+            if position >= 0:
+                self._seek_bar.set_position(position)
+
+    def _on_seek_requested(self, position_ms: int) -> None:
+        if self._vlc is None or self._stopped:
+            return
+        self._vlc.set_time(position_ms)
+        self._seek_bar.set_position(position_ms)
+        self._show_overlay()
 
     def _open_folder_dialog(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Open Video Folder")
@@ -504,6 +547,7 @@ class MainWindow(QWidget):
             self._update_queue_display()
         else:
             self._save_folder_state()
+        self._start_seek_updates()
         self._raise_ui_layers()
 
     def _on_song_selected(self, index: int) -> None:
@@ -588,6 +632,8 @@ class MainWindow(QWidget):
         if self._vlc is not None:
             self._vlc.stop()
         self._stopped = True
+        self._stop_seek_updates()
+        self._seek_bar.reset()
         self._show_status_message("End of playlist")
         self._show_controls()
 
@@ -633,6 +679,10 @@ class MainWindow(QWidget):
 
     def _on_clear_queue(self) -> None:
         self._play_queue.clear()
+        self._update_queue_display()
+
+    def _on_queue_reordered(self, indices: list[int]) -> None:
+        self._play_queue.set_order(indices)
         self._update_queue_display()
 
     def _update_queue_display(self) -> None:
@@ -741,6 +791,8 @@ class MainWindow(QWidget):
         if self._vlc is not None:
             self._vlc.stop()
         self._stopped = True
+        self._stop_seek_updates()
+        self._seek_bar.reset()
         self._save_folder_state()
         self._show_controls()
 

@@ -1,7 +1,8 @@
 from karaoke_blast.player.controls_bar import ControlsBar
+from karaoke_blast.player.seek_bar import SeekBar
 from karaoke_blast.player.video_widget import VideoWidget
 
-__all__ = ["ControlsBar", "VideoWidget"]
+__all__ = ["ControlsBar", "SeekBar", "VideoWidget"]
 
 def __getattr__(name: str):
     if name == "VlcPlayer":

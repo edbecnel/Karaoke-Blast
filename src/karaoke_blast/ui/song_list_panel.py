@@ -10,7 +10,6 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
     QListWidgetItem,
     QMenu,
     QPushButton,
@@ -19,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from karaoke_blast.models.sort_strategy import SortStrategy
+from karaoke_blast.ui.queue_list_widget import PlayOrderListWidget
 from karaoke_blast.utils.display import display_name
 
 PANEL_DEFAULT_WIDTH = 320
@@ -42,6 +42,26 @@ QListWidget::item:selected {
 }
 QListWidget::item:hover {
     background-color: rgba(255, 255, 255, 30);
+}
+"""
+
+QUEUE_PANEL_LIST_STYLE = """
+QListWidget {
+    background-color: rgba(20, 20, 30, 120);
+    color: white;
+    border: none;
+    font-size: 12px;
+    outline: none;
+}
+QListWidget::item {
+    padding: 6px 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 15);
+}
+QListWidget::item:selected {
+    background-color: rgba(233, 69, 96, 120);
+}
+QListWidget::item:hover {
+    background-color: rgba(255, 255, 255, 25);
 }
 """
 
@@ -106,6 +126,7 @@ class SongListPanel(QWidget):
     play_next_requested = pyqtSignal(int)
     remove_from_queue_requested = pyqtSignal(int)
     clear_queue_requested = pyqtSignal()
+    queue_reordered = pyqtSignal(list)
     sort_changed = pyqtSignal(object)
     close_requested = pyqtSignal()
     refresh_requested = pyqtSignal()
@@ -220,15 +241,18 @@ class SongListPanel(QWidget):
         queue_header.addWidget(clear_queue_btn)
         queue_outer.addLayout(queue_header)
 
-        self._queue_items = QWidget()
-        self._queue_items_layout = QVBoxLayout(self._queue_items)
-        self._queue_items_layout.setContentsMargins(0, 0, 0, 0)
-        self._queue_items_layout.setSpacing(2)
-        queue_outer.addWidget(self._queue_items)
+        self._queue_list = PlayOrderListWidget()
+        self._queue_list.setStyleSheet(QUEUE_PANEL_LIST_STYLE)
+        self._queue_list.itemClicked.connect(self._on_item_clicked)
+        self._queue_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._queue_list.customContextMenuRequested.connect(self._show_queue_context_menu)
+        self._queue_list.queue_reordered.connect(self.queue_reordered.emit)
+        queue_outer.addWidget(self._queue_list)
 
         layout.addWidget(self._queue_section)
 
-        self._list = QListWidget()
+        self._list = PlayOrderListWidget()
+        self._list.queue_reordered.connect(self.queue_reordered.emit)
         self._list.setStyleSheet(LIST_STYLE)
         self._list.setTextElideMode(Qt.TextElideMode.ElideRight)
         self._list.setMouseTracking(True)
@@ -298,11 +322,14 @@ class SongListPanel(QWidget):
         else:
             self._selected_index = index
 
-    def _on_queue_row_clicked(self, index: int) -> None:
-        self._on_song_index_clicked(index)
-
     def _show_context_menu(self, pos) -> None:
-        item = self._list.itemAt(pos)
+        self._show_song_context_menu(self._list, pos)
+
+    def _show_queue_context_menu(self, pos) -> None:
+        self._show_song_context_menu(self._queue_list, pos)
+
+    def _show_song_context_menu(self, list_widget: PlayOrderListWidget, pos) -> None:
+        item = list_widget.itemAt(pos)
         if item is None:
             return
         index = item.data(Qt.ItemDataRole.UserRole)
@@ -328,7 +355,7 @@ class SongListPanel(QWidget):
             remove.triggered.connect(lambda: self.remove_from_queue_requested.emit(index))
             menu.addAction(remove)
 
-        menu.exec(self._list.mapToGlobal(pos))
+        menu.exec(list_widget.mapToGlobal(pos))
 
     def set_queue_indices(self, indices: list[int]) -> None:
         self._queue_indices = indices
@@ -347,11 +374,6 @@ class SongListPanel(QWidget):
         ]
 
     def _rebuild_queue_ui(self) -> None:
-        while self._queue_items_layout.count():
-            child = self._queue_items_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-
         order = self._play_order_indices()
         if not order:
             self._queue_section.hide()
@@ -359,60 +381,14 @@ class SongListPanel(QWidget):
 
         display_queue = self._display_queue_indices()
         self._queue_title.setText(f"Now playing + queue ({len(order)})")
-        for index in order:
-            if index >= len(self._paths):
-                continue
-            is_current = self._current_index is not None and index == self._current_index
-            row = QWidget()
-            row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(8, 4, 4, 4)
-            row_layout.setSpacing(6)
-
-            if is_current:
-                row.setStyleSheet(
-                    "background-color: rgba(126, 231, 135, 30); border-radius: 4px;"
-                )
-                label = QLabel(f"▶ {display_name(self._paths[index])}")
-                label.setStyleSheet("color: #7ee787; font-size: 12px; font-weight: bold;")
-            else:
-                row.setStyleSheet(
-                    "background-color: rgba(233, 69, 96, 30); border-radius: 4px;"
-                )
-                queue_pos = display_queue.index(index) + 1
-                label = QLabel(f"⏭ {queue_pos} · {display_name(self._paths[index])}")
-                label.setStyleSheet("color: #ffb3c1; font-size: 12px;")
-
-            label.setToolTip(str(self._paths[index]))
-            label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-            row_layout.addWidget(label, 1)
-
-            if not is_current:
-                remove_btn = QPushButton("×")
-                remove_btn.setToolTip("Remove from queue")
-                remove_btn.setFixedSize(22, 22)
-                remove_btn.setStyleSheet(
-                    "QPushButton { background: transparent; color: #ccc; border: none;"
-                    " font-size: 16px; border-radius: 3px; }"
-                    "QPushButton:hover { background: rgba(255,255,255,30); color: white; }"
-                )
-                remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                remove_btn.clicked.connect(
-                    lambda _checked=False, idx=index: self.remove_from_queue_requested.emit(
-                        idx
-                    )
-                )
-                row_layout.addWidget(remove_btn)
-
-            row.setCursor(Qt.CursorShape.PointingHandCursor)
-
-            def _queue_row_mouse_press(event, idx: int = index) -> None:
-                if event.button() == Qt.MouseButton.LeftButton:
-                    self._on_queue_row_clicked(idx)
-                QWidget.mousePressEvent(row, event)
-
-            row.mousePressEvent = _queue_row_mouse_press
-            self._queue_items_layout.addWidget(row)
-
+        self._queue_list.set_reorder_enabled(len(display_queue) >= 2)
+        self._queue_list.set_play_order(
+            self._paths,
+            current_index=self._current_index,
+            queue_indices=self._queue_indices,
+        )
+        row_height = 34
+        self._queue_list.setFixedHeight(max(1, self._queue_list.count()) * row_height + 6)
         self._queue_section.show()
 
     def set_sort_strategy(self, strategy: SortStrategy) -> None:
@@ -465,16 +441,31 @@ class SongListPanel(QWidget):
     def _apply_filter(self) -> None:
         query = self._search.text().strip().lower()
         now_playing_only = self._now_playing_only
-        if now_playing_only:
-            candidate_indices = self._play_order_indices()
-        else:
-            candidate_indices = list(range(len(self._paths)))
+        total = len(self._paths)
+        display_queue = self._display_queue_indices()
 
         self._list.blockSignals(True)
+
+        if now_playing_only:
+            self._list.set_reorder_enabled(len(display_queue) >= 2)
+            self._list.set_play_order(
+                self._paths,
+                current_index=self._current_index,
+                queue_indices=self._queue_indices,
+            )
+            visible = self._list.count()
+            self._count_label.setText(
+                f"{visible} shown (current + queue) · {total} total"
+            )
+            self._sync_list_selection()
+            self._list.blockSignals(False)
+            return
+
+        self._list.set_reorder_enabled(False)
+        candidate_indices = list(range(len(self._paths)))
         self._list.clear()
 
         visible = 0
-        display_queue = self._display_queue_indices()
         for i in candidate_indices:
             path = self._paths[i]
             name = display_name(path).lower()
@@ -508,12 +499,7 @@ class SongListPanel(QWidget):
             self._list.addItem(item)
             visible += 1
 
-        total = len(self._paths)
-        if now_playing_only:
-            self._count_label.setText(
-                f"{visible} shown (current + queue) · {total} total"
-            )
-        elif query:
+        if query:
             self._count_label.setText(
                 f"{visible} of {total} song{'s' if total != 1 else ''}"
             )

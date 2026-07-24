@@ -25,6 +25,16 @@ class PlayQueue:
     def clear(self) -> None:
         self._indices.clear()
 
+    def set_order(self, indices: list[int]) -> None:
+        """Replace queue order from a reordered list of playlist indices."""
+        if set(indices) == set(self._indices) and len(indices) == len(self._indices):
+            self._indices = list(indices)
+            return
+        # Drag-reorder UI omits the now-playing row even if that index is still stored.
+        if set(indices).issubset(set(self._indices)):
+            self._indices = list(indices)
+            return
+
     def __len__(self) -> int:
         return len(self._indices)
 
