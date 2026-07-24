@@ -8,30 +8,33 @@ from PyQt6.QtWidgets import (
     QLabel,
     QPushButton,
     QSlider,
+    QStyleFactory,
     QWidget,
 )
 
 # Fully specify border + background so Windows native chrome does not show through.
 BUTTON_STYLE = (
     "QPushButton {"
-    " background-color: transparent; color: white; border: none;"
+    " background-color: rgba(0, 0, 0, 0); color: white;"
+    " border: 0px solid transparent;"
     " font-size: 18px; min-width: 40px; min-height: 36px;"
     " padding: 4px; border-radius: 4px;"
     "}"
     "QPushButton:hover { background-color: rgba(255, 255, 255, 40); }"
     "QPushButton:pressed { background-color: rgba(255, 255, 255, 70); }"
-    "QPushButton:focus { outline: none; border: none; }"
+    "QPushButton:focus { outline: none; border: 0px solid transparent; }"
 )
 
 # Windows-only: Mac already gets a 3D look from the rewind/forward emoji glyphs.
 SEEK_STYLE = (
     "QPushButton {"
-    " color: #1e2430; border: 1px solid #6e7788; border-radius: 6px;"
+    " color: #1e2430; border: 1px solid #6e7788; border-radius: 4px;"
     " border-top-color: #d8dee8; border-left-color: #c4cbd8;"
     " border-right-color: #6e7788; border-bottom-color: #535b6a;"
     " background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
     "  stop:0 #d5dbe6, stop:0.45 #b4bccb, stop:1 #8f98a9);"
-    " font-size: 16px; min-width: 40px; min-height: 36px; padding: 2px 6px;"
+    " font-size: 14px; min-width: 28px; max-width: 32px;"
+    " min-height: 24px; max-height: 28px; padding: 0px;"
     "}"
     "QPushButton:hover {"
     " background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
@@ -48,25 +51,27 @@ SEEK_STYLE = (
 
 PLAY_STYLE = (
     "QPushButton {"
-    " background-color: #e94560; color: white; border: none;"
+    " background-color: #e94560; color: white;"
+    " border: 0px solid transparent;"
     " font-size: 18px; min-width: 44px; min-height: 36px;"
     " padding: 4px; border-radius: 6px;"
     "}"
     "QPushButton:hover { background-color: #ff6b81; }"
     "QPushButton:pressed { background-color: #d63850; }"
-    "QPushButton:focus { outline: none; border: none; }"
+    "QPushButton:focus { outline: none; border: 0px solid transparent; }"
 )
 
 PIN_STYLE = (
     "QPushButton {"
-    " background-color: transparent; color: white; border: none;"
+    " background-color: rgba(0, 0, 0, 0); color: white;"
+    " border: 0px solid transparent;"
     " font-size: 18px; min-width: 40px; min-height: 36px;"
     " padding: 4px; border-radius: 4px;"
     "}"
     "QPushButton:hover { background-color: rgba(255, 255, 255, 40); }"
     "QPushButton:pressed { background-color: rgba(255, 255, 255, 70); }"
     "QPushButton:checked { background-color: rgba(233, 69, 96, 120); }"
-    "QPushButton:focus { outline: none; border: none; }"
+    "QPushButton:focus { outline: none; border: 0px solid transparent; }"
 )
 
 SLIDER_STYLE = (
@@ -80,6 +85,16 @@ SLIDER_STYLE = (
 
 def _seek_button_style() -> str:
     return SEEK_STYLE if sys.platform == "win32" else BUTTON_STYLE
+
+
+def _apply_windows_button_style(btn: QPushButton) -> None:
+    """Windows native styles ignore transparent button sheets; Fusion honors them."""
+    if sys.platform != "win32":
+        return
+    fusion = QStyleFactory.create("Fusion")
+    if fusion is not None:
+        btn.setStyle(fusion)
+    btn.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
 
 class ControlsBar(QWidget):
@@ -189,6 +204,7 @@ class ControlsBar(QWidget):
         btn.setAutoDefault(False)
         btn.setDefault(False)
         btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        _apply_windows_button_style(btn)
         btn.setStyleSheet(style)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         return btn
