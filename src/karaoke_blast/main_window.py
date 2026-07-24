@@ -21,7 +21,7 @@ from karaoke_blast.models.playlist import Playlist
 from karaoke_blast.models.sort_strategy import SortStrategy, sort_paths
 from karaoke_blast.player.controls_bar import ControlsBar
 from karaoke_blast.player.seek_bar import SeekBar
-from karaoke_blast.player.video_widget import VideoClickOverlay, VideoWidget
+from karaoke_blast.player.video_widget import VideoWidget
 from karaoke_blast.player.vlc_player import SEEK_STEP_MS, VlcPlayer
 from karaoke_blast.storage.folder_history import FolderHistory
 from karaoke_blast.storage.folder_queues import FolderQueues
@@ -237,10 +237,6 @@ class MainWindow(QWidget):
 
         self._video_widget = VideoWidget(self._video_container)
 
-        self._video_click_overlay = VideoClickOverlay(self._video_container)
-        self._video_click_overlay.double_clicked.connect(self._toggle_fullscreen)
-        self._video_click_overlay.installEventFilter(self)
-
         self._overlay = QLabel(self._video_container)
         self._overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._overlay.setStyleSheet(
@@ -301,8 +297,7 @@ class MainWindow(QWidget):
     def eventFilter(self, obj, event) -> bool:
         if (
             event.type() == QEvent.Type.MouseMove
-            and obj
-            in (self._video_container, self._video_click_overlay, self._controls, self._seek_bar)
+            and obj in (self._video_container, self._controls, self._seek_bar)
             and self._stack.currentWidget() == self._player_page
         ):
             self._show_controls()
@@ -381,10 +376,7 @@ class MainWindow(QWidget):
         # Keep VLC's native view a few pixels off the divider so it cannot
         # swallow hover on the panel grip / splitter in fullscreen.
         left = 4 if self._list_visible else 0
-        video_rect = (left, 0, max(0, w - left), h)
-        self._video_widget.setGeometry(*video_rect)
-        self._video_click_overlay.setGeometry(*video_rect)
-        self._video_click_overlay.raise_()
+        self._video_widget.setGeometry(left, 0, max(0, w - left), h)
         self._reposition_status_label()
         self._reposition_overlay()
         if self._list_visible:

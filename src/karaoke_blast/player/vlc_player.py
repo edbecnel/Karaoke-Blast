@@ -72,7 +72,7 @@ class VlcPlayer(QObject):
             self.playback_error.emit(f"Failed to play: {path.name}")
             logger.error("VLC failed to start playback for %s", path)
             return
-        if sys.platform == "darwin":
+        if sys.platform in ("darwin", "win32"):
             from PyQt6.QtCore import QTimer
 
             QTimer.singleShot(0, self.bind_output)

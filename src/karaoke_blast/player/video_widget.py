@@ -6,25 +6,6 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QWidget
 
 
-class VideoClickOverlay(QWidget):
-    """Transparent layer above embedded VLC video to receive mouse input."""
-
-    double_clicked = pyqtSignal()
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setStyleSheet("background: transparent;")
-        self.setMouseTracking(True)
-        self.setCursor(Qt.CursorShape.ArrowCursor)
-
-    def mouseDoubleClickEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.double_clicked.emit()
-            event.accept()
-            return
-        super().mouseDoubleClickEvent(event)
-
-
 class VideoWidget(QWidget):
     """Surface for embedding a VLC media player."""
 
