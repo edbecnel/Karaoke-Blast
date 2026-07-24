@@ -11,7 +11,6 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
-    QSplitter,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -28,8 +27,14 @@ from karaoke_blast.storage.folder_history import FolderHistory
 from karaoke_blast.storage.folder_queues import FolderQueues
 from karaoke_blast.storage.settings import Settings
 from karaoke_blast.ui.opening_screen import OpeningScreen
+from karaoke_blast.ui.panel_splitter import PanelSplitter
 from karaoke_blast.ui.recent_folders_panel import RecentFoldersPanel
-from karaoke_blast.ui.song_list_panel import PANEL_DEFAULT_WIDTH, SongListPanel
+from karaoke_blast.ui.song_list_panel import (
+    PANEL_DEFAULT_WIDTH,
+    PANEL_MAX_WIDTH,
+    PANEL_MIN_WIDTH,
+    SongListPanel,
+)
 from karaoke_blast.utils.display import display_name
 from karaoke_blast.utils.resources import logo_default_window_size
 from karaoke_blast.utils.video_scanner import scan_videos
@@ -207,7 +212,7 @@ class MainWindow(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self._splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter = PanelSplitter(Qt.Orientation.Horizontal)
         self._splitter.setChildrenCollapsible(True)
         self._splitter.splitterMoved.connect(self._on_splitter_moved)
 
@@ -221,6 +226,7 @@ class MainWindow(QWidget):
         self._song_list.sort_changed.connect(self._on_sort_changed)
         self._song_list.close_requested.connect(self._hide_song_list)
         self._song_list.refresh_requested.connect(self._refresh_song_list)
+        self._song_list.resize_dragged.connect(self._on_panel_resize_drag)
 
         self._video_container = QWidget()
         self._video_container.setStyleSheet("background-color: black;")
@@ -303,6 +309,40 @@ class MainWindow(QWidget):
         if self._is_launch_screen():
             self._launch_geometry_timer.start(300)
 
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        # macOS fullscreen transitions often leave the divider under VLC's
+        # native view until layout/z-order is re-armed.
+        if (
+            event.type() == QEvent.Type.WindowStateChange
+            and hasattr(self, "_song_list")
+            and self._list_visible
+        ):
+            QTimer.singleShot(0, self._rearm_panel_resize)
+            QTimer.singleShot(100, self._rearm_panel_resize)
+
+    def _on_panel_resize_drag(self, delta: int) -> None:
+        sizes = self._splitter.sizes()
+        total = sum(sizes)
+        if total <= 0:
+            return
+        min_video = 320
+        new_left = sizes[0] + delta
+        new_left = max(PANEL_MIN_WIDTH, min(PANEL_MAX_WIDTH, new_left))
+        new_left = min(new_left, max(PANEL_MIN_WIDTH, total - min_video))
+        self._splitter.setSizes([new_left, total - new_left])
+
+    def _rearm_panel_resize(self) -> None:
+        if not self._list_visible or not self._song_list.isVisible():
+            return
+        self._song_list.raise_edge_grip()
+        handle = self._splitter.handle(1)
+        handle.raise_()
+        handle.setCursor(Qt.CursorShape.SizeHorCursor)
+        self._reposition_video_ui()
+        if self._vlc is not None:
+            self._vlc.bind_output()
+
     def _on_splitter_moved(self, _pos: int, _index: int) -> None:
         sizes = self._splitter.sizes()
         self._list_visible = sizes[0] > 0 and self._song_list.isVisible()
@@ -313,9 +353,14 @@ class MainWindow(QWidget):
     def _reposition_video_ui(self) -> None:
         w = self._video_container.width()
         h = self._video_container.height()
-        self._video_widget.setGeometry(0, 0, w, h)
+        # Keep VLC's native view a few pixels off the divider so it cannot
+        # swallow hover on the panel grip / splitter in fullscreen.
+        left = 4 if self._list_visible else 0
+        self._video_widget.setGeometry(left, 0, max(0, w - left), h)
         self._reposition_status_label()
         self._reposition_overlay()
+        if self._list_visible:
+            self._song_list.raise_edge_grip()
 
     def _reposition_status_label(self, *, show: bool = False) -> None:
         w = self._video_container.width()
@@ -362,6 +407,10 @@ class MainWindow(QWidget):
             self._splitter.setSizes(self._saved_splitter_sizes)
         else:
             self._splitter.setSizes([PANEL_DEFAULT_WIDTH, total - PANEL_DEFAULT_WIDTH])
+        handle = self._splitter.handle(1)
+        handle.raise_()
+        handle.setCursor(Qt.CursorShape.SizeHorCursor)
+        self._song_list.raise_edge_grip()
         if self._playlist.paths:
             self._song_list.set_current_index(self._playlist.index)
 

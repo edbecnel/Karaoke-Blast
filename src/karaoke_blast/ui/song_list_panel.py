@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from karaoke_blast.models.sort_strategy import SortStrategy
+from karaoke_blast.ui.panel_splitter import EDGE_GRIP_WIDTH, PanelEdgeGrip
 from karaoke_blast.ui.queue_list_widget import PlayOrderListWidget
 from karaoke_blast.utils.display import display_name
 
@@ -130,18 +131,18 @@ class SongListPanel(QWidget):
     sort_changed = pyqtSignal(object)
     close_requested = pyqtSignal()
     refresh_requested = pyqtSignal()
+    resize_dragged = pyqtSignal(int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setMinimumWidth(PANEL_MIN_WIDTH)
         self.setMaximumWidth(PANEL_MAX_WIDTH)
-        self.setStyleSheet(
-            "background-color: rgba(15, 15, 25, 230);"
-            " border-right: 1px solid rgba(255, 255, 255, 30);"
-        )
+        # Resize grip is a real child widget (not CSS border) so hover works
+        # even when VLC covers the QSplitter handle in macOS fullscreen.
+        self.setStyleSheet("background-color: rgba(15, 15, 25, 230);")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setContentsMargins(12, 12, EDGE_GRIP_WIDTH + 8, 12)
         layout.setSpacing(8)
 
         header_row = QHBoxLayout()
@@ -266,6 +267,28 @@ class SongListPanel(QWidget):
         self._selected_index: int | None = None
         self._queue_indices: list[int] = []
         self._now_playing_only = False
+
+        self._edge_grip = PanelEdgeGrip(self)
+        self._edge_grip.dragged.connect(self.resize_dragged.emit)
+        self._edge_grip.raise_()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._position_edge_grip()
+
+    def raise_edge_grip(self) -> None:
+        """Keep the grip above siblings after fullscreen / layout changes."""
+        self._position_edge_grip()
+        self._edge_grip.raise_()
+        self._edge_grip.setCursor(Qt.CursorShape.SizeHorCursor)
+
+    def _position_edge_grip(self) -> None:
+        self._edge_grip.setGeometry(
+            self.width() - EDGE_GRIP_WIDTH,
+            0,
+            EDGE_GRIP_WIDTH,
+            self.height(),
+        )
 
     def _on_refresh_clicked(self, _checked: bool = False) -> None:
         self.refresh_requested.emit()
