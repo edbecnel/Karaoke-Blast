@@ -25,30 +25,6 @@ BUTTON_STYLE = (
     "QPushButton:focus { outline: none; border: 0px solid transparent; }"
 )
 
-# Windows-only: Mac already gets a 3D look from the rewind/forward emoji glyphs.
-SEEK_STYLE = (
-    "QPushButton {"
-    " color: #1e2430; border: 1px solid #6e7788; border-radius: 4px;"
-    " border-top-color: #d8dee8; border-left-color: #c4cbd8;"
-    " border-right-color: #6e7788; border-bottom-color: #535b6a;"
-    " background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
-    "  stop:0 #d5dbe6, stop:0.45 #b4bccb, stop:1 #8f98a9);"
-    " font-size: 14px; min-width: 28px; max-width: 32px;"
-    " min-height: 24px; max-height: 28px; padding: 0px;"
-    "}"
-    "QPushButton:hover {"
-    " background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
-    "  stop:0 #e2e7f0, stop:0.45 #c2cad8, stop:1 #9da6b6);"
-    "}"
-    "QPushButton:pressed {"
-    " border-top-color: #535b6a; border-left-color: #6e7788;"
-    " border-right-color: #c4cbd8; border-bottom-color: #d8dee8;"
-    " background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
-    "  stop:0 #8f98a9, stop:0.55 #b4bccb, stop:1 #d5dbe6);"
-    "}"
-    "QPushButton:focus { outline: none; }"
-)
-
 PLAY_STYLE = (
     "QPushButton {"
     " background-color: #e94560; color: white;"
@@ -83,8 +59,23 @@ SLIDER_STYLE = (
 )
 
 
-def _seek_button_style() -> str:
-    return SEEK_STYLE if sys.platform == "win32" else BUTTON_STYLE
+def _transport_icons() -> dict[str, str]:
+    """Media-control emoji render with light-blue button art on Windows; use plain glyphs there."""
+    if sys.platform == "win32":
+        return {
+            "previous": "|<",
+            "rewind": "<<",
+            "stop": "■",
+            "forward": ">>",
+            "next": ">|",
+        }
+    return {
+        "previous": "⏮",
+        "rewind": "⏪",
+        "stop": "⏹",
+        "forward": "⏩",
+        "next": "⏭",
+    }
 
 
 def _apply_windows_button_style(btn: QPushButton) -> None:
@@ -127,19 +118,15 @@ class ControlsBar(QWidget):
         layout.setContentsMargins(16, 8, 16, 8)
         layout.setSpacing(4)
 
-        seek_style = _seek_button_style()
-        self._prev_btn = self._make_button("⏮", "Previous song")
-        self._rewind_btn = self._make_button(
-            "⏪", "Rewind 10 seconds", style=seek_style, flat=False
-        )
+        icons = _transport_icons()
+        self._prev_btn = self._make_button(icons["previous"], "Previous song")
+        self._rewind_btn = self._make_button(icons["rewind"], "Rewind 10 seconds")
         self._play_pause_btn = self._make_button(
             "▶", "Play (Space)", style=PLAY_STYLE, flat=False
         )
-        self._stop_btn = self._make_button("⏹", "Stop")
-        self._forward_btn = self._make_button(
-            "⏩", "Fast forward 10 seconds", style=seek_style, flat=False
-        )
-        self._next_btn = self._make_button("⏭", "Next song")
+        self._stop_btn = self._make_button(icons["stop"], "Stop")
+        self._forward_btn = self._make_button(icons["forward"], "Fast forward 10 seconds")
+        self._next_btn = self._make_button(icons["next"], "Next song")
 
         self._prev_btn.clicked.connect(self.previous_clicked)
         self._rewind_btn.clicked.connect(self.rewind_clicked)
