@@ -1,4 +1,4 @@
-"""Build a macOS .icns file from the bundled app SVG icon."""
+"""Build a macOS .icns file from the bundled app PNG icon."""
 
 from __future__ import annotations
 
@@ -8,9 +8,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-from PyQt6.QtCore import QSize, Qt
-from PyQt6.QtGui import QPainter, QPixmap
-from PyQt6.QtSvg import QSvgRenderer
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QApplication
 
 ICON_SIZES = (
@@ -27,23 +26,25 @@ ICON_SIZES = (
 )
 
 
-def render_icon(svg_path: Path, size: int) -> QPixmap:
-    renderer = QSvgRenderer(str(svg_path))
-    pixmap = QPixmap(QSize(size, size))
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    renderer.render(painter)
-    painter.end()
-    return pixmap
+def render_icon(png_path: Path, size: int) -> QPixmap:
+    pixmap = QPixmap(str(png_path))
+    if pixmap.isNull():
+        raise FileNotFoundError(f"Could not load icon: {png_path}")
+    return pixmap.scaled(
+        size,
+        size,
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
 
 
-def build_icns(svg_path: Path, output_path: Path) -> None:
+def build_icns(png_path: Path, output_path: Path) -> None:
     app = QApplication([])
     iconset_dir = Path(tempfile.mkdtemp(suffix=".iconset"))
 
     try:
         for size, filename in ICON_SIZES:
-            pixmap = render_icon(svg_path, size)
+            pixmap = render_icon(png_path, size)
             pixmap.save(str(iconset_dir / filename), "PNG")
 
         subprocess.run(
@@ -56,16 +57,16 @@ def build_icns(svg_path: Path, output_path: Path) -> None:
 
 def main() -> int:
     if len(sys.argv) != 3:
-        print(f"Usage: {sys.argv[0]} <icon.svg> <output.icns>", file=sys.stderr)
+        print(f"Usage: {sys.argv[0]} <icon.png> <output.icns>", file=sys.stderr)
         return 1
 
-    svg_path = Path(sys.argv[1])
+    png_path = Path(sys.argv[1])
     output_path = Path(sys.argv[2])
-    if not svg_path.is_file():
-        print(f"Icon not found: {svg_path}", file=sys.stderr)
+    if not png_path.is_file():
+        print(f"Icon not found: {png_path}", file=sys.stderr)
         return 1
 
-    build_icns(svg_path, output_path)
+    build_icns(png_path, output_path)
     return 0
 
 

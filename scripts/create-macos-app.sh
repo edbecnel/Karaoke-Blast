@@ -7,7 +7,7 @@ APP_NAME="Karaoke Blast"
 BUNDLE_ID="com.karaokeblast.app"
 INSTALL_DIR="${1:-/Applications}"
 APP_PATH="$INSTALL_DIR/$APP_NAME.app"
-ICON_SVG="$ROOT/src/karaoke_blast/assets/icon.svg"
+ICON_PNG="$ROOT/src/karaoke_blast/assets/icon.png"
 
 resolve_python() {
   local candidates=(
@@ -74,7 +74,7 @@ cat >"$CONTENTS/Info.plist" <<EOF
 EOF
 
 echo "Building app icon..."
-"$PYTHON" "$ROOT/scripts/build_app_icon.py" "$ICON_SVG" "$RESOURCES/AppIcon.icns"
+"$PYTHON" "$ROOT/scripts/build_app_icon.py" "$ICON_PNG" "$RESOURCES/AppIcon.icns"
 
 rm -rf "$APP_PATH"
 mkdir -p "$INSTALL_DIR"

@@ -26,16 +26,18 @@ from karaoke_blast.player.vlc_player import SEEK_STEP_MS, VlcPlayer
 from karaoke_blast.storage.folder_history import FolderHistory
 from karaoke_blast.storage.folder_queues import FolderQueues
 from karaoke_blast.storage.settings import Settings
+from karaoke_blast.ui.opening_screen import OpeningScreen
 from karaoke_blast.ui.recent_folders_panel import RecentFoldersPanel
 from karaoke_blast.ui.song_list_panel import PANEL_DEFAULT_WIDTH, SongListPanel
 from karaoke_blast.utils.display import display_name
-from karaoke_blast.utils.resources import icon_pixmap
+from karaoke_blast.utils.resources import logo_default_window_size
 from karaoke_blast.utils.video_scanner import scan_videos
 
 logger = logging.getLogger(__name__)
 
 OVERLAY_HIDE_MS = 4000
 CONTROLS_HIDE_MS = 3000
+LAUNCH_WINDOW_MIN = 480
 
 
 def _same_paths(left: list[Path], right: list[Path]) -> bool:
@@ -86,8 +88,14 @@ class MainWindow(QWidget):
         self._controls_timer.setSingleShot(True)
         self._controls_timer.timeout.connect(self._hide_controls)
 
+        self._launch_geometry_timer = QTimer(self)
+        self._launch_geometry_timer.setSingleShot(True)
+        self._launch_geometry_timer.timeout.connect(self._save_launch_window_geometry)
+
         if initial_folder is not None:
             QTimer.singleShot(0, lambda: self._load_folder(initial_folder))
+        else:
+            self._apply_launch_window_geometry()
 
     def _ensure_vlc(self) -> bool:
         if self._vlc is not None:
@@ -116,42 +124,68 @@ class MainWindow(QWidget):
         self._vlc.set_mute(self._settings.muted)
         self._controls.set_muted(self._settings.muted)
 
+    def _is_launch_screen(self) -> bool:
+        return self._stack.currentWidget() == self._empty_state and not self.isFullScreen()
+
+    def _launch_window_size(self) -> tuple[int, int]:
+        width = self._settings.launch_window_width
+        height = self._settings.launch_window_height
+        if (
+            width is not None
+            and height is not None
+            and width >= LAUNCH_WINDOW_MIN
+            and height >= LAUNCH_WINDOW_MIN
+        ):
+            return width, height
+        return logo_default_window_size()
+
+    def _apply_launch_window_geometry(self) -> None:
+        width, height = self._launch_window_size()
+        self.setMinimumSize(LAUNCH_WINDOW_MIN, LAUNCH_WINDOW_MIN)
+        self.resize(width, height)
+        self._center_on_screen()
+
+    def _center_on_screen(self) -> None:
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        frame = self.frameGeometry()
+        frame.moveCenter(available.center())
+        self.move(frame.topLeft())
+
+    def _save_launch_window_geometry(self) -> None:
+        if not self._is_launch_screen():
+            return
+        self._settings.launch_window_width = self.width()
+        self._settings.launch_window_height = self.height()
+        self._settings.save()
+
     def _build_empty_state(self) -> QWidget:
-        page = QWidget()
-        page.setStyleSheet("background-color: #1a1a2e;")
-        layout = QVBoxLayout(page)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        logo = QLabel()
-        logo.setPixmap(icon_pixmap(128))
-        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo.setStyleSheet("background: transparent; margin-bottom: 8px;")
-
-        title = QLabel("Karaoke Blast")
-        title.setStyleSheet("color: white; font-size: 32px; font-weight: bold;")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        page = OpeningScreen()
+        layout = page.content_layout()
 
         subtitle = QLabel("Open a folder to start playing")
-        subtitle.setStyleSheet("color: #aaa; font-size: 16px; margin-bottom: 24px;")
+        subtitle.setStyleSheet(
+            "color: white; font-size: 18px; font-weight: 600; background: transparent;"
+        )
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         open_btn = QPushButton("Open Folder")
-        open_btn.setFixedSize(160, 44)
+        open_btn.setFixedSize(180, 48)
         open_btn.setStyleSheet(
             "QPushButton { background: #e94560; color: white; border: none;"
-            " border-radius: 6px; font-size: 15px; }"
+            " border-radius: 8px; font-size: 16px; font-weight: bold; }"
             "QPushButton:hover { background: #ff6b81; }"
         )
         open_btn.clicked.connect(self._open_folder_dialog)
 
-        layout.addWidget(logo)
-        layout.addWidget(title)
         layout.addWidget(subtitle)
         layout.addWidget(open_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self._recent_folders = RecentFoldersPanel()
         self._recent_folders.folder_selected.connect(self._load_folder)
-        layout.addSpacing(16)
+        layout.addSpacing(8)
         layout.addWidget(self._recent_folders, alignment=Qt.AlignmentFlag.AlignCenter)
         self._refresh_recent_folders()
 
@@ -252,6 +286,8 @@ class MainWindow(QWidget):
             self._reposition_video_ui()
             if self._vlc is not None:
                 self._vlc.bind_output()
+        if self._is_launch_screen():
+            self._launch_geometry_timer.start(300)
 
     def _on_splitter_moved(self, _pos: int, _index: int) -> None:
         sizes = self._splitter.sizes()
@@ -424,6 +460,7 @@ class MainWindow(QWidget):
             QTimer.singleShot(0, self._reposition_status_label)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        self._save_launch_window_geometry()
         self._save_folder_state()
         super().closeEvent(event)
 

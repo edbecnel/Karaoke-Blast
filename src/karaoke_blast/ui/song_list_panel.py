@@ -290,10 +290,16 @@ class SongListPanel(QWidget):
         index = item.data(Qt.ItemDataRole.UserRole)
         if index is None:
             return
+        self._on_song_index_clicked(index)
+
+    def _on_song_index_clicked(self, index: int) -> None:
         if index == self._selected_index:
             self.song_selected.emit(index)
         else:
             self._selected_index = index
+
+    def _on_queue_row_clicked(self, index: int) -> None:
+        self._on_song_index_clicked(index)
 
     def _show_context_menu(self, pos) -> None:
         item = self._list.itemAt(pos)
@@ -377,6 +383,7 @@ class SongListPanel(QWidget):
                 label.setStyleSheet("color: #ffb3c1; font-size: 12px;")
 
             label.setToolTip(str(self._paths[index]))
+            label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
             row_layout.addWidget(label, 1)
 
             if not is_current:
@@ -396,6 +403,14 @@ class SongListPanel(QWidget):
                 )
                 row_layout.addWidget(remove_btn)
 
+            row.setCursor(Qt.CursorShape.PointingHandCursor)
+
+            def _queue_row_mouse_press(event, idx: int = index) -> None:
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self._on_queue_row_clicked(idx)
+                QWidget.mousePressEvent(row, event)
+
+            row.mousePressEvent = _queue_row_mouse_press
             self._queue_items_layout.addWidget(row)
 
         self._queue_section.show()
