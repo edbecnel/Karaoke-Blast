@@ -4,13 +4,15 @@ import logging
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal
 
 from karaoke_blast.player.video_widget import VideoWidget
 
 logger = logging.getLogger(__name__)
 
 SEEK_STEP_MS = 10_000
+# Volume/mute set before VLC's audio output is ready is often ignored (silent play).
+_AUDIO_RETRY_MS = (0, 50, 150, 400, 800)
 
 
 class VlcPlayer(QObject):
@@ -18,10 +20,13 @@ class VlcPlayer(QObject):
 
     end_reached = pyqtSignal()
     playback_error = pyqtSignal(str)
+    _playing = pyqtSignal()
 
     def __init__(self, video_widget: VideoWidget, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._widget = video_widget
+        self._desired_volume = 80
+        self._desired_mute = False
 
         try:
             import vlc
@@ -49,6 +54,9 @@ class VlcPlayer(QObject):
         self._widget.set_player(self._player)
         self._widget.bind_requested.connect(self.bind_output)
 
+        # VLC event callbacks run off the Qt thread.
+        self._playing.connect(self._apply_audio, Qt.ConnectionType.QueuedConnection)
+
         event_manager = self._player.event_manager()
         event_manager.event_attach(
             vlc.EventType.MediaPlayerEndReached,
@@ -57,6 +65,10 @@ class VlcPlayer(QObject):
         event_manager.event_attach(
             vlc.EventType.MediaPlayerEncounteredError,
             self._on_error,
+        )
+        event_manager.event_attach(
+            vlc.EventType.MediaPlayerPlaying,
+            self._on_playing,
         )
 
     def bind_output(self) -> None:
@@ -73,13 +85,13 @@ class VlcPlayer(QObject):
             logger.error("VLC failed to start playback for %s", path)
             return
         if sys.platform in ("darwin", "win32"):
-            from PyQt6.QtCore import QTimer
-
             QTimer.singleShot(0, self.bind_output)
             QTimer.singleShot(100, self.bind_output)
+        self._schedule_audio_apply()
 
     def resume(self) -> None:
         self._player.play()
+        self._schedule_audio_apply()
 
     def pause(self) -> None:
         self._player.set_pause(1)
@@ -127,17 +139,31 @@ class VlcPlayer(QObject):
         return volume
 
     def set_volume(self, volume: int) -> None:
-        self._player.audio_set_volume(max(0, min(100, volume)))
+        self._desired_volume = max(0, min(100, volume))
+        self._apply_audio()
 
     def is_muted(self) -> bool:
         return bool(self._player.audio_get_mute())
 
     def set_mute(self, muted: bool) -> None:
-        self._player.audio_set_mute(muted)
+        self._desired_mute = muted
+        self._apply_audio()
 
     def toggle_mute(self) -> bool:
-        self._player.audio_toggle_mute()
-        return self.is_muted()
+        self._desired_mute = not self._desired_mute
+        self._apply_audio()
+        return self._desired_mute
+
+    def _schedule_audio_apply(self) -> None:
+        for delay_ms in _AUDIO_RETRY_MS:
+            QTimer.singleShot(delay_ms, self._apply_audio)
+
+    def _apply_audio(self) -> None:
+        self._player.audio_set_volume(self._desired_volume)
+        self._player.audio_set_mute(self._desired_mute)
+
+    def _on_playing(self, _event) -> None:
+        self._playing.emit()
 
     def _on_end_reached(self, _event) -> None:
         self.end_reached.emit()

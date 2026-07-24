@@ -613,8 +613,6 @@ class MainWindow(QWidget):
         self._vlc.play(current)
         self._controls.set_playing(True)
         self._apply_saved_audio()
-        QTimer.singleShot(0, self._apply_saved_audio)
-        QTimer.singleShot(100, self._apply_saved_audio)
         self._song_list.set_current_index(self._playlist.index)
         if queue_changed:
             self._update_queue_display()
