@@ -710,7 +710,8 @@ class MainWindow(QWidget):
         self._show_controls()
 
     def _on_end_reached(self) -> None:
-        self._advance_to_next_track()
+        # Defer so libvlc can finish tearing down the previous media before set_media().
+        QTimer.singleShot(50, self._advance_to_next_track)
 
     def _on_playback_error(self, message: str) -> None:
         logger.warning("Playback error: %s", message)
