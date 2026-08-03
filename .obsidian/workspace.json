@@ -190,6 +190,7 @@
   },
   "active": "e4942ac9261cd955",
   "lastOpenFiles": [
+    "src/karaoke_blast/services/__pycache__/youtube_download.cpython-313.pyc",
     "src/karaoke_blast/ui/__pycache__/youtube_download_status.cpython-314.pyc",
     "src/karaoke_blast/services/__pycache__/youtube_download.cpython-314.pyc",
     "src/karaoke_blast/ui/youtube_download_status.py",
@@ -199,7 +200,6 @@
     "src/karaoke_blast/storage/__pycache__/youtube_play_history.cpython-314.pyc",
     "src/karaoke_blast/storage/__pycache__/local_play_history.cpython-314.pyc",
     "src/karaoke_blast/models/__pycache__/path_queue.cpython-314.pyc",
-    "src/karaoke_blast/ui/youtube_history_panel.py",
-    "src/karaoke_blast/ui/local_history_panel.py"
+    "src/karaoke_blast/ui/youtube_history_panel.py"
   ]
 }

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import shutil
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
@@ -17,6 +19,32 @@ VLC_FORMAT = (
     "bestvideo[ext=mp4]+bestaudio[ext=m4a]/"
     "best[ext=mp4]/best"
 )
+
+# GUI launches on macOS often omit Homebrew from PATH.
+_FFMPEG_SEARCH_DIRS = (
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+)
+
+
+def resolve_ffmpeg_location() -> str | None:
+    """Return an ffmpeg binary path, including common install locations."""
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+
+    extra_dirs = [d for d in _FFMPEG_SEARCH_DIRS if os.path.isdir(d)]
+    if extra_dirs:
+        found = shutil.which("ffmpeg", path=os.pathsep.join(extra_dirs))
+        if found:
+            return found
+
+    for directory in extra_dirs:
+        candidate = Path(directory) / "ffmpeg"
+        if candidate.is_file():
+            return str(candidate)
+
+    return None
 
 
 def downloaded_file_for(video_id: str, folder: Path | None = None) -> Path | None:
@@ -36,7 +64,7 @@ def _build_ydl_opts(
     *,
     progress_callback,
 ) -> dict:
-    return {
+    opts: dict = {
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
@@ -46,6 +74,10 @@ def _build_ydl_opts(
         "outtmpl": str(output_dir / "%(title).200B [%(id)s].%(ext)s"),
         "progress_hooks": [progress_callback],
     }
+    ffmpeg = resolve_ffmpeg_location()
+    if ffmpeg is not None:
+        opts["ffmpeg_location"] = ffmpeg
+    return opts
 
 
 class YouTubeDownloadWorker(QObject):
@@ -69,6 +101,13 @@ class YouTubeDownloadWorker(QObject):
             return
 
         try:
+            if resolve_ffmpeg_location() is None:
+                self.download_failed.emit(
+                    video.video_id,
+                    "ffmpeg is not installed. Install ffmpeg and try again.",
+                )
+                return
+
             output_dir = downloads_dir()
             existing = downloaded_file_for(video.video_id, output_dir)
             if existing is not None:
