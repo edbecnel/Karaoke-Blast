@@ -14,11 +14,13 @@ from PyQt6.QtWidgets import (
     QMenu,
     QPushButton,
     QSplitter,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from karaoke_blast.models.sort_strategy import SortStrategy
+from karaoke_blast.ui.local_history_panel import LocalHistoryPanel
 from karaoke_blast.ui.panel_splitter import EDGE_GRIP_WIDTH, PanelEdgeGrip
 from karaoke_blast.ui.queue_list_widget import PlayOrderListWidget
 from karaoke_blast.utils.display import display_name
@@ -149,6 +151,10 @@ class SongListPanel(QWidget):
     refresh_requested = pyqtSignal()
     resize_dragged = pyqtSignal(int)
     queue_split_changed = pyqtSignal(float)
+    history_play_requested = pyqtSignal(object)
+    history_queue_requested = pyqtSignal(object)
+    history_remove_requested = pyqtSignal(object)
+    history_clear_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -193,48 +199,6 @@ class SongListPanel(QWidget):
         header_row.addWidget(close_btn)
         layout.addLayout(header_row)
 
-        self._sort_combo = QComboBox()
-        self._sort_combo.setStyleSheet(COMBO_STYLE)
-        sort_palette = self._sort_combo.palette()
-        sort_palette.setColor(QPalette.ColorRole.Text, QColor("#ffffff"))
-        self._sort_combo.setPalette(sort_palette)
-        for strategy in SortStrategy:
-            self._sort_combo.addItem(strategy.label, strategy)
-        self._sort_combo.currentIndexChanged.connect(self._on_sort_changed)
-        layout.addWidget(self._sort_combo)
-
-        self._search = QLineEdit()
-        self._search.setPlaceholderText("Search songs…")
-        self._search.setClearButtonEnabled(True)
-        self._search.setStyleSheet(SEARCH_STYLE)
-        search_palette = self._search.palette()
-        search_palette.setColor(QPalette.ColorRole.Text, QColor("#ffffff"))
-        search_palette.setColor(QPalette.ColorRole.PlaceholderText, QColor("#b8b8c8"))
-        self._search.setPalette(search_palette)
-        self._search.textChanged.connect(self._apply_filter)
-        layout.addWidget(self._search)
-
-        self._now_playing_btn = QPushButton("Current + queue")
-        self._now_playing_btn.setCheckable(True)
-        self._now_playing_btn.setToolTip(
-            "Show only the song playing now and songs waiting in the queue"
-        )
-        self._now_playing_btn.setEnabled(False)
-        self._now_playing_btn.setStyleSheet(
-            "QPushButton { background-color: #2d2d42; color: #b8b8c8; border: 1px solid #5a5a72;"
-            " border-radius: 4px; padding: 6px 10px; font-size: 12px; }"
-            "QPushButton:hover:enabled { border-color: #7a7a92; color: white; }"
-            "QPushButton:checked { background-color: #e94560; color: white; border-color: #e94560; }"
-            "QPushButton:disabled { color: #555; border-color: #3a3a4a; }"
-        )
-        self._now_playing_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._now_playing_btn.toggled.connect(self._on_now_playing_filter_toggled)
-        layout.addWidget(self._now_playing_btn)
-
-        self._count_label = QLabel()
-        self._count_label.setStyleSheet("color: #888; font-size: 11px;")
-        layout.addWidget(self._count_label)
-
         self._queue_section = QWidget()
         self._queue_section.hide()
         queue_outer = QVBoxLayout(self._queue_section)
@@ -247,7 +211,7 @@ class SongListPanel(QWidget):
         queue_header.addWidget(self._queue_title)
         queue_header.addStretch()
         clear_queue_btn = QPushButton("Clear")
-        clear_queue_btn.setToolTip("Remove all queued songs")
+        clear_queue_btn.setToolTip("Clear now playing and all queued songs")
         clear_queue_btn.setStyleSheet(
             "QPushButton { background: transparent; color: #aaa; border: none;"
             " font-size: 11px; padding: 2px 6px; }"
@@ -267,6 +231,64 @@ class SongListPanel(QWidget):
         self._queue_list.queue_reordered.connect(self.queue_reordered.emit)
         queue_outer.addWidget(self._queue_list, 1)
         self._queue_section.setMinimumHeight(QUEUE_SECTION_MIN_HEIGHT)
+        layout.addWidget(self._queue_section)
+
+        self._tabs = QTabWidget()
+        self._tabs.setStyleSheet(
+            "QTabWidget::pane { border: none; background: transparent; }"
+            "QTabBar::tab {"
+            " background: #2d2d42; color: #b8b8c8; padding: 8px 14px;"
+            " border-top-left-radius: 4px; border-top-right-radius: 4px; margin-right: 2px;"
+            "}"
+            "QTabBar::tab:selected { background: #e94560; color: white; }"
+        )
+
+        songs_tab = QWidget()
+        songs_layout = QVBoxLayout(songs_tab)
+        songs_layout.setContentsMargins(0, 0, 0, 0)
+        songs_layout.setSpacing(8)
+
+        self._sort_combo = QComboBox()
+        self._sort_combo.setStyleSheet(COMBO_STYLE)
+        sort_palette = self._sort_combo.palette()
+        sort_palette.setColor(QPalette.ColorRole.Text, QColor("#ffffff"))
+        self._sort_combo.setPalette(sort_palette)
+        for strategy in SortStrategy:
+            self._sort_combo.addItem(strategy.label, strategy)
+        self._sort_combo.currentIndexChanged.connect(self._on_sort_changed)
+        songs_layout.addWidget(self._sort_combo)
+
+        self._search = QLineEdit()
+        self._search.setPlaceholderText("Search songs…")
+        self._search.setClearButtonEnabled(True)
+        self._search.setStyleSheet(SEARCH_STYLE)
+        search_palette = self._search.palette()
+        search_palette.setColor(QPalette.ColorRole.Text, QColor("#ffffff"))
+        search_palette.setColor(QPalette.ColorRole.PlaceholderText, QColor("#b8b8c8"))
+        self._search.setPalette(search_palette)
+        self._search.textChanged.connect(self._apply_filter)
+        songs_layout.addWidget(self._search)
+
+        self._now_playing_btn = QPushButton("Current + queue")
+        self._now_playing_btn.setCheckable(True)
+        self._now_playing_btn.setToolTip(
+            "Show only the song playing now and songs waiting in the queue"
+        )
+        self._now_playing_btn.setEnabled(False)
+        self._now_playing_btn.setStyleSheet(
+            "QPushButton { background-color: #2d2d42; color: #b8b8c8; border: 1px solid #5a5a72;"
+            " border-radius: 4px; padding: 6px 10px; font-size: 12px; }"
+            "QPushButton:hover:enabled { border-color: #7a7a92; color: white; }"
+            "QPushButton:checked { background-color: #e94560; color: white; border-color: #e94560; }"
+            "QPushButton:disabled { color: #555; border-color: #3a3a4a; }"
+        )
+        self._now_playing_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._now_playing_btn.toggled.connect(self._on_now_playing_filter_toggled)
+        songs_layout.addWidget(self._now_playing_btn)
+
+        self._count_label = QLabel()
+        self._count_label.setStyleSheet("color: #888; font-size: 11px;")
+        songs_layout.addWidget(self._count_label)
 
         self._list = PlayOrderListWidget()
         self._list.queue_reordered.connect(self.queue_reordered.emit)
@@ -282,17 +304,50 @@ class SongListPanel(QWidget):
         self._list_splitter.setStyleSheet(QUEUE_SPLITTER_STYLE)
         self._list_splitter.setHandleWidth(4)
         self._list_splitter.setChildrenCollapsible(False)
-        self._list_splitter.addWidget(self._queue_section)
         self._list_splitter.addWidget(self._list)
-        self._list_splitter.setStretchFactor(0, 0)
-        self._list_splitter.setStretchFactor(1, 1)
-        self._list_splitter.splitterMoved.connect(self._on_queue_splitter_moved)
-        layout.addWidget(self._list_splitter, 1)
+        self._list_splitter.setStretchFactor(0, 1)
+        songs_layout.addWidget(self._list_splitter, 1)
+
+        history_tab = QWidget()
+        history_layout = QVBoxLayout(history_tab)
+        history_layout.setContentsMargins(0, 0, 0, 0)
+        history_layout.setSpacing(8)
+
+        history_header = QHBoxLayout()
+        history_title = QLabel("History")
+        history_title.setStyleSheet("color: #e94560; font-size: 12px; font-weight: bold;")
+        history_header.addWidget(history_title)
+        history_header.addStretch()
+        clear_history_btn = QPushButton("Clear")
+        clear_history_btn.setToolTip("Remove all history entries")
+        clear_history_btn.setStyleSheet(
+            "QPushButton { background: transparent; color: #aaa; border: none;"
+            " font-size: 11px; padding: 2px 6px; }"
+            "QPushButton:hover { color: white; background: rgba(255,255,255,25);"
+            " border-radius: 3px; }"
+        )
+        clear_history_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        clear_history_btn.clicked.connect(self.history_clear_requested.emit)
+        history_header.addWidget(clear_history_btn)
+        history_layout.addLayout(history_header)
+
+        self._history_list = LocalHistoryPanel()
+        self._history_list.setStyleSheet(LIST_STYLE)
+        self._history_list.setMinimumHeight(LIST_MIN_HEIGHT)
+        self._history_list.play_requested.connect(self.history_play_requested)
+        self._history_list.queue_requested.connect(self.history_queue_requested)
+        self._history_list.remove_requested.connect(self.history_remove_requested)
+        history_layout.addWidget(self._history_list, 1)
+
+        self._tabs.addTab(songs_tab, "Songs")
+        self._tabs.addTab(history_tab, "History")
+        layout.addWidget(self._tabs, 1)
 
         self._paths: list[Path] = []
         self._current_index: int | None = None
         self._selected_index: int | None = None
         self._queue_indices: list[int] = []
+        self._queue_includes_now_playing = True
         self._now_playing_only = False
         self._queue_section_ratio: float | None = None
 
@@ -324,43 +379,12 @@ class SongListPanel(QWidget):
 
     def set_queue_section_ratio(self, ratio: float | None) -> None:
         self._queue_section_ratio = ratio
-        self._apply_queue_split_sizes()
-
-    def _queue_split_ratio(self) -> float:
-        if self._queue_section_ratio is not None:
-            return max(
-                QUEUE_SECTION_MIN_RATIO,
-                min(QUEUE_SECTION_MAX_RATIO, self._queue_section_ratio),
-            )
-        return QUEUE_SECTION_DEFAULT_RATIO
 
     def _apply_queue_split_sizes(self) -> None:
-        total = self._list_splitter.height()
-        if total <= 0:
-            return
-        if not self._queue_section.isVisible():
-            self._list_splitter.setSizes([0, total])
-            return
+        return
 
-        ratio = self._queue_split_ratio()
-        top = max(QUEUE_SECTION_MIN_HEIGHT, int(total * ratio))
-        bottom = max(LIST_MIN_HEIGHT, total - top)
-        if bottom < LIST_MIN_HEIGHT:
-            bottom = LIST_MIN_HEIGHT
-            top = max(QUEUE_SECTION_MIN_HEIGHT, total - bottom)
-        self._list_splitter.setSizes([top, bottom])
-
-    def _on_queue_splitter_moved(self, _pos: int, _index: int) -> None:
-        if not self._queue_section.isVisible():
-            return
-        sizes = self._list_splitter.sizes()
-        total = sum(sizes)
-        if total <= 0 or sizes[0] <= 0:
-            return
-        ratio = sizes[0] / total
-        ratio = max(QUEUE_SECTION_MIN_RATIO, min(QUEUE_SECTION_MAX_RATIO, ratio))
-        self._queue_section_ratio = ratio
-        self.queue_split_changed.emit(ratio)
+    def set_history(self, paths: list[Path], *, current: Path | None = None) -> None:
+        self._history_list.set_history(paths, current=current)
 
     def _on_refresh_clicked(self, _checked: bool = False) -> None:
         self.refresh_requested.emit()
@@ -419,12 +443,18 @@ class SongListPanel(QWidget):
             self._selected_index = index
 
     def _show_context_menu(self, pos) -> None:
-        self._show_song_context_menu(self._list, pos)
+        self._show_song_context_menu(self._list, pos, from_queue=False)
 
     def _show_queue_context_menu(self, pos) -> None:
-        self._show_song_context_menu(self._queue_list, pos)
+        self._show_song_context_menu(self._queue_list, pos, from_queue=True)
 
-    def _show_song_context_menu(self, list_widget: PlayOrderListWidget, pos) -> None:
+    def _show_song_context_menu(
+        self,
+        list_widget: PlayOrderListWidget,
+        pos,
+        *,
+        from_queue: bool,
+    ) -> None:
         item = list_widget.itemAt(pos)
         if item is None:
             return
@@ -450,11 +480,26 @@ class SongListPanel(QWidget):
             remove = QAction("Remove from Queue", self)
             remove.triggered.connect(lambda: self.remove_from_queue_requested.emit(index))
             menu.addAction(remove)
+        elif (
+            from_queue
+            and index == self._current_index
+            and self._queue_includes_now_playing
+        ):
+            remove = QAction("Remove", self)
+            remove.triggered.connect(lambda: self.remove_from_queue_requested.emit(index))
+            menu.addAction(remove)
 
         menu.exec(list_widget.mapToGlobal(pos))
 
-    def set_queue_indices(self, indices: list[int]) -> None:
+    def set_queue_indices(
+        self,
+        indices: list[int],
+        *,
+        include_now_playing: bool | None = None,
+    ) -> None:
         self._queue_indices = indices
+        if include_now_playing is not None:
+            self._queue_includes_now_playing = include_now_playing
         self._update_now_playing_filter_state()
         if self._now_playing_only:
             self._queue_section.hide()
@@ -531,7 +576,11 @@ class SongListPanel(QWidget):
     def _play_order_indices(self) -> list[int]:
         """Current song first, then queued songs in FIFO order."""
         order: list[int] = []
-        if self._current_index is not None and 0 <= self._current_index < len(self._paths):
+        if (
+            self._queue_includes_now_playing
+            and self._current_index is not None
+            and 0 <= self._current_index < len(self._paths)
+        ):
             order.append(self._current_index)
         order.extend(self._display_queue_indices())
         return order

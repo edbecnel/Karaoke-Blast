@@ -14,3 +14,10 @@ def config_dir() -> Path:
         path = Path.home() / ".config" / "karaoke-blast"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def downloads_dir() -> Path:
+    """Directory for YouTube videos downloaded for offline playback."""
+    path = config_dir() / "youtube-downloads"
+    path.mkdir(parents=True, exist_ok=True)
+    return path

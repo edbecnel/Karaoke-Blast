@@ -12,6 +12,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from karaoke_blast.models.media_source import MediaSourceMode
+
 # Fully specify border + background so Windows native chrome does not show through.
 BUTTON_STYLE = (
     "QPushButton {"
@@ -107,6 +109,7 @@ class ControlsBar(QWidget):
     list_toggled = pyqtSignal()
     pin_toggled = pyqtSignal(bool)
     fullscreen_toggled = pyqtSignal()
+    home_clicked = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -146,6 +149,10 @@ class ControlsBar(QWidget):
         layout.addWidget(self._stop_btn)
         layout.addWidget(self._forward_btn)
         layout.addWidget(self._next_btn)
+
+        self._home_btn = self._make_button("⌂", "Start menu")
+        self._home_btn.clicked.connect(self.home_clicked)
+        layout.addWidget(self._home_btn)
 
         self._list_btn = self._make_button("☰", "Song list (L)")
         self._list_btn.clicked.connect(self.list_toggled)
@@ -257,6 +264,21 @@ class ControlsBar(QWidget):
         value = max(0, min(100, self._volume_slider.value() + delta))
         self.set_volume(value, emit=True)
         return value
+
+    def set_media_mode(self, mode: MediaSourceMode) -> None:
+        youtube = mode == MediaSourceMode.YOUTUBE
+        for widget in (
+            self._play_pause_btn,
+            self._prev_btn,
+            self._rewind_btn,
+            self._forward_btn,
+        ):
+            widget.setVisible(not youtube)
+        self._next_btn.setEnabled(True)
+        self._stop_btn.setEnabled(True)
+        self._list_btn.setToolTip(
+            "YouTube panel (L)" if youtube else "Song list (L)"
+        )
 
     def show_bar(self) -> None:
         self.show()

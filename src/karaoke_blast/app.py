@@ -19,6 +19,7 @@ def _configure_qt_plugin_path() -> None:
 
 _configure_qt_plugin_path()
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
 from karaoke_blast.main_window import MainWindow
@@ -43,6 +44,7 @@ def _configure_windows_app_id() -> None:
 
 def run(initial_folder: Path | None = None) -> int:
     _configure_windows_app_id()
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     app = QApplication(sys.argv)
     app.setApplicationName("Karaoke Blast")
     icon = app_icon()

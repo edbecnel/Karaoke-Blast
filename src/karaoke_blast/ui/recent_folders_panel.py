@@ -33,9 +33,11 @@ QListWidget::item:hover {
 }
 """
 
+PINNED_LABEL = "YouTube Downloads"
+
 
 class RecentFoldersPanel(QWidget):
-    """Shows recently opened folders for quick selection."""
+    """Shows pinned and recently opened folders for quick selection."""
 
     folder_selected = pyqtSignal(object)
 
@@ -45,7 +47,7 @@ class RecentFoldersPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        self._heading = QLabel("Recent Folders")
+        self._heading = QLabel("Folders")
         self._heading.setStyleSheet("color: #ccc; font-size: 14px; font-weight: bold;")
         self._heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._heading)
@@ -58,13 +60,28 @@ class RecentFoldersPanel(QWidget):
         self._list.itemClicked.connect(self._on_item_clicked)
         layout.addWidget(self._list, alignment=Qt.AlignmentFlag.AlignCenter)
 
-    def set_folders(self, folders: list[Path]) -> None:
+    def set_folders(
+        self,
+        folders: list[Path],
+        *,
+        pinned: list[Path] | None = None,
+    ) -> None:
         self._list.clear()
-        if not folders:
+        pinned_paths = pinned or []
+        pinned_resolved = {path.resolve() for path in pinned_paths}
+        recent = [folder for folder in folders if folder.resolve() not in pinned_resolved]
+
+        if not pinned_paths and not recent:
             self.hide()
             return
 
-        for folder in folders:
+        for folder in pinned_paths:
+            item = QListWidgetItem(PINNED_LABEL)
+            item.setData(Qt.ItemDataRole.UserRole, folder)
+            item.setToolTip(str(folder))
+            self._list.addItem(item)
+
+        for folder in recent:
             item = QListWidgetItem(folder.name)
             item.setData(Qt.ItemDataRole.UserRole, folder)
             item.setToolTip(str(folder))

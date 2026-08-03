@@ -1,11 +1,12 @@
 # Karaoke Blast
 
-Full-screen karaoke video player and manager. Open a local folder of videos and play them in alphabetical order.
+Full-screen karaoke video player and manager. Open a local folder of videos and play them in alphabetical order, or search YouTube for karaoke tracks and play them in an embedded player.
 
 ## Requirements
 
 - Python 3.11+
-- [VLC media player](https://www.videolan.org/vlc/) installed on your system
+- [VLC media player](https://www.videolan.org/vlc/) installed on your system (for local files)
+- [ffmpeg](https://ffmpeg.org/) on your system PATH (required to merge YouTube video and audio when downloading)
 
 ### Install VLC
 
@@ -14,6 +15,14 @@ Full-screen karaoke video player and manager. Open a local folder of videos and 
 | macOS | `brew install vlc` |
 | Windows | Download from [videolan.org](https://www.videolan.org/vlc/) |
 | Linux | `sudo apt install vlc` (or your distro's package manager) |
+
+### Install ffmpeg (for YouTube downloads)
+
+| Platform | Command |
+|---|---|
+| macOS | `brew install ffmpeg` |
+| Windows | Download from [ffmpeg.org](https://ffmpeg.org/download.html) and add to PATH |
+| Linux | `sudo apt install ffmpeg` (or your distro's package manager) |
 
 ## Quick Start
 
@@ -26,6 +35,8 @@ python -m karaoke_blast
 
 Open a folder containing video files (`.mp4`, `.mkv`, `.avi`, `.mov`, `.webm`, `.m4v`) and playback starts automatically in full screen. Recently opened folders appear on the startup screen for quick access.
 
+You can also click **Search YouTube** on the startup screen to find and play karaoke videos online without downloading them first.
+
 ### CLI
 
 ```bash
@@ -36,22 +47,24 @@ python -m karaoke_blast --folder /path/to/videos
 
 | Key | Action |
 |---|---|
-| `Space` | Play / pause |
+| `Space` | Play / pause (local files) |
 | `S` | Stop |
-| `→` or `N` | Next song |
+| `→` or `N` | Next song / next queued YouTube video |
 | `←` or `P` | Previous song |
 | `,` or `[` | Rewind 10 seconds |
 | `.` or `]` | Fast forward 10 seconds |
-| `M` | Mute / unmute |
-| `+` / `↑` | Volume up |
-| `-` / `↓` | Volume down |
+| `M` | Mute / unmute (local and YouTube) |
+| `+` / `↑` | Volume up (local and YouTube) |
+| `-` / `↓` | Volume down (local and YouTube) |
 | `O` | Open a different folder |
-| `L` | Toggle song list |
+| `Y` | Open YouTube search (or focus search when in YouTube mode) |
+| `L` | Toggle song list / YouTube panel |
+| `⌂` (Start menu button) | Return to the start screen |
 | `F` or `F11` | Toggle full screen |
 | `Esc` | Exit full screen (or quit if already windowed) |
 | `Q` | Quit |
 
-Move the mouse during playback to reveal the on-screen control bar. Use the play/pause toggle on the control bar, or press `Space`, to play and pause.
+Move the mouse during playback to reveal the on-screen control bar. Use the play/pause toggle on the control bar, or press `Space`, to play and pause local files.
 
 ## Song List
 
@@ -63,6 +76,87 @@ When a folder is loaded, a song list panel appears on the left. Click a song onc
 Press `L` or click **☰** on the control bar to show or hide the song list. You can also click **×** at the top of the song list panel.
 
 Right-click any song and choose **Play Next** to queue it after the current song finishes. Queued songs appear in the **Queue** panel above the list — click **×** on a song to remove it, or **Clear** to empty the queue. You can also right-click a queued song and choose **Remove from Queue**. Toggle **Current + queue** to show only the playing song and queued songs; the filter turns off automatically when the queue is empty.
+
+Use the **History** tab to see recently played songs from any folder. Double-click to play, or right-click for **Play Now**, **Play Next**, or **Remove from History**. Click **Clear** to empty the history list. History is saved across sessions.
+
+## YouTube Streaming
+
+Click **Search YouTube** on the startup screen, or press `Y`, to enter YouTube mode.
+
+### Search
+
+1. Enter a **song** name (required) and optionally an **artist / band**.
+2. Click **Search**. If your query does not already include the word `karaoke`, it is appended automatically.
+3. Double-click a result to play it, or right-click and choose **Play Next** to queue it.
+
+### Paste URL
+
+Switch to the **Paste URL** tab to play a video when you already have a YouTube link or video ID.
+
+### Queue
+
+Queued YouTube videos appear in the **Queue** section at the top of the search panel. When the current video ends, the next queued video plays automatically. Press `N` or click **Next** on the control bar to skip ahead manually. Press `S` or **Stop** to end playback; the queue is kept.
+
+Volume and mute on the control bar work in YouTube mode and share the same saved settings as local playback.
+
+The **History** tab lists recently played YouTube videos with the same play, queue, and remove actions as search results. History persists across sessions and can be cleared with the **Clear** button.
+
+Opening a local folder switches back to local playback and clears the YouTube queue.
+
+### Downloads
+
+Download YouTube videos for offline playback in the local VLC player:
+
+- Right-click a search result, history entry, or queue item and choose **Download**
+- Or use the **Download** button on the **Paste URL** tab
+
+Downloads run in the background — you can keep playing and searching YouTube while a download is in progress. Progress, success, and failure are shown in the status area below the queue panel. Only one download runs at a time.
+
+Videos are saved as VLC-compatible **MP4** files (H.264 video + AAC audio when available) in the app's **YouTube Downloads** folder:
+
+- macOS: `~/Library/Application Support/Karaoke Blast/youtube-downloads`
+- Linux: `~/.config/karaoke-blast/youtube-downloads`
+- Windows: `%APPDATA%\Karaoke Blast\youtube-downloads`
+
+**YouTube Downloads** appears as a pinned folder on the startup screen. Click it to open your downloads in the local player. When the folder is empty, the player opens with a message prompting you to download videos from YouTube mode.
+
+After a successful download, you are prompted to **Open Downloads** in the local player or dismiss the dialog.
+
+### Search backends
+
+By default, searches use **yt-dlp** (no API key required). To use the official **YouTube Data API** instead, edit your settings file:
+
+- macOS / Linux: `~/.config/karaoke-blast/settings.json`
+- Windows: `%APPDATA%\karaoke-blast\settings.json`
+
+```json
+{
+  "youtube_search_backend": "api",
+  "youtube_api_key": "YOUR_GOOGLE_API_KEY"
+}
+```
+
+Set `youtube_search_backend` to `"yt-dlp"` to switch back. If the API key is missing while `"api"` is selected, the app falls back to yt-dlp and shows a notice.
+
+## Manual Test Checklist
+
+- [ ] Local folder opens and plays as before
+- [ ] **Search YouTube** opens player in YouTube mode with search panel visible
+- [ ] Search appends `karaoke` when not present in query
+- [ ] Double-click result plays video in embedded player
+- [ ] Right-click **Play Next** queues video; queue shows in panel
+- [ ] Video end auto-advances to next queued item
+- [ ] **Next** skips to next queued video; **Stop** stops playback but keeps queue
+- [ ] **Paste URL** tab plays a direct link
+- [ ] `Y` focuses search; `L` toggles YouTube panel
+- [ ] Opening a local folder switches back to VLC and clears YouTube queue
+- [ ] Fullscreen works in both local and YouTube modes
+- [ ] Right-click **Download** on a search result; progress appears in the sidebar
+- [ ] Download completes and shows success; **Open Downloads** opens the local player
+- [ ] **YouTube Downloads** appears on the startup screen (even when empty)
+- [ ] Can play and search YouTube while a download is in progress
+- [ ] Second download while one is active shows a notice
+- [ ] Re-downloading an existing video reports it is already downloaded
 
 ## Roadmap
 

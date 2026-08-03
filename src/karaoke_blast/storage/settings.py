@@ -23,6 +23,8 @@ class Settings:
         self.launch_window_width: int | None = None
         self.launch_window_height: int | None = None
         self.queue_section_ratio: float | None = None
+        self.youtube_search_backend: str = "yt-dlp"
+        self.youtube_api_key: str | None = None
         self.load()
 
     def load(self) -> None:
@@ -46,6 +48,14 @@ class Settings:
             ratio = data.get("queue_section_ratio")
             if isinstance(ratio, (int, float)) and 0.1 <= float(ratio) <= 0.85:
                 self.queue_section_ratio = float(ratio)
+            backend = data.get("youtube_search_backend")
+            if backend in {"yt-dlp", "api"}:
+                self.youtube_search_backend = backend
+            api_key = data.get("youtube_api_key")
+            if isinstance(api_key, str) and api_key.strip():
+                self.youtube_api_key = api_key.strip()
+            elif api_key is None:
+                self.youtube_api_key = None
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning("Could not load settings: %s", exc)
 
@@ -57,6 +67,8 @@ class Settings:
             "launch_window_width": self.launch_window_width,
             "launch_window_height": self.launch_window_height,
             "queue_section_ratio": self.queue_section_ratio,
+            "youtube_search_backend": self.youtube_search_backend,
+            "youtube_api_key": self.youtube_api_key,
         }
         try:
             _settings_file().write_text(
