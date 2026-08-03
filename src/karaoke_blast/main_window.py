@@ -398,12 +398,14 @@ class MainWindow(QWidget):
         self._save_folder_state()
         if self._media_mode == MediaSourceMode.LOCAL:
             self._freeze_local_playback()
-        elif self._youtube_player is not None:
-            self._youtube_player.stop()
+        elif self._media_mode == MediaSourceMode.YOUTUBE:
+            if self._youtube_player is not None:
+                self._youtube_player.stop()
             self._current_youtube = None
             self._youtube_stopped = True
             self._controls.set_playing(False)
             self._update_youtube_queue_display()
+            self._youtube_panel.clear_messages()
         self._hide_side_panel()
         self._overlay.hide()
         self._status_label.hide()
@@ -783,6 +785,7 @@ class MainWindow(QWidget):
         self._current_youtube = None
         self._youtube_stopped = True
         self._media_mode = MediaSourceMode.LOCAL
+        self._youtube_panel.clear_messages()
         self._left_panel_stack.setCurrentIndex(0)
         self._canvas_stack.setCurrentIndex(0)
         self._controls.set_media_mode(MediaSourceMode.LOCAL)

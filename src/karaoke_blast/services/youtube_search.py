@@ -7,6 +7,7 @@ import logging
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass
 from typing import Protocol
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
@@ -16,10 +17,27 @@ from karaoke_blast.models.youtube_video import YouTubeVideo
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_RESULTS = 15
+MAX_TOTAL_RESULTS = 60
+
+
+@dataclass
+class YouTubeSearchPage:
+    """One page of YouTube search results."""
+
+    videos: list[YouTubeVideo]
+    has_more: bool
+    next_page_token: str | None = None
 
 
 class YouTubeSearchBackend(Protocol):
-    def search(self, query: str, *, max_results: int = DEFAULT_MAX_RESULTS) -> list[YouTubeVideo]: ...
+    def search_page(
+        self,
+        query: str,
+        *,
+        max_results: int = DEFAULT_MAX_RESULTS,
+        page_token: str | None = None,
+        skip: int = 0,
+    ) -> YouTubeSearchPage: ...
 
 
 def _entry_to_video(entry: dict) -> YouTubeVideo | None:
@@ -58,28 +76,44 @@ def _entry_to_video(entry: dict) -> YouTubeVideo | None:
 class YtDlpSearchBackend:
     """Search YouTube via yt-dlp without an API key."""
 
-    def search(self, query: str, *, max_results: int = DEFAULT_MAX_RESULTS) -> list[YouTubeVideo]:
+    def search_page(
+        self,
+        query: str,
+        *,
+        max_results: int = DEFAULT_MAX_RESULTS,
+        page_token: str | None = None,
+        skip: int = 0,
+    ) -> YouTubeSearchPage:
         import yt_dlp
 
+        if skip >= MAX_TOTAL_RESULTS:
+            return YouTubeSearchPage(videos=[], has_more=False)
+
+        total_needed = min(skip + max_results, MAX_TOTAL_RESULTS)
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
             "extract_flat": "in_playlist",
         }
-        results: list[YouTubeVideo] = []
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"ytsearch{max_results}:{query}", download=False)
+            info = ydl.extract_info(f"ytsearch{total_needed}:{query}", download=False)
         entries = info.get("entries") if isinstance(info, dict) else None
         if not entries:
-            return results
+            return YouTubeSearchPage(videos=[], has_more=False)
+
+        all_videos: list[YouTubeVideo] = []
         for entry in entries:
             if not isinstance(entry, dict):
                 continue
             video = _entry_to_video(entry)
             if video is not None:
-                results.append(video)
-        return results
+                all_videos.append(video)
+
+        page_videos = all_videos[skip : skip + max_results]
+        at_cap = skip + len(page_videos) >= MAX_TOTAL_RESULTS
+        has_more = len(all_videos) >= total_needed and not at_cap
+        return YouTubeSearchPage(videos=page_videos, has_more=has_more)
 
 
 class YouTubeApiSearchBackend:
@@ -88,16 +122,24 @@ class YouTubeApiSearchBackend:
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
 
-    def search(self, query: str, *, max_results: int = DEFAULT_MAX_RESULTS) -> list[YouTubeVideo]:
-        search_params = urllib.parse.urlencode(
-            {
-                "part": "snippet",
-                "q": query,
-                "type": "video",
-                "maxResults": max_results,
-                "key": self._api_key,
-            }
-        )
+    def search_page(
+        self,
+        query: str,
+        *,
+        max_results: int = DEFAULT_MAX_RESULTS,
+        page_token: str | None = None,
+        skip: int = 0,
+    ) -> YouTubeSearchPage:
+        params: dict[str, str | int] = {
+            "part": "snippet",
+            "q": query,
+            "type": "video",
+            "maxResults": max_results,
+            "key": self._api_key,
+        }
+        if page_token:
+            params["pageToken"] = page_token
+        search_params = urllib.parse.urlencode(params)
         search_url = f"https://www.googleapis.com/youtube/v3/search?{search_params}"
         search_payload = self._fetch_json(search_url)
         items = search_payload.get("items", [])
@@ -112,7 +154,7 @@ class YouTubeApiSearchBackend:
                 video_ids.append(video_id)
                 snippets[video_id] = snippet
         if not video_ids:
-            return []
+            return YouTubeSearchPage(videos=[], has_more=False)
 
         duration_by_id = self._fetch_durations(video_ids)
         results: list[YouTubeVideo] = []
@@ -134,7 +176,15 @@ class YouTubeApiSearchBackend:
                     thumbnail_url=thumbnail_url,
                 )
             )
-        return results
+
+        next_token = search_payload.get("nextPageToken")
+        at_cap = skip + len(results) >= MAX_TOTAL_RESULTS
+        has_more = isinstance(next_token, str) and next_token and not at_cap
+        return YouTubeSearchPage(
+            videos=results,
+            has_more=has_more,
+            next_page_token=next_token if isinstance(next_token, str) else None,
+        )
 
     def _fetch_durations(self, video_ids: list[str]) -> dict[str, int | None]:
         params = urllib.parse.urlencode(
@@ -206,9 +256,21 @@ class YouTubeSearchService:
         self._backend_name = backend_name
         self._api_key = api_key
 
-    def search(self, query: str, *, max_results: int = DEFAULT_MAX_RESULTS) -> list[YouTubeVideo]:
+    def search_page(
+        self,
+        query: str,
+        *,
+        max_results: int = DEFAULT_MAX_RESULTS,
+        page_token: str | None = None,
+        skip: int = 0,
+    ) -> YouTubeSearchPage:
         backend = self._resolve_backend()
-        return backend.search(query, max_results=max_results)
+        return backend.search_page(
+            query,
+            max_results=max_results,
+            page_token=page_token,
+            skip=skip,
+        )
 
     def _resolve_backend(self) -> YouTubeSearchBackend:
         if self._backend_name == "api":
@@ -221,7 +283,7 @@ class YouTubeSearchService:
 class YouTubeSearchWorker(QObject):
     """Run YouTube searches off the UI thread."""
 
-    search_finished = pyqtSignal(list)
+    search_finished = pyqtSignal(object)
     search_failed = pyqtSignal(str)
 
     def __init__(
@@ -235,14 +297,26 @@ class YouTubeSearchWorker(QObject):
         self._backend_name = backend_name
         self._api_key = api_key
 
-    def run_search(self, query: str, *, max_results: int = DEFAULT_MAX_RESULTS) -> None:
+    def run_search(
+        self,
+        query: str,
+        *,
+        max_results: int = DEFAULT_MAX_RESULTS,
+        page_token: str | None = None,
+        skip: int = 0,
+    ) -> None:
         try:
             service = YouTubeSearchService(
                 backend_name=self._backend_name,
                 api_key=self._api_key,
             )
-            results = service.search(query, max_results=max_results)
-            self.search_finished.emit(results)
+            page = service.search_page(
+                query,
+                max_results=max_results,
+                page_token=page_token,
+                skip=skip,
+            )
+            self.search_finished.emit(page)
         except (RuntimeError, TypeError, OSError, ValueError) as exc:
             logger.warning("YouTube search failed: %s", exc)
             self.search_failed.emit(str(exc))
@@ -257,12 +331,21 @@ def start_search(
     on_failed,
     parent: QObject | None = None,
     max_results: int = DEFAULT_MAX_RESULTS,
+    page_token: str | None = None,
+    skip: int = 0,
 ) -> QThread:
     """Launch a one-shot search thread and connect result signals."""
     thread = QThread(parent)
     worker = YouTubeSearchWorker(backend_name=backend_name, api_key=api_key)
     worker.moveToThread(thread)
-    thread.started.connect(lambda: worker.run_search(query, max_results=max_results))
+    thread.started.connect(
+        lambda: worker.run_search(
+            query,
+            max_results=max_results,
+            page_token=page_token,
+            skip=skip,
+        )
+    )
     worker.search_finished.connect(on_finished)
     worker.search_failed.connect(on_failed)
     worker.search_finished.connect(thread.quit)

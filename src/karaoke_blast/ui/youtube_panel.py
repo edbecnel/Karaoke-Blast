@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPalette
 from PyQt6.QtWidgets import (
     QHBoxLayout,
@@ -57,6 +57,14 @@ TAB_STYLE = (
     "}"
     "QTabBar::tab:selected { background: #e94560; color: white; }"
 )
+
+_DISMISS_BTN_STYLE = (
+    "QPushButton { background: transparent; color: #aaa; border: none;"
+    " font-size: 16px; border-radius: 4px; }"
+    "QPushButton:hover { background: rgba(255,255,255,30); color: white; }"
+)
+_URL_STATUS_STYLE = "color: #aaa; font-size: 11px;"
+_URL_ERROR_STYLE = "color: #ff6b81; font-size: 11px;"
 
 
 class YouTubePanel(QWidget):
@@ -166,10 +174,22 @@ class YouTubePanel(QWidget):
         button_row.addWidget(self._url_download_btn)
         url_layout.addLayout(button_row)
 
+        url_status_row = QHBoxLayout()
+        url_status_row.setSpacing(4)
         self._url_status = QLabel("")
-        self._url_status.setStyleSheet("color: #aaa; font-size: 11px;")
+        self._url_status.setStyleSheet(_URL_STATUS_STYLE)
         self._url_status.setWordWrap(True)
-        url_layout.addWidget(self._url_status)
+        url_status_row.addWidget(self._url_status, 1)
+
+        self._url_status_close_btn = QPushButton("×")
+        self._url_status_close_btn.setToolTip("Dismiss")
+        self._url_status_close_btn.setFixedSize(24, 24)
+        self._url_status_close_btn.setStyleSheet(_DISMISS_BTN_STYLE)
+        self._url_status_close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._url_status_close_btn.clicked.connect(self._clear_url_status)
+        self._url_status_close_btn.hide()
+        url_status_row.addWidget(self._url_status_close_btn)
+        url_layout.addLayout(url_status_row)
         url_layout.addStretch(1)
 
         history_tab = QWidget()
@@ -252,15 +272,31 @@ class YouTubePanel(QWidget):
     def reset_download_status(self) -> None:
         self._download_status.reset()
 
+    def clear_messages(self) -> None:
+        """Hide download status, search errors, and URL validation messages."""
+        self.reset_download_status()
+        self._search_panel.clear_status()
+        self._clear_url_status()
+
     def raise_edge_grip(self) -> None:
         self._search_panel.raise_edge_grip()
+
+    def _clear_url_status(self) -> None:
+        self._url_status.clear()
+        self._url_status.setStyleSheet(_URL_STATUS_STYLE)
+        self._url_status_close_btn.hide()
+
+    def _show_url_error(self, message: str) -> None:
+        self._url_status.setText(message)
+        self._url_status.setStyleSheet(_URL_ERROR_STYLE)
+        self._url_status_close_btn.show()
 
     def _video_from_url_field(self) -> YouTubeVideo | None:
         video_id = extract_video_id(self._url_input.text())
         if video_id is None:
-            self._url_status.setText("Enter a valid YouTube URL or video ID.")
+            self._show_url_error("Enter a valid YouTube URL or video ID.")
             return None
-        self._url_status.setText("")
+        self._clear_url_status()
         return YouTubeVideo(
             video_id=video_id,
             title=self._url_input.text().strip() or video_id,

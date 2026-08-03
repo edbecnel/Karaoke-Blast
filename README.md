@@ -88,6 +88,7 @@ Click **Search YouTube** on the startup screen, or press `Y`, to enter YouTube m
 1. Enter a **song** name (required) and optionally an **artist / band**.
 2. Click **Search**. If your query does not already include the word `karaoke`, it is appended automatically.
 3. Double-click a result to play it, or right-click and choose **Play Next** to queue it.
+4. Click **Search more** to load the next 15 results and append them to the list (up to 60 total). A new **Search** clears the list and starts over.
 
 ### Paste URL
 
@@ -143,6 +144,7 @@ Set `youtube_search_backend` to `"yt-dlp"` to switch back. If the API key is mis
 - [ ] Local folder opens and plays as before
 - [ ] **Search YouTube** opens player in YouTube mode with search panel visible
 - [ ] Search appends `karaoke` when not present in query
+- [ ] **Search more** appends additional results; new **Search** clears the list
 - [ ] Double-click result plays video in embedded player
 - [ ] Right-click **Play Next** queues video; queue shows in panel
 - [ ] Video end auto-advances to next queued item

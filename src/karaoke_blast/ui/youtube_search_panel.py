@@ -17,7 +17,11 @@ from PyQt6.QtWidgets import (
 )
 
 from karaoke_blast.models.youtube_video import YouTubeVideo
-from karaoke_blast.services.youtube_search import start_search
+from karaoke_blast.services.youtube_search import (
+    MAX_TOTAL_RESULTS,
+    YouTubeSearchPage,
+    start_search,
+)
 from karaoke_blast.ui.panel_splitter import EDGE_GRIP_WIDTH, PanelEdgeGrip
 from karaoke_blast.ui.youtube_queue_widget import format_duration
 from karaoke_blast.utils.youtube_query import build_karaoke_query
@@ -66,7 +70,30 @@ QListWidget::item:hover {
 }
 """
 
+SEARCH_BTN_STYLE = (
+    "QPushButton { background-color: #e94560; color: white; border: none;"
+    " border-radius: 4px; padding: 8px 12px; font-size: 13px; font-weight: bold; }"
+    "QPushButton:hover { background-color: #ff6b81; }"
+    "QPushButton:disabled { background-color: #5a5a72; color: #ccc; }"
+)
+
+SEARCH_MORE_BTN_STYLE = (
+    "QPushButton { background-color: #2d2d42; color: white; border: 1px solid #5a5a72;"
+    " border-radius: 4px; padding: 8px 12px; font-size: 13px; }"
+    "QPushButton:hover { background-color: #3a3a52; border-color: #7a7a92; }"
+    "QPushButton:disabled { background-color: #1a1a28; color: #666; border-color: #3a3a52; }"
+)
+
 _ROLE_VIDEO = Qt.ItemDataRole.UserRole + 1
+
+_DISMISS_BTN_STYLE = (
+    "QPushButton { background: transparent; color: #aaa; border: none;"
+    " font-size: 16px; border-radius: 4px; }"
+    "QPushButton:hover { background: rgba(255,255,255,30); color: white; }"
+)
+
+_STATUS_STYLE = "color: #aaa; font-size: 11px;"
+_ERROR_STYLE = "color: #ff6b81; font-size: 11px;"
 
 
 class YouTubeSearchPanel(QWidget):
@@ -88,6 +115,11 @@ class YouTubeSearchPanel(QWidget):
         self._backend_name = "yt-dlp"
         self._api_key: str | None = None
         self._search_thread = None
+        self._active_query: str | None = None
+        self._api_page_token: str | None = None
+        self._yt_dlp_skip = 0
+        self._has_more = False
+        self._append_next = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, EDGE_GRIP_WIDTH + 8, 12)
@@ -118,20 +150,36 @@ class YouTubeSearchPanel(QWidget):
         self._artist_input = self._make_input("Artist / band (optional)")
         layout.addWidget(self._artist_input)
 
+        search_row = QHBoxLayout()
+        search_row.setSpacing(8)
         self._search_btn = QPushButton("Search")
-        self._search_btn.setStyleSheet(
-            "QPushButton { background-color: #e94560; color: white; border: none;"
-            " border-radius: 4px; padding: 8px 12px; font-size: 13px; font-weight: bold; }"
-            "QPushButton:hover { background-color: #ff6b81; }"
-            "QPushButton:disabled { background-color: #5a5a72; color: #ccc; }"
-        )
+        self._search_btn.setStyleSheet(SEARCH_BTN_STYLE)
         self._search_btn.clicked.connect(self._start_search)
-        layout.addWidget(self._search_btn)
+        search_row.addWidget(self._search_btn)
 
+        self._search_more_btn = QPushButton("Search more")
+        self._search_more_btn.setStyleSheet(SEARCH_MORE_BTN_STYLE)
+        self._search_more_btn.setEnabled(False)
+        self._search_more_btn.clicked.connect(self._start_search_more)
+        search_row.addWidget(self._search_more_btn)
+        layout.addLayout(search_row)
+
+        status_row = QHBoxLayout()
+        status_row.setSpacing(4)
         self._status_label = QLabel("")
-        self._status_label.setStyleSheet("color: #aaa; font-size: 11px;")
+        self._status_label.setStyleSheet(_STATUS_STYLE)
         self._status_label.setWordWrap(True)
-        layout.addWidget(self._status_label)
+        status_row.addWidget(self._status_label, 1)
+
+        self._status_close_btn = QPushButton("×")
+        self._status_close_btn.setToolTip("Dismiss")
+        self._status_close_btn.setFixedSize(24, 24)
+        self._status_close_btn.setStyleSheet(_DISMISS_BTN_STYLE)
+        self._status_close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._status_close_btn.clicked.connect(self.clear_status)
+        self._status_close_btn.hide()
+        status_row.addWidget(self._status_close_btn)
+        layout.addLayout(status_row)
 
         self._results_list = QListWidget()
         self._results_list.setStyleSheet(LIST_STYLE)
@@ -167,31 +215,79 @@ class YouTubeSearchPanel(QWidget):
         self._song_input.setFocus()
         self._song_input.selectAll()
 
+    def _existing_video_ids(self) -> set[str]:
+        ids: set[str] = set()
+        for index in range(self._results_list.count()):
+            item = self._results_list.item(index)
+            video = self._video_at(item)
+            if video is not None:
+                ids.add(video.video_id)
+        return ids
+
+    def _add_result_item(self, video: YouTubeVideo) -> None:
+        duration = format_duration(video.duration_seconds)
+        suffix = f" ({duration})" if duration else ""
+        item = QListWidgetItem(f"{video.title}{suffix}\n{video.channel}")
+        item.setData(_ROLE_VIDEO, video)
+        item.setToolTip(f"{video.title}\n{video.channel}\n{video.watch_url}")
+        self._results_list.addItem(item)
+
     def set_results(self, results: list[YouTubeVideo]) -> None:
         self._results_list.clear()
         for video in results:
-            duration = format_duration(video.duration_seconds)
-            suffix = f" ({duration})" if duration else ""
-            item = QListWidgetItem(f"{video.title}{suffix}\n{video.channel}")
-            item.setData(_ROLE_VIDEO, video)
-            item.setToolTip(f"{video.title}\n{video.channel}\n{video.watch_url}")
-            self._results_list.addItem(item)
-        if results:
-            self._status_label.setText(f"{len(results)} result(s)")
-        else:
+            self._add_result_item(video)
+        self._update_status_label()
+
+    def append_results(self, results: list[YouTubeVideo]) -> int:
+        existing = self._existing_video_ids()
+        added = 0
+        for video in results:
+            if video.video_id in existing:
+                continue
+            self._add_result_item(video)
+            existing.add(video.video_id)
+            added += 1
+        self._update_status_label()
+        return added
+
+    def _update_status_label(self) -> None:
+        count = self._results_list.count()
+        self._status_label.setStyleSheet(_STATUS_STYLE)
+        self._status_close_btn.hide()
+        if count == 0:
             self._status_label.setText("No results found.")
+            return
+        if count >= MAX_TOTAL_RESULTS and not self._has_more:
+            self._status_label.setText(
+                f"{count} results — refine your search for more results."
+            )
+        else:
+            self._status_label.setText(f"{count} result(s)")
+
+    def _update_search_more_button(self) -> None:
+        enabled = (
+            self._active_query is not None
+            and self._has_more
+            and self._results_list.count() < MAX_TOTAL_RESULTS
+        )
+        self._search_more_btn.setEnabled(enabled)
+
+    def clear_status(self) -> None:
+        self._status_label.clear()
+        self._status_label.setStyleSheet(_STATUS_STYLE)
+        self._status_close_btn.hide()
 
     def show_search_error(self, message: str) -> None:
         self._status_label.setText(message)
+        self._status_label.setStyleSheet(_ERROR_STYLE)
+        self._status_close_btn.show()
 
-    def _start_search(self) -> None:
-        query = build_karaoke_query(self._song_input.text(), self._artist_input.text())
-        if not query:
-            self._status_label.setText("Enter a song name to search.")
-            return
-        if self._search_thread is not None and self._search_thread.isRunning():
-            return
+    def _show_input_error(self, message: str) -> None:
+        self._status_label.setText(message)
+        self._status_label.setStyleSheet(_ERROR_STYLE)
+        self._status_close_btn.show()
 
+    def _resolve_backend(self) -> tuple[str, str | None]:
         backend_name = self._backend_name
         api_key = self._api_key
         if backend_name == "api" and not api_key:
@@ -199,8 +295,25 @@ class YouTubeSearchPanel(QWidget):
                 "YouTube API key is not configured. Using yt-dlp search instead."
             )
             backend_name = "yt-dlp"
+        return backend_name, api_key
 
-        self._search_btn.setEnabled(False)
+    def _start_search(self) -> None:
+        query = build_karaoke_query(self._song_input.text(), self._artist_input.text())
+        if not query:
+            self._show_input_error("Enter a song name to search.")
+            return
+        if self._search_thread is not None and self._search_thread.isRunning():
+            return
+
+        self._active_query = query
+        self._api_page_token = None
+        self._yt_dlp_skip = 0
+        self._has_more = False
+        self._append_next = False
+
+        backend_name, api_key = self._resolve_backend()
+        self._set_search_in_progress(True)
+        self.clear_status()
         self._status_label.setText("Searching…")
         self._search_thread = start_search(
             query=query,
@@ -211,14 +324,61 @@ class YouTubeSearchPanel(QWidget):
             parent=self,
         )
 
-    def _on_search_finished(self, results: list) -> None:
-        self._search_btn.setEnabled(True)
+    def _start_search_more(self) -> None:
+        if not self._active_query or not self._has_more:
+            return
+        if self._search_thread is not None and self._search_thread.isRunning():
+            return
+
+        self._append_next = True
+        backend_name, api_key = self._resolve_backend()
+        page_token = self._api_page_token if backend_name == "api" else None
+        skip = self._yt_dlp_skip if backend_name != "api" else self._results_list.count()
+
+        self._set_search_in_progress(True)
+        self.clear_status()
+        self._status_label.setText("Searching…")
+        self._search_thread = start_search(
+            query=self._active_query,
+            backend_name=backend_name,
+            api_key=api_key,
+            on_finished=self._on_search_finished,
+            on_failed=self._on_search_failed,
+            parent=self,
+            page_token=page_token,
+            skip=skip,
+        )
+
+    def _set_search_in_progress(self, in_progress: bool) -> None:
+        self._search_btn.setEnabled(not in_progress)
+        if in_progress:
+            self._search_more_btn.setEnabled(False)
+        else:
+            self._update_search_more_button()
+
+    def _on_search_finished(self, page: object) -> None:
+        self._set_search_in_progress(False)
         self._search_thread = None
-        self.set_results(results)
+
+        if not isinstance(page, YouTubeSearchPage):
+            return
+
+        if self._append_next:
+            self.append_results(page.videos)
+            self._append_next = False
+        else:
+            self.set_results(page.videos)
+
+        self._api_page_token = page.next_page_token
+        self._yt_dlp_skip = self._results_list.count()
+        self._has_more = page.has_more
+        self._update_search_more_button()
+        self._update_status_label()
 
     def _on_search_failed(self, message: str) -> None:
-        self._search_btn.setEnabled(True)
+        self._set_search_in_progress(False)
         self._search_thread = None
+        self._append_next = False
         self.show_search_error(message)
 
     def _video_at(self, item: QListWidgetItem | None) -> YouTubeVideo | None:
