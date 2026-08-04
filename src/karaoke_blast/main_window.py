@@ -7,6 +7,7 @@ from PyQt6.QtCore import QEvent, Qt, QThread, QTimer
 from PyQt6.QtGui import QCloseEvent, QKeyEvent, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
+    QDialog,
     QFileDialog,
     QLabel,
     QLineEdit,
@@ -38,7 +39,9 @@ from karaoke_blast.storage.paths import downloads_dir
 from karaoke_blast.storage.settings import Settings
 from karaoke_blast.storage.youtube_play_history import YouTubePlayHistory
 from karaoke_blast.ui.opening_screen import OpeningScreen
+from karaoke_blast.ui.batch_rename_dialog import BatchRenameDialog
 from karaoke_blast.ui.panel_splitter import PanelSplitter
+from karaoke_blast.ui.rename_file_dialog import RenameFileDialog, RenameResult
 from karaoke_blast.ui.recent_folders_panel import RecentFoldersPanel
 from karaoke_blast.ui.song_list_panel import (
     PANEL_DEFAULT_WIDTH,
@@ -244,9 +247,19 @@ class MainWindow(QWidget):
         )
         youtube_btn.clicked.connect(self._enter_youtube_mode)
 
+        rename_btn = QPushButton("Rename Downloads")
+        rename_btn.setFixedSize(180, 48)
+        rename_btn.setStyleSheet(
+            "QPushButton { background: #2d2d42; color: white; border: 1px solid #5a5a72;"
+            " border-radius: 8px; font-size: 16px; font-weight: bold; }"
+            "QPushButton:hover { background: #3a3a52; border-color: #7a7a92; }"
+        )
+        rename_btn.clicked.connect(self._open_batch_rename_dialog)
+
         layout.addWidget(subtitle)
         layout.addWidget(open_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(youtube_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(rename_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self._recent_folders = RecentFoldersPanel()
         self._recent_folders.folder_selected.connect(self._on_start_menu_folder_selected)
@@ -298,6 +311,7 @@ class MainWindow(QWidget):
         self._song_list.history_queue_requested.connect(self._on_history_queue_requested)
         self._song_list.history_remove_requested.connect(self._on_history_remove_requested)
         self._song_list.history_clear_requested.connect(self._on_history_clear_requested)
+        self._song_list.rename_requested.connect(self._on_rename_requested)
 
         self._youtube_panel = YouTubePanel()
         self._youtube_panel.hide()
@@ -1124,6 +1138,89 @@ class MainWindow(QWidget):
             return
         self._playlist.go_to(index)
         self._play_current()
+
+    def _open_batch_rename_dialog(self) -> None:
+        dialog = BatchRenameDialog(
+            initial_folder=downloads_dir(),
+            fmt=self._settings.filename_rename_format,
+            skip_canonical=self._settings.filename_rename_skip_canonical,
+            parent=self,
+        )
+        dialog.file_renamed.connect(self._on_file_renamed)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._settings.filename_rename_format = dialog.format()
+            self._settings.filename_rename_skip_canonical = dialog.skip_canonical()
+            self._settings.save()
+
+    def _on_rename_requested(self, index: int) -> None:
+        if index < 0 or index >= len(self._playlist.paths):
+            return
+        path = self._playlist.paths[index]
+        dialog = RenameFileDialog(
+            path,
+            fmt=self._settings.filename_rename_format,
+            show_format_config=True,
+            rename_button_label="Rename",
+            parent=self,
+        )
+        dialog.file_renamed.connect(self._on_file_renamed)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._settings.filename_rename_format = dialog.format()
+            self._settings.save()
+
+    def _on_file_renamed(self, old_path: Path, new_path: Path) -> None:
+        try:
+            old_resolved = old_path.resolve()
+            new_resolved = new_path.resolve()
+        except OSError:
+            old_resolved = old_path
+            new_resolved = new_path
+
+        self._raw_paths = [
+            new_path if path.resolve() == old_resolved else path for path in self._raw_paths
+        ]
+
+        if self._folder is not None:
+            queue = self._folder_queues.get_queue(self._folder)
+            current = self._folder_queues.get_current(self._folder)
+            updated_queue = [
+                new_path if path.resolve() == old_resolved else path for path in queue
+            ]
+            updated_current = (
+                new_path
+                if current is not None and current.resolve() == old_resolved
+                else current
+            )
+            self._folder_queues.set(
+                self._folder,
+                queue=updated_queue,
+                current=updated_current,
+            )
+
+        for history_path in list(self._local_history.paths()):
+            if history_path.resolve() == old_resolved:
+                self._local_history.remove(history_path)
+                self._local_history.add(new_path)
+
+        if not any(path.resolve() == old_resolved for path in self._playlist.paths):
+            return
+
+        current = self._playlist.current()
+        keep_path = new_path if current is not None and current.resolve() == old_resolved else current
+        old_paths = list(self._playlist.paths)
+        updated_paths = [
+            new_path if path.resolve() == old_resolved else path for path in self._playlist.paths
+        ]
+        sorted_paths = sort_paths(updated_paths, self._sort_strategy)
+        self._remap_play_queue(old_paths, sorted_paths)
+        self._playlist.reorder(sorted_paths, keep_path=keep_path)
+        self._song_list.set_songs(
+            self._playlist.paths,
+            current_index=self._playlist.index,
+            clear_search=False,
+        )
+        self._update_queue_display()
+        self._update_local_history_display()
 
     def _on_sort_changed(self, strategy: SortStrategy) -> None:
         self._sort_strategy = strategy

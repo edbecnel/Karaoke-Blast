@@ -11,27 +11,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-LIST_STYLE = """
-QListWidget {
-    background-color: rgba(255, 255, 255, 12);
-    color: white;
-    border: 1px solid rgba(255, 255, 255, 30);
-    border-radius: 6px;
-    font-size: 13px;
-    outline: none;
-    padding: 4px;
-}
-QListWidget::item {
-    padding: 10px 12px;
-    border-radius: 4px;
-}
-QListWidget::item:selected {
-    background-color: rgba(233, 69, 96, 140);
-}
-QListWidget::item:hover {
-    background-color: rgba(255, 255, 255, 25);
-}
-"""
+from karaoke_blast.ui.list_style import RECENT_FOLDERS_LIST_STYLE
 
 PINNED_LABEL = "YouTube Downloads"
 
@@ -53,7 +33,7 @@ class RecentFoldersPanel(QWidget):
         layout.addWidget(self._heading)
 
         self._list = QListWidget()
-        self._list.setStyleSheet(LIST_STYLE)
+        self._list.setStyleSheet(RECENT_FOLDERS_LIST_STYLE)
         self._list.setMaximumWidth(520)
         self._list.setMinimumHeight(120)
         self._list.setMaximumHeight(280)

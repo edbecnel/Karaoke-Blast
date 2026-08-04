@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 
 from karaoke_blast.storage.paths import config_dir
+from karaoke_blast.utils.filename_rename import FilenameFormat
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,8 @@ class Settings:
         self.youtube_search_backend: str = "yt-dlp"
         self.youtube_api_key: str | None = None
         self.youtube_append_karaoke: bool = True
+        self.filename_rename_format: FilenameFormat = FilenameFormat()
+        self.filename_rename_skip_canonical: bool = True
         self.load()
 
     def load(self) -> None:
@@ -59,6 +62,11 @@ class Settings:
                 self.youtube_api_key = None
             if isinstance(data.get("youtube_append_karaoke"), bool):
                 self.youtube_append_karaoke = data["youtube_append_karaoke"]
+            rename_data = data.get("filename_rename")
+            if isinstance(rename_data, dict):
+                self.filename_rename_format = FilenameFormat.from_dict(rename_data)
+            if isinstance(data.get("filename_rename_skip_canonical"), bool):
+                self.filename_rename_skip_canonical = data["filename_rename_skip_canonical"]
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning("Could not load settings: %s", exc)
 
@@ -73,6 +81,8 @@ class Settings:
             "youtube_search_backend": self.youtube_search_backend,
             "youtube_api_key": self.youtube_api_key,
             "youtube_append_karaoke": self.youtube_append_karaoke,
+            "filename_rename": self.filename_rename_format.to_dict(),
+            "filename_rename_skip_canonical": self.filename_rename_skip_canonical,
         }
         try:
             _settings_file().write_text(

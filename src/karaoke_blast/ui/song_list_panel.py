@@ -20,6 +20,8 @@ from PyQt6.QtWidgets import (
 )
 
 from karaoke_blast.models.sort_strategy import SortStrategy
+from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
+from karaoke_blast.ui.list_style import QUEUE_LIST_STYLE, SIDEBAR_LIST_STYLE
 from karaoke_blast.ui.local_history_panel import LocalHistoryPanel
 from karaoke_blast.ui.panel_splitter import EDGE_GRIP_WIDTH, PanelEdgeGrip
 from karaoke_blast.ui.queue_list_widget import PlayOrderListWidget
@@ -33,46 +35,6 @@ QUEUE_SECTION_MIN_RATIO = 0.12
 QUEUE_SECTION_MAX_RATIO = 0.75
 QUEUE_SECTION_MIN_HEIGHT = 72
 LIST_MIN_HEIGHT = 80
-
-LIST_STYLE = """
-QListWidget {
-    background-color: rgba(20, 20, 30, 230);
-    color: white;
-    border: none;
-    font-size: 13px;
-    outline: none;
-}
-QListWidget::item {
-    padding: 8px 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 20);
-}
-QListWidget::item:selected {
-    background-color: rgba(233, 69, 96, 120);
-}
-QListWidget::item:hover {
-    background-color: rgba(255, 255, 255, 30);
-}
-"""
-
-QUEUE_PANEL_LIST_STYLE = """
-QListWidget {
-    background-color: rgba(20, 20, 30, 120);
-    color: white;
-    border: none;
-    font-size: 12px;
-    outline: none;
-}
-QListWidget::item {
-    padding: 6px 10px;
-    border-bottom: 1px solid rgba(255, 255, 255, 15);
-}
-QListWidget::item:selected {
-    background-color: rgba(233, 69, 96, 120);
-}
-QListWidget::item:hover {
-    background-color: rgba(255, 255, 255, 25);
-}
-"""
 
 COMBO_STYLE = """
 QComboBox {
@@ -155,6 +117,7 @@ class SongListPanel(QWidget):
     history_queue_requested = pyqtSignal(object)
     history_remove_requested = pyqtSignal(object)
     history_clear_requested = pyqtSignal()
+    rename_requested = pyqtSignal(int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -224,7 +187,7 @@ class SongListPanel(QWidget):
         queue_outer.addLayout(queue_header)
 
         self._queue_list = PlayOrderListWidget()
-        self._queue_list.setStyleSheet(QUEUE_PANEL_LIST_STYLE)
+        self._queue_list.setStyleSheet(QUEUE_LIST_STYLE)
         self._queue_list.itemClicked.connect(self._on_item_clicked)
         self._queue_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._queue_list.customContextMenuRequested.connect(self._show_queue_context_menu)
@@ -292,7 +255,7 @@ class SongListPanel(QWidget):
 
         self._list = PlayOrderListWidget()
         self._list.queue_reordered.connect(self.queue_reordered.emit)
-        self._list.setStyleSheet(LIST_STYLE)
+        self._list.setStyleSheet(SIDEBAR_LIST_STYLE)
         self._list.setTextElideMode(Qt.TextElideMode.ElideRight)
         self._list.setMouseTracking(True)
         self._list.setMinimumHeight(LIST_MIN_HEIGHT)
@@ -332,7 +295,7 @@ class SongListPanel(QWidget):
         history_layout.addLayout(history_header)
 
         self._history_list = LocalHistoryPanel()
-        self._history_list.setStyleSheet(LIST_STYLE)
+        self._history_list.setStyleSheet(SIDEBAR_LIST_STYLE)
         self._history_list.setMinimumHeight(LIST_MIN_HEIGHT)
         self._history_list.play_requested.connect(self.history_play_requested)
         self._history_list.queue_requested.connect(self.history_queue_requested)
@@ -463,10 +426,7 @@ class SongListPanel(QWidget):
             return
 
         menu = QMenu(self)
-        menu.setStyleSheet(
-            "QMenu { background-color: #1e1e2e; color: white; border: 1px solid #5a5a72; }"
-            "QMenu::item:selected { background-color: #e94560; }"
-        )
+        menu.setStyleSheet(CONTEXT_MENU_STYLE)
 
         play_now = QAction("Play Now", self)
         play_now.triggered.connect(lambda: self.song_selected.emit(index))
@@ -488,6 +448,10 @@ class SongListPanel(QWidget):
             remove = QAction("Remove", self)
             remove.triggered.connect(lambda: self.remove_from_queue_requested.emit(index))
             menu.addAction(remove)
+
+        rename = QAction("Rename…", self)
+        rename.triggered.connect(lambda: self.rename_requested.emit(index))
+        menu.addAction(rename)
 
         menu.exec(list_widget.mapToGlobal(pos))
 

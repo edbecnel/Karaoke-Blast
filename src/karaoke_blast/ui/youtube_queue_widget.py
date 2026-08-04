@@ -6,29 +6,14 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QColor
 from PyQt6.QtWidgets import QListWidget, QListWidgetItem, QMenu
 
+from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
+from karaoke_blast.ui.list_style import QUEUE_LIST_STYLE
+
 from karaoke_blast.models.youtube_video import YouTubeVideo
 
 _ROLE_VIDEO = Qt.ItemDataRole.UserRole
 
-QUEUE_PANEL_LIST_STYLE = """
-QListWidget {
-    background-color: rgba(20, 20, 30, 120);
-    color: white;
-    border: none;
-    font-size: 12px;
-    outline: none;
-}
-QListWidget::item {
-    padding: 6px 10px;
-    border-bottom: 1px solid rgba(255, 255, 255, 15);
-}
-QListWidget::item:selected {
-    background-color: rgba(233, 69, 96, 120);
-}
-QListWidget::item:hover {
-    background-color: rgba(255, 255, 255, 25);
-}
-"""
+QUEUE_PANEL_LIST_STYLE = QUEUE_LIST_STYLE
 
 
 def format_duration(seconds: int | None) -> str:
@@ -115,10 +100,7 @@ class YouTubeQueueWidget(QListWidget):
             return
 
         menu = QMenu(self)
-        menu.setStyleSheet(
-            "QMenu { background-color: #1e1e2e; color: white; border: 1px solid #5a5a72; }"
-            "QMenu::item:selected { background-color: #e94560; }"
-        )
+        menu.setStyleSheet(CONTEXT_MENU_STYLE)
 
         play_now = QAction("Play Now", self)
         play_now.triggered.connect(lambda: self.play_requested.emit(video))

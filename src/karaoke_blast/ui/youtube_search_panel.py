@@ -23,6 +23,9 @@ from karaoke_blast.services.youtube_search import (
     YouTubeSearchPage,
     start_search,
 )
+from karaoke_blast.ui.checkbox_style import CHECKBOX_STYLE
+from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
+from karaoke_blast.ui.list_style import SIDEBAR_LIST_STYLE
 from karaoke_blast.ui.panel_splitter import EDGE_GRIP_WIDTH, PanelEdgeGrip
 from karaoke_blast.ui.youtube_queue_widget import format_duration
 from karaoke_blast.utils.youtube_query import build_karaoke_query
@@ -51,26 +54,6 @@ QLineEdit:focus {
 }
 """
 
-LIST_STYLE = """
-QListWidget {
-    background-color: rgba(20, 20, 30, 230);
-    color: white;
-    border: none;
-    font-size: 13px;
-    outline: none;
-}
-QListWidget::item {
-    padding: 8px 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 20);
-}
-QListWidget::item:selected {
-    background-color: rgba(233, 69, 96, 120);
-}
-QListWidget::item:hover {
-    background-color: rgba(255, 255, 255, 30);
-}
-"""
-
 SEARCH_BTN_STYLE = (
     "QPushButton { background-color: #e94560; color: white; border: none;"
     " border-radius: 4px; padding: 8px 12px; font-size: 13px; font-weight: bold; }"
@@ -96,27 +79,8 @@ _DISMISS_BTN_STYLE = (
 _STATUS_STYLE = "color: #aaa; font-size: 11px;"
 _ERROR_STYLE = "color: #ff6b81; font-size: 11px;"
 
-_CHECKBOX_STYLE = """
-QCheckBox {
-    color: #b8b8c8;
-    font-size: 12px;
-    spacing: 6px;
-}
-QCheckBox::indicator {
-    width: 14px;
-    height: 14px;
-    border: 1px solid #5a5a72;
-    border-radius: 3px;
-    background-color: #2d2d42;
-}
-QCheckBox::indicator:hover {
-    border-color: #7a7a92;
-}
-QCheckBox::indicator:checked {
-    background-color: #e94560;
-    border-color: #e94560;
-}
-"""
+# Backward-compatible alias for youtube_panel and other imports.
+LIST_STYLE = SIDEBAR_LIST_STYLE
 
 
 class YouTubeSearchPanel(QWidget):
@@ -179,7 +143,7 @@ class YouTubeSearchPanel(QWidget):
         self._append_karaoke_checkbox.setToolTip(
             "Uncheck to search for any YouTube video, not just karaoke versions"
         )
-        self._append_karaoke_checkbox.setStyleSheet(_CHECKBOX_STYLE)
+        self._append_karaoke_checkbox.setStyleSheet(CHECKBOX_STYLE)
         self._append_karaoke_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
         self._append_karaoke_checkbox.toggled.connect(self.append_karaoke_changed.emit)
         layout.addWidget(self._append_karaoke_checkbox)
@@ -216,7 +180,7 @@ class YouTubeSearchPanel(QWidget):
         layout.addLayout(status_row)
 
         self._results_list = QListWidget()
-        self._results_list.setStyleSheet(LIST_STYLE)
+        self._results_list.setStyleSheet(SIDEBAR_LIST_STYLE)
         self._results_list.setMinimumHeight(RESULTS_MIN_HEIGHT)
         self._results_list.itemDoubleClicked.connect(self._on_result_double_clicked)
         self._results_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -441,6 +405,7 @@ class YouTubeSearchPanel(QWidget):
         if video is None:
             return
         menu = QMenu(self)
+        menu.setStyleSheet(CONTEXT_MENU_STYLE)
         play_action = QAction("Play Now", self)
         play_action.triggered.connect(lambda: self.play_requested.emit(video))
         menu.addAction(play_action)
