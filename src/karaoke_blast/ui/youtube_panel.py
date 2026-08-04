@@ -77,6 +77,7 @@ class YouTubePanel(QWidget):
     close_requested = pyqtSignal()
     resize_dragged = pyqtSignal(int)
     search_backend_fallback = pyqtSignal(str)
+    append_karaoke_changed = pyqtSignal(bool)
     history_remove_requested = pyqtSignal(str)
     history_clear_requested = pyqtSignal()
     download_requested = pyqtSignal(object)
@@ -135,6 +136,7 @@ class YouTubePanel(QWidget):
         self._search_panel.close_requested.connect(self.close_requested)
         self._search_panel.resize_dragged.connect(self.resize_dragged)
         self._search_panel.search_backend_fallback.connect(self.search_backend_fallback)
+        self._search_panel.append_karaoke_changed.connect(self.append_karaoke_changed)
         self._search_panel.download_requested.connect(self.download_requested)
 
         self._url_page = QWidget()
@@ -230,6 +232,9 @@ class YouTubePanel(QWidget):
 
     def configure_search(self, *, backend_name: str, api_key: str | None) -> None:
         self._search_panel.configure_search(backend_name=backend_name, api_key=api_key)
+
+    def set_append_karaoke(self, checked: bool) -> None:
+        self._search_panel.set_append_karaoke(checked)
 
     def focus_search(self) -> None:
         self._tabs.setCurrentIndex(0)

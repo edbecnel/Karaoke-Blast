@@ -305,6 +305,8 @@ class MainWindow(QWidget):
             backend_name=self._settings.youtube_search_backend,
             api_key=self._settings.youtube_api_key,
         )
+        self._youtube_panel.set_append_karaoke(self._settings.youtube_append_karaoke)
+        self._youtube_panel.append_karaoke_changed.connect(self._on_append_karaoke_changed)
         self._youtube_panel.play_requested.connect(self._on_youtube_play_requested)
         self._youtube_panel.queue_requested.connect(self._on_youtube_queue_requested)
         self._youtube_panel.remove_from_queue_requested.connect(
@@ -495,6 +497,10 @@ class MainWindow(QWidget):
 
     def _on_queue_split_changed(self, ratio: float) -> None:
         self._settings.queue_section_ratio = ratio
+        self._settings.save()
+
+    def _on_append_karaoke_changed(self, checked: bool) -> None:
+        self._settings.youtube_append_karaoke = checked
         self._settings.save()
 
     def _on_splitter_moved(self, _pos: int, _index: int) -> None:

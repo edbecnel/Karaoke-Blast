@@ -5,6 +5,7 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QColor, QPalette
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -95,6 +96,28 @@ _DISMISS_BTN_STYLE = (
 _STATUS_STYLE = "color: #aaa; font-size: 11px;"
 _ERROR_STYLE = "color: #ff6b81; font-size: 11px;"
 
+_CHECKBOX_STYLE = """
+QCheckBox {
+    color: #b8b8c8;
+    font-size: 12px;
+    spacing: 6px;
+}
+QCheckBox::indicator {
+    width: 14px;
+    height: 14px;
+    border: 1px solid #5a5a72;
+    border-radius: 3px;
+    background-color: #2d2d42;
+}
+QCheckBox::indicator:hover {
+    border-color: #7a7a92;
+}
+QCheckBox::indicator:checked {
+    background-color: #e94560;
+    border-color: #e94560;
+}
+"""
+
 
 class YouTubeSearchPanel(QWidget):
     """Left sidebar for searching YouTube and managing the queue."""
@@ -105,6 +128,7 @@ class YouTubeSearchPanel(QWidget):
     close_requested = pyqtSignal()
     resize_dragged = pyqtSignal(int)
     search_backend_fallback = pyqtSignal(str)
+    append_karaoke_changed = pyqtSignal(bool)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -149,6 +173,16 @@ class YouTubeSearchPanel(QWidget):
 
         self._artist_input = self._make_input("Artist / band (optional)")
         layout.addWidget(self._artist_input)
+
+        self._append_karaoke_checkbox = QCheckBox('Append "karaoke" to search')
+        self._append_karaoke_checkbox.setChecked(True)
+        self._append_karaoke_checkbox.setToolTip(
+            "Uncheck to search for any YouTube video, not just karaoke versions"
+        )
+        self._append_karaoke_checkbox.setStyleSheet(_CHECKBOX_STYLE)
+        self._append_karaoke_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._append_karaoke_checkbox.toggled.connect(self.append_karaoke_changed.emit)
+        layout.addWidget(self._append_karaoke_checkbox)
 
         search_row = QHBoxLayout()
         search_row.setSpacing(8)
@@ -210,6 +244,11 @@ class YouTubeSearchPanel(QWidget):
     def configure_search(self, *, backend_name: str, api_key: str | None) -> None:
         self._backend_name = backend_name
         self._api_key = api_key
+
+    def set_append_karaoke(self, checked: bool) -> None:
+        self._append_karaoke_checkbox.blockSignals(True)
+        self._append_karaoke_checkbox.setChecked(checked)
+        self._append_karaoke_checkbox.blockSignals(False)
 
     def focus_search(self) -> None:
         self._song_input.setFocus()
@@ -298,7 +337,11 @@ class YouTubeSearchPanel(QWidget):
         return backend_name, api_key
 
     def _start_search(self) -> None:
-        query = build_karaoke_query(self._song_input.text(), self._artist_input.text())
+        query = build_karaoke_query(
+            self._song_input.text(),
+            self._artist_input.text(),
+            append_karaoke=self._append_karaoke_checkbox.isChecked(),
+        )
         if not query:
             self._show_input_error("Enter a song name to search.")
             return

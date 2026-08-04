@@ -25,6 +25,7 @@ class Settings:
         self.queue_section_ratio: float | None = None
         self.youtube_search_backend: str = "yt-dlp"
         self.youtube_api_key: str | None = None
+        self.youtube_append_karaoke: bool = True
         self.load()
 
     def load(self) -> None:
@@ -56,6 +57,8 @@ class Settings:
                 self.youtube_api_key = api_key.strip()
             elif api_key is None:
                 self.youtube_api_key = None
+            if isinstance(data.get("youtube_append_karaoke"), bool):
+                self.youtube_append_karaoke = data["youtube_append_karaoke"]
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning("Could not load settings: %s", exc)
 
@@ -69,6 +72,7 @@ class Settings:
             "queue_section_ratio": self.queue_section_ratio,
             "youtube_search_backend": self.youtube_search_backend,
             "youtube_api_key": self.youtube_api_key,
+            "youtube_append_karaoke": self.youtube_append_karaoke,
         }
         try:
             _settings_file().write_text(
