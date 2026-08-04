@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import sys
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
@@ -20,11 +21,36 @@ VLC_FORMAT = (
     "best[ext=mp4]/best"
 )
 
-# GUI launches on macOS often omit Homebrew from PATH.
-_FFMPEG_SEARCH_DIRS = (
+# GUI launches often omit Homebrew / WinGet shim dirs from PATH.
+_MAC_FFMPEG_SEARCH_DIRS = (
     "/opt/homebrew/bin",
     "/usr/local/bin",
 )
+
+
+def _ffmpeg_search_dirs() -> list[str]:
+    dirs: list[str] = []
+    if sys.platform == "darwin":
+        dirs.extend(_MAC_FFMPEG_SEARCH_DIRS)
+    elif sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA", "")
+        if local:
+            winget_links = Path(local) / "Microsoft" / "WinGet" / "Links"
+            if winget_links.is_dir():
+                dirs.append(str(winget_links))
+            winget_packages = Path(local) / "Microsoft" / "WinGet" / "Packages"
+            if winget_packages.is_dir():
+                for package_dir in winget_packages.iterdir():
+                    if not package_dir.is_dir() or "ffmpeg" not in package_dir.name.lower():
+                        continue
+                    for candidate in package_dir.glob("*/bin"):
+                        if candidate.is_dir():
+                            dirs.append(str(candidate))
+    return [d for d in dirs if os.path.isdir(d)]
+
+
+def _ffmpeg_binary_names() -> tuple[str, ...]:
+  return ("ffmpeg.exe", "ffmpeg") if sys.platform == "win32" else ("ffmpeg",)
 
 
 def resolve_ffmpeg_location() -> str | None:
@@ -33,16 +59,17 @@ def resolve_ffmpeg_location() -> str | None:
     if found:
         return found
 
-    extra_dirs = [d for d in _FFMPEG_SEARCH_DIRS if os.path.isdir(d)]
+    extra_dirs = _ffmpeg_search_dirs()
     if extra_dirs:
         found = shutil.which("ffmpeg", path=os.pathsep.join(extra_dirs))
         if found:
             return found
 
     for directory in extra_dirs:
-        candidate = Path(directory) / "ffmpeg"
-        if candidate.is_file():
-            return str(candidate)
+        for name in _ffmpeg_binary_names():
+            candidate = Path(directory) / name
+            if candidate.is_file():
+                return str(candidate)
 
     return None
 
