@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPalette
 from PyQt6.QtWidgets import (
@@ -17,6 +19,7 @@ from PyQt6.QtWidgets import (
 from karaoke_blast.models.youtube_video import YouTubeVideo
 from karaoke_blast.ui.panel_splitter import EDGE_GRIP_WIDTH
 from karaoke_blast.ui.youtube_download_status import YouTubeDownloadStatus
+from karaoke_blast.ui.youtube_downloads_folder_row import YouTubeDownloadsFolderRow
 from karaoke_blast.ui.youtube_history_panel import YouTubeHistoryPanel
 from karaoke_blast.ui.youtube_queue_widget import QUEUE_PANEL_LIST_STYLE, YouTubeQueueWidget
 from karaoke_blast.ui.youtube_search_panel import (
@@ -81,6 +84,7 @@ class YouTubePanel(QWidget):
     history_remove_requested = pyqtSignal(str)
     history_clear_requested = pyqtSignal()
     download_requested = pyqtSignal(object)
+    browse_downloads_folder_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -126,6 +130,12 @@ class YouTubePanel(QWidget):
 
         self._download_status = YouTubeDownloadStatus()
         layout.addWidget(self._download_status)
+
+        self._downloads_folder_row = YouTubeDownloadsFolderRow()
+        self._downloads_folder_row.browse_clicked.connect(
+            self.browse_downloads_folder_requested.emit
+        )
+        layout.addWidget(self._downloads_folder_row)
 
         self._tabs = QTabWidget()
         self._tabs.setStyleSheet(TAB_STYLE)
@@ -229,6 +239,9 @@ class YouTubePanel(QWidget):
         self._tabs.addTab(self._url_page, "Paste URL")
         self._tabs.addTab(history_tab, "History")
         layout.addWidget(self._tabs, 1)
+
+    def set_downloads_folder(self, path: Path) -> None:
+        self._downloads_folder_row.set_folder(path)
 
     def configure_search(self, *, backend_name: str, api_key: str | None) -> None:
         self._search_panel.configure_search(backend_name=backend_name, api_key=api_key)

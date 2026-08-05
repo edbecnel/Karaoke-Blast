@@ -35,7 +35,6 @@ from karaoke_blast.services.youtube_download import downloaded_file_for, start_d
 from karaoke_blast.storage.folder_history import FolderHistory
 from karaoke_blast.storage.folder_queues import FolderQueues
 from karaoke_blast.storage.local_play_history import LocalPlayHistory
-from karaoke_blast.storage.paths import downloads_dir
 from karaoke_blast.storage.settings import Settings
 from karaoke_blast.storage.youtube_play_history import YouTubePlayHistory
 from karaoke_blast.ui.opening_screen import OpeningScreen
@@ -43,6 +42,7 @@ from karaoke_blast.ui.batch_rename_dialog import BatchRenameDialog
 from karaoke_blast.ui.panel_splitter import PanelSplitter
 from karaoke_blast.ui.rename_file_dialog import RenameFileDialog, RenameResult
 from karaoke_blast.ui.recent_folders_panel import RecentFoldersPanel
+from karaoke_blast.ui.youtube_downloads_folder_row import YouTubeDownloadsFolderRow
 from karaoke_blast.ui.song_list_panel import (
     PANEL_DEFAULT_WIDTH,
     PANEL_MAX_WIDTH,
@@ -265,12 +265,42 @@ class MainWindow(QWidget):
         self._recent_folders.folder_selected.connect(self._on_start_menu_folder_selected)
         layout.addSpacing(8)
         layout.addWidget(self._recent_folders, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self._startup_downloads_folder_row = YouTubeDownloadsFolderRow(sidebar=False)
+        self._startup_downloads_folder_row.setMaximumWidth(520)
+        self._startup_downloads_folder_row.browse_clicked.connect(
+            self._browse_youtube_downloads_folder
+        )
+        layout.addWidget(self._startup_downloads_folder_row, alignment=Qt.AlignmentFlag.AlignCenter)
+        self._update_downloads_folder_display()
         self._refresh_recent_folders()
 
         return page
 
+    def _youtube_downloads_path(self) -> Path:
+        return self._settings.resolved_youtube_downloads_dir()
+
+    def _update_downloads_folder_display(self) -> None:
+        path = self._youtube_downloads_path()
+        self._startup_downloads_folder_row.set_folder(path)
+        if hasattr(self, "_youtube_panel"):
+            self._youtube_panel.set_downloads_folder(path)
+
+    def _browse_youtube_downloads_folder(self) -> None:
+        current = self._youtube_downloads_path()
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Select YouTube Download Folder",
+            str(current),
+        )
+        if not folder:
+            return
+        self._settings.set_youtube_downloads_dir(Path(folder))
+        self._update_downloads_folder_display()
+        self._refresh_recent_folders()
+
     def _refresh_recent_folders(self) -> None:
-        downloads = downloads_dir()
+        downloads = self._youtube_downloads_path()
         recent = [
             folder
             for folder in self._folder_history.folders()
@@ -279,7 +309,7 @@ class MainWindow(QWidget):
         self._recent_folders.set_folders(recent, pinned=[downloads])
 
     def _on_start_menu_folder_selected(self, folder: Path) -> None:
-        allow_empty = folder.resolve() == downloads_dir().resolve()
+        allow_empty = folder.resolve() == self._youtube_downloads_path().resolve()
         self._load_folder(folder, allow_empty=allow_empty)
 
     def _build_player_page(self) -> QWidget:
@@ -333,6 +363,10 @@ class MainWindow(QWidget):
         self._youtube_panel.history_remove_requested.connect(self._on_youtube_history_remove)
         self._youtube_panel.history_clear_requested.connect(self._on_youtube_history_clear)
         self._youtube_panel.download_requested.connect(self._on_youtube_download_requested)
+        self._youtube_panel.browse_downloads_folder_requested.connect(
+            self._browse_youtube_downloads_folder
+        )
+        self._youtube_panel.set_downloads_folder(self._youtube_downloads_path())
 
         self._left_panel_stack = QStackedWidget()
         self._left_panel_stack.addWidget(self._song_list)
@@ -1076,8 +1110,9 @@ class MainWindow(QWidget):
             self._show_toast("A download is already in progress.", duration_ms=4000)
             return
 
-        downloads_dir().mkdir(parents=True, exist_ok=True)
-        existing = downloaded_file_for(video.video_id)
+        output_dir = self._youtube_downloads_path()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        existing = downloaded_file_for(video.video_id, output_dir)
         if existing is not None:
             self._youtube_panel.show_download_success(
                 video.title,
@@ -1091,6 +1126,7 @@ class MainWindow(QWidget):
         self._youtube_panel.show_downloading(video.title)
         self._download_thread, _worker = start_download(
             video=video,
+            output_dir=output_dir,
             on_progress=self._on_youtube_download_progress,
             on_finished=self._on_youtube_download_finished,
             on_failed=self._on_youtube_download_failed,
@@ -1102,7 +1138,7 @@ class MainWindow(QWidget):
         self._youtube_panel.update_download_progress(title, percent, status)
 
     def _on_youtube_download_finished(self, path: Path, video: YouTubeVideo) -> None:
-        self._folder_history.add(downloads_dir())
+        self._folder_history.add(self._youtube_downloads_path())
         self._refresh_recent_folders()
         self._youtube_panel.show_download_success(
             video.title,
@@ -1121,15 +1157,16 @@ class MainWindow(QWidget):
         self._downloading_video = None
 
     def _offer_open_downloads(self) -> None:
+        downloads_path = self._youtube_downloads_path()
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Information)
         box.setWindowTitle("Download Complete")
-        box.setText("Video saved to your YouTube downloads folder.")
+        box.setText(f"Video saved to:\n{downloads_path}")
         open_btn = box.addButton("Open Downloads", QMessageBox.ButtonRole.AcceptRole)
         box.addButton("Dismiss", QMessageBox.ButtonRole.RejectRole)
         box.exec()
         if box.clickedButton() == open_btn:
-            self._load_folder(downloads_dir(), allow_empty=True)
+            self._load_folder(downloads_path, allow_empty=True)
 
     def _on_song_selected(self, index: int) -> None:
         if self._media_mode != MediaSourceMode.LOCAL:
@@ -1141,7 +1178,7 @@ class MainWindow(QWidget):
 
     def _open_batch_rename_dialog(self) -> None:
         dialog = BatchRenameDialog(
-            initial_folder=downloads_dir(),
+            initial_folder=self._youtube_downloads_path(),
             fmt=self._settings.filename_rename_format,
             skip_canonical=self._settings.filename_rename_skip_canonical,
             parent=self,

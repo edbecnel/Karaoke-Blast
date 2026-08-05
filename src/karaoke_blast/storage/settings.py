@@ -4,7 +4,7 @@ import json
 import logging
 from pathlib import Path
 
-from karaoke_blast.storage.paths import config_dir
+from karaoke_blast.storage.paths import config_dir, default_downloads_dir
 from karaoke_blast.utils.filename_rename import FilenameFormat
 
 logger = logging.getLogger(__name__)
@@ -27,6 +27,7 @@ class Settings:
         self.youtube_search_backend: str = "yt-dlp"
         self.youtube_api_key: str | None = None
         self.youtube_append_karaoke: bool = True
+        self.youtube_downloads_dir: str | None = None
         self.filename_rename_format: FilenameFormat = FilenameFormat()
         self.filename_rename_skip_canonical: bool = True
         self.load()
@@ -62,6 +63,11 @@ class Settings:
                 self.youtube_api_key = None
             if isinstance(data.get("youtube_append_karaoke"), bool):
                 self.youtube_append_karaoke = data["youtube_append_karaoke"]
+            downloads_dir = data.get("youtube_downloads_dir")
+            if isinstance(downloads_dir, str) and downloads_dir.strip():
+                self.youtube_downloads_dir = downloads_dir.strip()
+            elif downloads_dir is None:
+                self.youtube_downloads_dir = None
             rename_data = data.get("filename_rename")
             if isinstance(rename_data, dict):
                 self.filename_rename_format = FilenameFormat.from_dict(rename_data)
@@ -81,6 +87,7 @@ class Settings:
             "youtube_search_backend": self.youtube_search_backend,
             "youtube_api_key": self.youtube_api_key,
             "youtube_append_karaoke": self.youtube_append_karaoke,
+            "youtube_downloads_dir": self.youtube_downloads_dir,
             "filename_rename": self.filename_rename_format.to_dict(),
             "filename_rename_skip_canonical": self.filename_rename_skip_canonical,
         }
@@ -90,3 +97,22 @@ class Settings:
             )
         except OSError as exc:
             logger.warning("Could not save settings: %s", exc)
+
+    def resolved_youtube_downloads_dir(self) -> Path:
+        """Return the configured YouTube downloads folder, or the default."""
+        if self.youtube_downloads_dir:
+            path = Path(self.youtube_downloads_dir)
+            if path.is_dir():
+                return path
+            logger.warning(
+                "Configured YouTube downloads folder is unavailable, using default: %s",
+                self.youtube_downloads_dir,
+            )
+        return default_downloads_dir()
+
+    def set_youtube_downloads_dir(self, path: Path) -> None:
+        """Persist a custom YouTube downloads folder."""
+        resolved = path.resolve()
+        resolved.mkdir(parents=True, exist_ok=True)
+        self.youtube_downloads_dir = str(resolved)
+        self.save()

@@ -11,7 +11,7 @@ from pathlib import Path
 from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
 
 from karaoke_blast.models.youtube_video import YouTubeVideo
-from karaoke_blast.storage.paths import downloads_dir
+from karaoke_blast.storage.paths import default_downloads_dir
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ def resolve_ffmpeg_location() -> str | None:
 
 def downloaded_file_for(video_id: str, folder: Path | None = None) -> Path | None:
     """Return an existing download path for *video_id*, if any."""
-    target_dir = folder or downloads_dir()
+    target_dir = folder or default_downloads_dir()
     if not target_dir.is_dir():
         return None
     suffix = f" [{video_id}]."
@@ -117,9 +117,11 @@ class YouTubeDownloadWorker(QObject):
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._video: YouTubeVideo | None = None
+        self._output_dir: Path | None = None
 
-    def run_download(self, video: YouTubeVideo) -> None:
+    def run_download(self, video: YouTubeVideo, output_dir: Path) -> None:
         self._video = video
+        self._output_dir = output_dir
         try:
             import yt_dlp
             from yt_dlp.utils import DownloadError
@@ -135,7 +137,11 @@ class YouTubeDownloadWorker(QObject):
                 )
                 return
 
-            output_dir = downloads_dir()
+            output_dir = self._output_dir
+            if output_dir is None:
+                self.download_failed.emit(video.video_id, "Download folder was not configured.")
+                return
+            output_dir.mkdir(parents=True, exist_ok=True)
             existing = downloaded_file_for(video.video_id, output_dir)
             if existing is not None:
                 self.download_finished.emit(existing, video)
@@ -185,6 +191,7 @@ class YouTubeDownloadWorker(QObject):
 def start_download(
     *,
     video: YouTubeVideo,
+    output_dir: Path,
     on_progress,
     on_finished,
     on_failed,
@@ -194,7 +201,7 @@ def start_download(
     thread = QThread(parent)
     worker = YouTubeDownloadWorker()
     worker.moveToThread(thread)
-    thread.started.connect(lambda: worker.run_download(video))
+    thread.started.connect(lambda: worker.run_download(video, output_dir))
     worker.progress_updated.connect(on_progress, Qt.ConnectionType.QueuedConnection)
     worker.download_finished.connect(on_finished, Qt.ConnectionType.QueuedConnection)
     worker.download_failed.connect(on_failed, Qt.ConnectionType.QueuedConnection)

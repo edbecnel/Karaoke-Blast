@@ -117,11 +117,23 @@ Download YouTube videos for offline playback in the local VLC player:
 
 Downloads run in the background — you can keep playing and searching YouTube while a download is in progress. Progress, success, and failure are shown in the status area below the queue panel. Only one download runs at a time.
 
-Videos are saved as VLC-compatible **MP4** files (H.264 video + AAC audio when available) in the app's **YouTube Downloads** folder:
+Videos are saved as VLC-compatible **MP4** files (H.264 video + AAC audio when available). By default they go to the app's **YouTube Downloads** folder:
 
 - macOS: `~/Library/Application Support/Karaoke Blast/youtube-downloads`
 - Linux: `~/.config/karaoke-blast/youtube-downloads`
 - Windows: `%APPDATA%\Karaoke Blast\youtube-downloads`
+
+Use **Change…** on the startup screen or in the YouTube panel (below the download status) to pick a different folder. The choice is saved across sessions. Changing the folder does not move existing downloads.
+
+You can also set the path manually in `settings.json`:
+
+```json
+{
+  "youtube_downloads_dir": "D:\\Karaoke\\YouTube"
+}
+```
+
+Omit `youtube_downloads_dir` or set it to `null` to use the default folder above.
 
 **YouTube Downloads** appears as a pinned folder on the startup screen. Click it to open your downloads in the local player. When the folder is empty, the player opens with a message prompting you to download videos from YouTube mode.
 
@@ -131,8 +143,9 @@ After a successful download, you are prompted to **Open Downloads** in the local
 
 By default, searches use **yt-dlp** (no API key required). To use the official **YouTube Data API** instead, edit your settings file:
 
-- macOS / Linux: `~/.config/karaoke-blast/settings.json`
-- Windows: `%APPDATA%\karaoke-blast\settings.json`
+- macOS: `~/Library/Application Support/Karaoke Blast/settings.json`
+- Linux: `~/.config/karaoke-blast/settings.json`
+- Windows: `%APPDATA%\Karaoke Blast\settings.json`
 
 ```json
 {
@@ -164,6 +177,8 @@ Set `youtube_search_backend` to `"yt-dlp"` to switch back. If the API key is mis
 - [ ] Can play and search YouTube while a download is in progress
 - [ ] Second download while one is active shows a notice
 - [ ] Re-downloading an existing video reports it is already downloaded
+- [ ] **Change…** on startup screen and YouTube panel opens a folder picker
+- [ ] Custom download folder persists after restart and is used for new downloads
 
 ## Roadmap
 

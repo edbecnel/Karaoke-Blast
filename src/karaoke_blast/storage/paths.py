@@ -16,8 +16,8 @@ def config_dir() -> Path:
     return path
 
 
-def downloads_dir() -> Path:
-    """Directory for YouTube videos downloaded for offline playback."""
+def default_downloads_dir() -> Path:
+    """Default directory for YouTube videos downloaded for offline playback."""
     path = config_dir() / "youtube-downloads"
     path.mkdir(parents=True, exist_ok=True)
     return path
