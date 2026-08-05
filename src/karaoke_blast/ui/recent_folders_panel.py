@@ -3,23 +3,30 @@
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QVBoxLayout,
     QWidget,
 )
 
+from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
 from karaoke_blast.ui.list_style import RECENT_FOLDERS_LIST_STYLE
 
 PINNED_LABEL = "YouTube Downloads"
+
+_ROLE_FOLDER = Qt.ItemDataRole.UserRole
+_ROLE_PINNED = Qt.ItemDataRole.UserRole + 1
 
 
 class RecentFoldersPanel(QWidget):
     """Shows pinned and recently opened folders for quick selection."""
 
     folder_selected = pyqtSignal(object)
+    folder_remove_requested = pyqtSignal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -38,6 +45,8 @@ class RecentFoldersPanel(QWidget):
         self._list.setMinimumHeight(120)
         self._list.setMaximumHeight(280)
         self._list.itemClicked.connect(self._on_item_clicked)
+        self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._list.customContextMenuRequested.connect(self._show_context_menu)
         layout.addWidget(self._list, alignment=Qt.AlignmentFlag.AlignCenter)
 
     def set_folders(
@@ -57,19 +66,45 @@ class RecentFoldersPanel(QWidget):
 
         for folder in pinned_paths:
             item = QListWidgetItem(PINNED_LABEL)
-            item.setData(Qt.ItemDataRole.UserRole, folder)
+            item.setData(_ROLE_FOLDER, folder)
+            item.setData(_ROLE_PINNED, True)
             item.setToolTip(str(folder))
             self._list.addItem(item)
 
         for folder in recent:
             item = QListWidgetItem(folder.name)
-            item.setData(Qt.ItemDataRole.UserRole, folder)
+            item.setData(_ROLE_FOLDER, folder)
+            item.setData(_ROLE_PINNED, False)
             item.setToolTip(str(folder))
             self._list.addItem(item)
 
         self.show()
 
+    def _folder_from_item(self, item: QListWidgetItem | None) -> Path | None:
+        if item is None:
+            return None
+        folder = item.data(_ROLE_FOLDER)
+        return folder if isinstance(folder, Path) else None
+
+    def _is_pinned_item(self, item: QListWidgetItem) -> bool:
+        return bool(item.data(_ROLE_PINNED))
+
     def _on_item_clicked(self, item: QListWidgetItem) -> None:
-        folder = item.data(Qt.ItemDataRole.UserRole)
+        folder = self._folder_from_item(item)
         if folder is not None:
             self.folder_selected.emit(folder)
+
+    def _show_context_menu(self, pos) -> None:
+        item = self._list.itemAt(pos)
+        folder = self._folder_from_item(item)
+        if folder is None or self._is_pinned_item(item):
+            return
+
+        menu = QMenu(self)
+        menu.setStyleSheet(CONTEXT_MENU_STYLE)
+
+        remove = QAction("Remove from List", self)
+        remove.triggered.connect(lambda: self.folder_remove_requested.emit(folder))
+        menu.addAction(remove)
+
+        menu.exec(self._list.mapToGlobal(pos))

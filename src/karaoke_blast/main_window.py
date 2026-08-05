@@ -263,6 +263,9 @@ class MainWindow(QWidget):
 
         self._recent_folders = RecentFoldersPanel()
         self._recent_folders.folder_selected.connect(self._on_start_menu_folder_selected)
+        self._recent_folders.folder_remove_requested.connect(
+            self._on_recent_folder_remove_requested
+        )
         layout.addSpacing(8)
         layout.addWidget(self._recent_folders, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -311,6 +314,10 @@ class MainWindow(QWidget):
     def _on_start_menu_folder_selected(self, folder: Path) -> None:
         allow_empty = folder.resolve() == self._youtube_downloads_path().resolve()
         self._load_folder(folder, allow_empty=allow_empty)
+
+    def _on_recent_folder_remove_requested(self, folder: Path) -> None:
+        self._folder_history.remove(folder)
+        self._refresh_recent_folders()
 
     def _build_player_page(self) -> QWidget:
         page = QWidget()

@@ -37,7 +37,7 @@ pip install -e .
 python -m karaoke_blast
 ```
 
-Open a folder containing video files (`.mp4`, `.mkv`, `.avi`, `.mov`, `.webm`, `.m4v`) and playback starts automatically in full screen. Recently opened folders appear on the startup screen for quick access.
+Open a folder containing video files (`.mp4`, `.mkv`, `.avi`, `.mov`, `.webm`, `.m4v`) and playback starts automatically in full screen. Recently opened folders appear on the startup screen for quick access. Right-click a recent folder and choose **Remove from List** to hide it from the list.
 
 You can also click **Search YouTube** on the startup screen to find and play karaoke videos online without downloading them first.
 
@@ -179,6 +179,7 @@ Set `youtube_search_backend` to `"yt-dlp"` to switch back. If the API key is mis
 - [ ] Re-downloading an existing video reports it is already downloaded
 - [ ] **Change…** on startup screen and YouTube panel opens a folder picker
 - [ ] Custom download folder persists after restart and is used for new downloads
+- [ ] Right-click **Remove from List** on a recent folder removes it from the startup list after restart
 
 ## Roadmap
 

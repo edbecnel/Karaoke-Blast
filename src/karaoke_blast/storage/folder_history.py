@@ -50,6 +50,11 @@ class FolderHistory:
         self._paths = self._paths[:MAX_HISTORY]
         self.save()
 
+    def remove(self, folder: Path) -> None:
+        folder = folder.resolve()
+        self._paths = [p for p in self._paths if p != folder]
+        self.save()
+
     def folders(self) -> list[Path]:
         self._prune_missing()
         return list(self._paths)
