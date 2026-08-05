@@ -190,6 +190,9 @@
   },
   "active": "e4942ac9261cd955",
   "lastOpenFiles": [
+    "scripts/__pycache__/rename_karaoke.cpython-314.pyc",
+    "scripts/__pycache__/build_app_icon.cpython-314.pyc",
+    "scripts/__pycache__",
     "src/karaoke_blast/ui/__pycache__/youtube_downloads_folder_row.cpython-314.pyc",
     "src/karaoke_blast/ui/youtube_downloads_folder_row.py",
     "src/karaoke_blast/services/__pycache__/youtube_download.cpython-313.pyc",
@@ -197,9 +200,6 @@
     "src/karaoke_blast/services/__pycache__/youtube_download.cpython-314.pyc",
     "src/karaoke_blast/ui/youtube_download_status.py",
     "src/karaoke_blast/services/youtube_download.py",
-    "src/karaoke_blast/ui/__pycache__/youtube_history_panel.cpython-314.pyc",
-    "src/karaoke_blast/ui/__pycache__/local_history_panel.cpython-314.pyc",
-    "src/karaoke_blast/storage/__pycache__/youtube_play_history.cpython-314.pyc",
-    "src/karaoke_blast/storage/__pycache__/local_play_history.cpython-314.pyc"
+    "src/karaoke_blast/ui/__pycache__/youtube_history_panel.cpython-314.pyc"
   ]
 }

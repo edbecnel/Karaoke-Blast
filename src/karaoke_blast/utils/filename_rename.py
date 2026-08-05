@@ -10,73 +10,188 @@ _YOUTUBE_ID_SUFFIX = re.compile(r"\s*\[[\w-]{6,}\]\s*$")
 _INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*]')
 _SPLIT_DELIMITERS = re.compile(r"\s*[-–—|｜]\s*|\s*\|\s*|_+|\s*\(\s*|\s*\)\s*")
 
-DEFAULT_SLOT_NAMES = ("Song Name", "Artist Name")
-DEFAULT_SEPARATORS = (" - ", " - ")
-DEFAULT_SUFFIX_TEXT = "Karaoke"
+SLOT_KIND_SONG = "song"
+SLOT_KIND_ARTIST = "artist"
+SLOT_KIND_ADDITIONAL = "additional"
+
+DEFAULT_SEPARATORS = (" - ", " - ", " - ")
+SLOT_COUNT = 4
+SEPARATOR_COUNT = 3
+
+# Legacy keys for migration
+_LEGACY_DEFAULT_SLOT_NAMES = ("Song Name", "Artist Name")
+_LEGACY_DEFAULT_SUFFIX = "Karaoke"
+
+
+@dataclass
+class FormatSlot:
+    """One position in the filename format."""
+
+    kind: str
+    label: str
+    enabled: bool = True
+    hint: str = ""
+    hint_fixed: bool = False
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "kind": self.kind,
+            "label": self.label,
+            "enabled": self.enabled,
+            "hint": self.hint,
+            "hint_fixed": self.hint_fixed,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> FormatSlot:
+        kind = str(data.get("kind", SLOT_KIND_ADDITIONAL))
+        label = str(data.get("label", "Additional"))
+        enabled = bool(data.get("enabled", True))
+        hint = str(data.get("hint", "")) if data.get("hint") is not None else ""
+        if "hint_fixed" in data:
+            hint_fixed = bool(data.get("hint_fixed", False))
+        elif hint and kind == SLOT_KIND_ADDITIONAL and hint == label:
+            hint_fixed = True
+        else:
+            hint_fixed = False
+        return cls(kind=kind, label=label, enabled=enabled, hint=hint, hint_fixed=hint_fixed)
 
 
 @dataclass
 class FilenameFormat:
-    """Configurable filename layout: slots, separators, and optional suffix."""
+    """Configurable filename layout: four reorderable slots and three separators."""
 
-    slot_names: list[str] = field(default_factory=lambda: list(DEFAULT_SLOT_NAMES))
+    slots: list[FormatSlot] = field(default_factory=list)
     separators: list[str] = field(default_factory=lambda: list(DEFAULT_SEPARATORS))
-    suffix_enabled: bool = True
-    suffix_text: str = DEFAULT_SUFFIX_TEXT
 
-    def normalized_separators(self) -> list[str]:
-        """Return separators sized for the current slot/suffix configuration."""
-        needed = len(self.slot_names) - 1
-        if self.suffix_enabled and self.suffix_text:
-            needed += 1
-        separators = list(self.separators[:needed])
-        while len(separators) < needed:
-            separators.append(" - ")
-        return separators
+    def __post_init__(self) -> None:
+        self._normalize_shape()
+
+    def _normalize_shape(self) -> None:
+        while len(self.slots) < SLOT_COUNT:
+            self.slots.append(
+                FormatSlot(SLOT_KIND_ADDITIONAL, "Additional", enabled=False, hint="")
+            )
+        self.slots = self.slots[:SLOT_COUNT]
+        while len(self.separators) < SEPARATOR_COUNT:
+            self.separators.append(" - ")
+        self.separators = self.separators[:SEPARATOR_COUNT]
+
+    def enabled_slot_indices(self) -> list[int]:
+        return [index for index, slot in enumerate(self.slots) if slot.enabled]
+
+    def song_slot_index(self) -> int | None:
+        for index, slot in enumerate(self.slots):
+            if slot.kind == SLOT_KIND_SONG:
+                return index
+        return None
+
+    def slot_label(self, index: int) -> str:
+        return self.slots[index].label
 
     def to_dict(self) -> dict[str, object]:
+        self._normalize_shape()
         return {
-            "slot_names": list(self.slot_names),
+            "slots": [slot.to_dict() for slot in self.slots],
             "separators": list(self.separators),
-            "suffix_enabled": self.suffix_enabled,
-            "suffix_text": self.suffix_text,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, object] | None) -> FilenameFormat:
         if not data:
             return DEFAULT_KARAOKE_FORMAT.copy()
-        slot_names = data.get("slot_names", DEFAULT_SLOT_NAMES)
+        if "slots" in data:
+            return cls._from_new_dict(data)
+        return cls._migrate_legacy_dict(data)
+
+    @classmethod
+    def _from_new_dict(cls, data: dict[str, object]) -> FilenameFormat:
+        raw_slots = data.get("slots", [])
         separators = data.get("separators", DEFAULT_SEPARATORS)
-        suffix_enabled = data.get("suffix_enabled", True)
-        suffix_text = data.get("suffix_text", DEFAULT_SUFFIX_TEXT)
+        slots: list[FormatSlot] = []
+        if isinstance(raw_slots, list):
+            for entry in raw_slots:
+                if isinstance(entry, dict):
+                    slots.append(FormatSlot.from_dict(entry))
         fmt = cls(
-            slot_names=[str(name) for name in slot_names] if isinstance(slot_names, list) else list(DEFAULT_SLOT_NAMES),
-            separators=[str(sep) for sep in separators] if isinstance(separators, list) else list(DEFAULT_SEPARATORS),
-            suffix_enabled=bool(suffix_enabled),
-            suffix_text=str(suffix_text) if isinstance(suffix_text, str) else DEFAULT_SUFFIX_TEXT,
+            slots=slots,
+            separators=[str(sep) for sep in separators]
+            if isinstance(separators, list)
+            else list(DEFAULT_SEPARATORS),
         )
-        if not fmt.slot_names:
-            fmt.slot_names = list(DEFAULT_SLOT_NAMES)
+        fmt._normalize_shape()
         return fmt
+
+    @classmethod
+    def _migrate_legacy_dict(cls, data: dict[str, object]) -> FilenameFormat:
+        slot_names = data.get("slot_names", _LEGACY_DEFAULT_SLOT_NAMES)
+        separators = data.get("separators", (" - ", " - "))
+        suffix_enabled = bool(data.get("suffix_enabled", True))
+        suffix_text = str(data.get("suffix_text", _LEGACY_DEFAULT_SUFFIX))
+
+        names = (
+            [str(name) for name in slot_names]
+            if isinstance(slot_names, list)
+            else list(_LEGACY_DEFAULT_SLOT_NAMES)
+        )
+        song_label = names[0] if names else "Song Name"
+        artist_label = names[1] if len(names) > 1 else "Artist Name"
+
+        legacy_seps = (
+            [str(sep) for sep in separators]
+            if isinstance(separators, list)
+            else [" - ", " - "]
+        )
+        migrated_seps = [" - ", " - ", " - "]
+        migrated_seps[0] = legacy_seps[0] if legacy_seps else " - "
+        if suffix_enabled and suffix_text:
+            migrated_seps[1] = legacy_seps[1] if len(legacy_seps) > 1 else " - "
+            migrated_seps[2] = legacy_seps[1] if len(legacy_seps) > 1 else " - "
+        elif len(legacy_seps) > 0:
+            migrated_seps[1] = legacy_seps[0]
+
+        return cls(
+            slots=[
+                FormatSlot(SLOT_KIND_SONG, song_label, enabled=True),
+                FormatSlot(SLOT_KIND_ARTIST, artist_label, enabled=True),
+                FormatSlot(
+                    SLOT_KIND_ADDITIONAL,
+                    suffix_text if suffix_text else "Karaoke",
+                    enabled=suffix_enabled and bool(suffix_text),
+                    hint=suffix_text if suffix_text else "Karaoke",
+                    hint_fixed=bool(suffix_text),
+                ),
+                FormatSlot(SLOT_KIND_ADDITIONAL, "Additional", enabled=False, hint=""),
+            ],
+            separators=migrated_seps,
+        )
 
     def copy(self) -> FilenameFormat:
         return FilenameFormat.from_dict(self.to_dict())
 
 
 DEFAULT_KARAOKE_FORMAT = FilenameFormat(
-    slot_names=list(DEFAULT_SLOT_NAMES),
+    slots=[
+        FormatSlot(SLOT_KIND_SONG, "Song Name", enabled=True),
+        FormatSlot(SLOT_KIND_ARTIST, "Artist Name", enabled=True),
+        FormatSlot(SLOT_KIND_ADDITIONAL, "Karaoke", enabled=True, hint="Karaoke", hint_fixed=True),
+        FormatSlot(SLOT_KIND_ADDITIONAL, "Additional", enabled=False, hint=""),
+    ],
     separators=list(DEFAULT_SEPARATORS),
-    suffix_enabled=True,
-    suffix_text=DEFAULT_SUFFIX_TEXT,
 )
 
-NO_SUFFIX_FORMAT = FilenameFormat(
-    slot_names=list(DEFAULT_SLOT_NAMES),
-    separators=[" - "],
-    suffix_enabled=False,
-    suffix_text="",
+SONG_ARTIST_FORMAT = FilenameFormat(
+    slots=[
+        FormatSlot(SLOT_KIND_SONG, "Song Name", enabled=True),
+        FormatSlot(SLOT_KIND_ARTIST, "Artist Name", enabled=True),
+        FormatSlot(SLOT_KIND_ADDITIONAL, "Karaoke", enabled=False, hint="Karaoke"),
+        FormatSlot(SLOT_KIND_ADDITIONAL, "Additional", enabled=False, hint=""),
+    ],
+    separators=list(DEFAULT_SEPARATORS),
 )
+
+# Backward-compatible alias used by older imports.
+NO_SUFFIX_FORMAT = SONG_ARTIST_FORMAT
 
 
 class RenameError(Exception):
@@ -95,6 +210,26 @@ def split_title(stem: str) -> list[str]:
     return [part for part in parts if part]
 
 
+def default_slot_values(stem: str, fmt: FilenameFormat) -> dict[int, str]:
+    """Suggest initial rename values from a filename stem and format configuration."""
+    fmt._normalize_shape()
+    values: dict[int, str] = {}
+    parts = split_title(stem)
+    part_index = 0
+
+    for slot_index in fmt.enabled_slot_indices():
+        slot = fmt.slots[slot_index]
+        if slot.kind == SLOT_KIND_ADDITIONAL and slot.hint_fixed and slot.hint:
+            values[slot_index] = slot.hint
+            continue
+
+        if part_index < len(parts):
+            values[slot_index] = parts[part_index]
+            part_index += 1
+
+    return values
+
+
 def sanitize_filename(name: str) -> str:
     """Remove invalid filename characters while preserving intentional separators."""
     cleaned = _INVALID_FILENAME_CHARS.sub("", name)
@@ -103,89 +238,93 @@ def sanitize_filename(name: str) -> str:
     return cleaned
 
 
-def compose_filename(slots: dict[str, str], fmt: FilenameFormat) -> str:
-    """Build a filename stem from slot values and format configuration."""
-    values = [slots.get(name, "").strip() for name in fmt.slot_names]
-    if not values or not values[0]:
+def compose_filename(slot_values: dict[int, str], fmt: FilenameFormat) -> str:
+    """Build a filename stem from per-slot values and format configuration."""
+    fmt._normalize_shape()
+    included: list[tuple[int, str]] = []
+    for index, slot in enumerate(fmt.slots):
+        if not slot.enabled:
+            continue
+        value = slot_values.get(index, "").strip()
+        if value:
+            included.append((index, value))
+
+    song_index = fmt.song_slot_index()
+    if song_index is not None and fmt.slots[song_index].enabled:
+        if not slot_values.get(song_index, "").strip():
+            return ""
+
+    if not included:
         return ""
 
-    separators = fmt.normalized_separators()
-    result = values[0]
-    for index in range(1, len(values)):
-        separator = separators[index - 1] if index - 1 < len(separators) else " - "
-        result += separator + values[index]
-
-    if fmt.suffix_enabled and fmt.suffix_text:
-        suffix_sep_index = len(values) - 1
-        separator = (
-            separators[suffix_sep_index]
-            if suffix_sep_index < len(separators)
-            else " - "
-        )
-        result += separator + fmt.suffix_text
+    result = included[0][1]
+    for position in range(1, len(included)):
+        index = included[position][0]
+        separator = fmt.separators[index - 1] if index > 0 else " - "
+        result += separator + included[position][1]
 
     return sanitize_filename(result)
 
 
 def format_preview(fmt: FilenameFormat) -> str:
     """Return a human-readable pattern preview for the UI."""
-    separators = fmt.normalized_separators()
+    fmt._normalize_shape()
+    enabled_indices = fmt.enabled_slot_indices()
+    if not enabled_indices:
+        return ""
+
     parts: list[str] = []
-    for index, slot_name in enumerate(fmt.slot_names):
-        if index > 0:
-            sep_index = index - 1
-            parts.append(separators[sep_index] if sep_index < len(separators) else " - ")
-        parts.append(f"{{{slot_name}}}")
-    if fmt.suffix_enabled and fmt.suffix_text:
-        suffix_sep_index = len(fmt.slot_names) - 1
-        parts.append(
-            separators[suffix_sep_index]
-            if suffix_sep_index < len(separators)
-            else " - "
-        )
-        parts.append(fmt.suffix_text)
+    for position, index in enumerate(enabled_indices):
+        if position > 0:
+            parts.append(fmt.separators[index - 1] if index > 0 else " - ")
+        parts.append(f"{{{fmt.slots[index].label}}}")
     return "".join(parts)
 
 
-def parse_slots_from_stem(stem: str, fmt: FilenameFormat) -> dict[str, str] | None:
+def _parse_slots_backtrack(
+    remaining: str,
+    fmt: FilenameFormat,
+    enabled_indices: list[int],
+    position: int,
+) -> dict[int, str] | None:
+    if position < 0:
+        return {} if not remaining.strip() else None
+
+    slot_index = enabled_indices[position]
+    slot = fmt.slots[slot_index]
+
+    if position == 0:
+        value = remaining.strip()
+        if not value:
+            return None
+        return {slot_index: value}
+
+    separator = fmt.separators[slot_index - 1] if slot_index > 0 else ""
+    if separator and separator in remaining:
+        head, _, tail = remaining.rpartition(separator)
+        if tail.strip():
+            parsed = _parse_slots_backtrack(head, fmt, enabled_indices, position - 1)
+            if parsed is not None:
+                parsed[slot_index] = tail.strip()
+                return parsed
+
+    if slot.kind != SLOT_KIND_SONG:
+        return _parse_slots_backtrack(remaining, fmt, enabled_indices, position - 1)
+
+    return None
+
+
+def parse_slots_from_stem(stem: str, fmt: FilenameFormat) -> dict[int, str] | None:
     """Parse a filename stem into slot values when it matches *fmt*, else None."""
     cleaned = strip_youtube_id(stem)
     if not cleaned:
         return None
 
-    separators = fmt.normalized_separators()
-    remaining = cleaned
-
-    if fmt.suffix_enabled and fmt.suffix_text:
-        suffix_sep_index = len(fmt.slot_names) - 1
-        suffix_sep = (
-            separators[suffix_sep_index]
-            if suffix_sep_index < len(separators)
-            else " - "
-        )
-        suffix = suffix_sep + fmt.suffix_text
-        if not remaining.endswith(suffix):
-            return None
-        remaining = remaining[: -len(suffix)]
-
-    if not fmt.slot_names:
+    enabled_indices = fmt.enabled_slot_indices()
+    if not enabled_indices:
         return None
 
-    values: list[str] = [""] * len(fmt.slot_names)
-    for index in range(len(fmt.slot_names) - 1, 0, -1):
-        sep = separators[index - 1] if index - 1 < len(separators) else " - "
-        if sep not in remaining:
-            return None
-        head, _, tail = remaining.rpartition(sep)
-        if not tail.strip():
-            return None
-        values[index] = tail.strip()
-        remaining = head
-    if not remaining.strip():
-        return None
-    values[0] = remaining.strip()
-
-    return dict(zip(fmt.slot_names, values, strict=True))
+    return _parse_slots_backtrack(cleaned, fmt, enabled_indices, len(enabled_indices) - 1)
 
 
 def looks_canonical(path: Path, fmt: FilenameFormat) -> bool:

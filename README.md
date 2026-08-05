@@ -83,6 +83,20 @@ Right-click any song and choose **Play Next** to queue it after the current song
 
 Use the **History** tab to see recently played songs from any folder. Double-click to play, or right-click for **Play Now**, **Play Next**, or **Remove from History**. Click **Clear** to empty the history list. History is saved across sessions.
 
+## Batch Rename
+
+Use **Rename Downloads** on the startup screen (or right-click a song in the song list) to rename video files with a configurable format.
+
+The format uses **four reorderable slots** with a separator between each position:
+
+- **Song Name** (required at rename time)
+- **Artist Name** (optional)
+- Two **additional** slots (optional, customizable labels)
+
+By default the pattern is `{Song Name} - {Artist Name} - {Karaoke}` with a fourth slot disabled. Use **↑** / **↓** in the format editor to change slot order, checkboxes to enable or disable slots, and separator fields between rows to customize spacing. For additional slots, set **Hint or default value** and check **Fixed** to pre-fill that value when renaming (like the old Karaoke suffix); you can still change it per file. Only **Song Name** must be filled when renaming; empty optional slots are omitted from the filename.
+
+Settings are saved in `settings.json` under `filename_rename`. Legacy two-slot + suffix settings are migrated automatically on load.
+
 ## YouTube Streaming
 
 Click **Search YouTube** on the startup screen, or press `Y`, to enter YouTube mode.

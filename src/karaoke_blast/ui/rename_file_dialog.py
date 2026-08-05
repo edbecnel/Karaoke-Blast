@@ -23,7 +23,10 @@ from karaoke_blast.ui.format_config_widget import FormatConfigWidget
 from karaoke_blast.utils.filename_rename import (
     FilenameFormat,
     RenameError,
+    SLOT_KIND_ADDITIONAL,
+    SLOT_KIND_SONG,
     compose_filename,
+    default_slot_values,
     safe_rename,
     split_title,
 )
@@ -104,11 +107,13 @@ class RenameFileDialog(QDialog):
         self._path = path
         self._fmt = fmt.copy()
         self._parts = split_title(path.stem)
+        self._default_slot_values = default_slot_values(path.stem, self._fmt)
         self._result = RenameResult.CANCELLED
         self._new_path: Path | None = None
-        self._focused_slot_index = 0
-        self._slot_fields: dict[str, QLineEdit] = {}
-        self._slot_radios: dict[str, QRadioButton] = {}
+        self._format_widget: FormatConfigWidget | None = None
+        self._focused_slot_index = self._first_enabled_slot_index()
+        self._slot_fields: dict[int, QLineEdit] = {}
+        self._slot_radios: dict[int, QRadioButton] = {}
         self._chip_buttons: list[QPushButton] = []
         self._target_group = QButtonGroup(self)
         self._target_selector_widget = QWidget()
@@ -193,6 +198,13 @@ class RenameFileDialog(QDialog):
             return self._format_widget.format()
         return self._fmt
 
+    def _enabled_slot_indices(self) -> list[int]:
+        return self.format().enabled_slot_indices()
+
+    def _first_enabled_slot_index(self) -> int:
+        enabled = self._enabled_slot_indices()
+        return enabled[0] if enabled else 0
+
     def _rebuild_part_chips(self) -> None:
         while self._parts_row.count():
             item = self._parts_row.takeAt(0)
@@ -201,7 +213,7 @@ class RenameFileDialog(QDialog):
                 widget.deleteLater()
         self._chip_buttons.clear()
 
-        for index, part in enumerate(self._parts):
+        for part in self._parts:
             chip = QPushButton(part)
             chip.setStyleSheet(_CHIP_STYLE)
             chip.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -226,19 +238,23 @@ class RenameFileDialog(QDialog):
         append_label.setStyleSheet(_LABEL_STYLE)
         self._target_selector_layout.addWidget(append_label)
 
-        for index, slot_name in enumerate(self._fmt.slot_names):
-            radio = QRadioButton(slot_name)
+        enabled_indices = self._enabled_slot_indices()
+        for radio_index, slot_index in enumerate(enabled_indices):
+            slot = self.format().slots[slot_index]
+            radio = QRadioButton(slot.label)
             radio.setStyleSheet(_RADIO_STYLE)
-            self._target_group.addButton(radio, index)
-            self._slot_radios[slot_name] = radio
+            self._target_group.addButton(radio, radio_index)
+            self._slot_radios[slot_index] = radio
             self._target_selector_layout.addWidget(radio)
 
         self._target_selector_layout.addStretch()
 
-        if self._fmt.slot_names:
-            selected_index = min(self._focused_slot_index, len(self._fmt.slot_names) - 1)
-            self._focused_slot_index = selected_index
-            self._slot_radios[self._fmt.slot_names[selected_index]].setChecked(True)
+        if enabled_indices:
+            if self._focused_slot_index not in enabled_indices:
+                self._focused_slot_index = enabled_indices[0]
+            radio = self._slot_radios.get(self._focused_slot_index)
+            if radio is not None:
+                radio.setChecked(True)
 
     def _rebuild_slot_fields(self) -> None:
         while self._slots_layout.count():
@@ -248,17 +264,30 @@ class RenameFileDialog(QDialog):
                 widget.deleteLater()
         self._slot_fields.clear()
 
-        for index, slot_name in enumerate(self._fmt.slot_names):
+        fmt = self.format()
+        for slot_index in fmt.enabled_slot_indices():
+            slot = fmt.slots[slot_index]
             row = QHBoxLayout()
-            label = QLabel(f"{slot_name}:")
+            label = QLabel(f"{slot.label}:")
             label.setFixedWidth(110)
             label.setStyleSheet(_LABEL_STYLE)
             field = QLineEdit()
             field.setStyleSheet(_FIELD_STYLE)
             field.textChanged.connect(self._update_preview)
             field.installEventFilter(self)
-            field.setProperty("slot_index", index)
-            self._slot_fields[slot_name] = field
+            field.setProperty("slot_index", slot_index)
+            initial_value = self._default_slot_values.get(slot_index, "")
+            if initial_value:
+                field.blockSignals(True)
+                field.setText(initial_value)
+                field.blockSignals(False)
+            if slot.kind == SLOT_KIND_SONG:
+                field.setPlaceholderText("")
+            elif slot.kind == SLOT_KIND_ADDITIONAL and not slot.hint_fixed and slot.hint:
+                field.setPlaceholderText(slot.hint)
+            elif slot.kind == SLOT_KIND_ADDITIONAL:
+                field.setPlaceholderText("Optional")
+            self._slot_fields[slot_index] = field
             row.addWidget(label)
             row.addWidget(field, 1)
             container = QWidget()
@@ -267,28 +296,29 @@ class RenameFileDialog(QDialog):
 
         self._update_target_highlight()
 
-    def _on_target_selected(self, index: int, checked: bool) -> None:
-        if not checked or index < 0 or index >= len(self._fmt.slot_names):
+    def _on_target_selected(self, radio_index: int, checked: bool) -> None:
+        if not checked:
             return
-        self._focused_slot_index = index
+        enabled_indices = self._enabled_slot_indices()
+        if radio_index < 0 or radio_index >= len(enabled_indices):
+            return
+        self._focused_slot_index = enabled_indices[radio_index]
         self._update_target_highlight()
 
     def _update_target_highlight(self) -> None:
-        if not self._fmt.slot_names:
-            return
-        selected_name = self._fmt.slot_names[self._focused_slot_index]
-        for slot_name, field in self._slot_fields.items():
+        for slot_index, field in self._slot_fields.items():
             field.setStyleSheet(
-                _ACTIVE_FIELD_STYLE if slot_name == selected_name else _FIELD_STYLE
+                _ACTIVE_FIELD_STYLE
+                if slot_index == self._focused_slot_index
+                else _FIELD_STYLE
             )
 
     def eventFilter(self, obj, event) -> bool:
         if event.type() == QEvent.Type.FocusIn and isinstance(obj, QLineEdit):
             slot_index = obj.property("slot_index")
-            if isinstance(slot_index, int) and 0 <= slot_index < len(self._fmt.slot_names):
+            if isinstance(slot_index, int) and slot_index in self._slot_fields:
                 self._focused_slot_index = slot_index
-                slot_name = self._fmt.slot_names[slot_index]
-                radio = self._slot_radios.get(slot_name)
+                radio = self._slot_radios.get(slot_index)
                 if radio is not None:
                     radio.setChecked(True)
                 self._update_target_highlight()
@@ -296,42 +326,47 @@ class RenameFileDialog(QDialog):
 
     def _on_format_changed(self, fmt: FilenameFormat) -> None:
         self._fmt = fmt.copy()
-        values = {name: field.text() for name, field in self._slot_fields.items()}
-        selected_name = (
-            self._fmt.slot_names[self._focused_slot_index]
-            if self._fmt.slot_names
-            and self._focused_slot_index < len(self._fmt.slot_names)
-            else None
-        )
+        values = {index: field.text() for index, field in self._slot_fields.items()}
+        previous_focus = self._focused_slot_index
+        self._default_slot_values = default_slot_values(self._path.stem, self._fmt)
+        for slot_index in self._fmt.enabled_slot_indices():
+            slot = self._fmt.slots[slot_index]
+            if slot_index not in values and slot.hint_fixed and slot.hint:
+                values[slot_index] = slot.hint
         self._rebuild_target_selector()
         self._rebuild_slot_fields()
-        for name, value in values.items():
-            if name in self._slot_fields:
-                self._slot_fields[name].setText(value)
-        if selected_name is not None and selected_name in self._slot_radios:
-            self._slot_radios[selected_name].setChecked(True)
-            self._focused_slot_index = self._fmt.slot_names.index(selected_name)
+        for index, value in values.items():
+            if index in self._slot_fields:
+                self._slot_fields[index].setText(value)
+        if previous_focus in self._slot_fields:
+            self._focused_slot_index = previous_focus
+            radio = self._slot_radios.get(previous_focus)
+            if radio is not None:
+                radio.setChecked(True)
+        else:
+            self._focused_slot_index = self._first_enabled_slot_index()
         self._update_target_highlight()
         self._update_preview()
 
     def _assign_part(self, part: str) -> None:
-        if not self._fmt.slot_names:
+        if self._focused_slot_index not in self._slot_fields:
             return
-        slot_name = self._fmt.slot_names[self._focused_slot_index]
-        field = self._slot_fields[slot_name]
+        field = self._slot_fields[self._focused_slot_index]
         current = field.text().strip()
         field.setText(f"{current} {part}".strip() if current else part)
         self._update_preview()
 
-    def _slot_values(self) -> dict[str, str]:
-        return {name: field.text() for name, field in self._slot_fields.items()}
+    def _slot_values(self) -> dict[int, str]:
+        return {index: field.text() for index, field in self._slot_fields.items()}
 
     def _update_preview(self, *_args) -> None:
         preview = compose_filename(self._slot_values(), self.format())
         if preview:
+            self._preview_label.setStyleSheet(_PREVIEW_STYLE)
             self._preview_label.setText(f"Preview: {preview}{self._path.suffix}")
         else:
-            self._preview_label.setText("Preview: (fill all slots to preview)")
+            self._preview_label.setStyleSheet(_PREVIEW_STYLE)
+            self._preview_label.setText("Preview: (fill Song Name to preview)")
         self._rename_button.setEnabled(bool(preview))
 
     def _skip(self) -> None:

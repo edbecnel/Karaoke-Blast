@@ -11,9 +11,11 @@ from pathlib import Path
 from karaoke_blast.storage.paths import config_dir
 from karaoke_blast.utils.filename_rename import (
     DEFAULT_KARAOKE_FORMAT,
+    SLOT_KIND_SONG,
     FilenameFormat,
     RenameError,
     compose_filename,
+    default_slot_values,
     looks_canonical,
     safe_rename,
     split_title,
@@ -41,35 +43,49 @@ def _load_settings_format() -> tuple[FilenameFormat, bool]:
 
 
 def _build_format(args: argparse.Namespace) -> FilenameFormat:
-    if args.separators or args.suffix is not None or args.no_suffix or args.slots:
-        slots = args.slots or list(DEFAULT_KARAOKE_FORMAT.slot_names)
-        separators = args.separators or list(DEFAULT_KARAOKE_FORMAT.separators)
-        suffix_enabled = not args.no_suffix
-        suffix_text = args.suffix if args.suffix is not None else DEFAULT_KARAOKE_FORMAT.suffix_text
-        return FilenameFormat(
-            slot_names=slots,
-            separators=separators,
-            suffix_enabled=suffix_enabled,
-            suffix_text=suffix_text,
-        )
+    if args.separators or args.no_suffix or args.suffix:
+        fmt = DEFAULT_KARAOKE_FORMAT.copy()
+        if args.separators:
+            for index, separator in enumerate(args.separators[:3]):
+                fmt.separators[index] = separator
+        if args.no_suffix:
+            fmt.slots[2].enabled = False
+        elif args.suffix is not None:
+            fmt.slots[2].label = args.suffix
+            fmt.slots[2].hint = args.suffix
+            fmt.slots[2].hint_fixed = bool(args.suffix)
+            fmt.slots[2].enabled = bool(args.suffix)
+        return fmt
     fmt, _skip = _load_settings_format()
     return fmt
 
 
-def _prompt_slot(slot_name: str, parts: list[str]) -> str:
+def _prompt_slot(slot_label: str, parts: list[str], *, required: bool) -> str:
     if parts:
-        print(f"  Available parts:")
+        print("  Available parts:")
         for index, part in enumerate(parts, start=1):
             print(f"    {index}. {part}")
+    hint = "required" if required else "optional, press Enter to skip"
     while True:
-        raw = input(f"{slot_name} [1-{len(parts)} or custom text]: ").strip()
+        raw = input(f"{slot_label} ({hint}) [1-{len(parts)} or custom text]: ").strip()
         if not raw:
-            return ""
-        if raw.isdigit():
+            return "" if not required else _retry_required(slot_label, parts)
+        if raw.isdigit() and parts:
             choice = int(raw)
             if 1 <= choice <= len(parts):
                 return parts[choice - 1]
         return raw
+
+
+def _retry_required(slot_label: str, parts: list[str]) -> str:
+    while True:
+        raw = input(f"{slot_label} is required. Enter a value: ").strip()
+        if raw:
+            if raw.isdigit() and parts:
+                choice = int(raw)
+                if 1 <= choice <= len(parts):
+                    return parts[choice - 1]
+            return raw
 
 
 def _confirm(prompt: str) -> str:
@@ -86,14 +102,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--separators",
         nargs="+",
-        help="Separator strings in order (e.g. ' - ' ' | ')",
+        help="Separator strings in order (up to 3, e.g. ' - ' ' - ' ' - ')",
     )
-    parser.add_argument("--suffix", help="Suffix text (default: Karaoke)")
-    parser.add_argument("--no-suffix", action="store_true", help="Omit the suffix")
     parser.add_argument(
-        "--slots",
-        nargs="+",
-        help="Slot names in order (default: 'Song Name' 'Artist Name')",
+        "--suffix",
+        help="Label/text for the third slot (default: Karaoke)",
+    )
+    parser.add_argument(
+        "--no-suffix",
+        action="store_true",
+        help="Disable the third additional slot",
     )
     parser.add_argument(
         "--include-canonical",
@@ -127,11 +145,21 @@ def main(argv: list[str] | None = None) -> int:
         parts = split_title(path.stem)
         print(f"Parts: {parts if parts else '(none)'}")
 
-        slots: dict[str, str] = {}
-        for slot_name in fmt.slot_names:
-            slots[slot_name] = _prompt_slot(slot_name, parts)
+        defaults = default_slot_values(path.stem, fmt)
+        slot_values: dict[int, str] = {}
+        for slot_index in fmt.enabled_slot_indices():
+            slot = fmt.slots[slot_index]
+            required = slot.kind == SLOT_KIND_SONG
+            default = defaults.get(slot_index, "")
+            if default:
+                raw = input(
+                    f"{slot.label} ({'required' if required else 'optional'}) [{default}]: "
+                ).strip()
+                slot_values[slot_index] = raw or default
+            else:
+                slot_values[slot_index] = _prompt_slot(slot.label, parts, required=required)
 
-        preview = compose_filename(slots, fmt)
+        preview = compose_filename(slot_values, fmt)
         if not preview:
             print("Could not build a filename. Skipping.")
             skipped += 1

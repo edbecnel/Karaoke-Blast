@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from PyQt6 import sip
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -16,7 +17,10 @@ from PyQt6.QtWidgets import (
 from karaoke_blast.ui.checkbox_style import CHECKBOX_STYLE_WHITE_LABEL
 from karaoke_blast.utils.filename_rename import (
     DEFAULT_KARAOKE_FORMAT,
-    NO_SUFFIX_FORMAT,
+    SLOT_KIND_ADDITIONAL,
+    SLOT_KIND_ARTIST,
+    SLOT_KIND_SONG,
+    SONG_ARTIST_FORMAT,
     FilenameFormat,
     format_preview,
 )
@@ -45,14 +49,28 @@ QPushButton:hover {
     background-color: #3a3a52;
     border-color: #7a7a92;
 }
+QPushButton:disabled {
+    color: #666;
+    border-color: #3a3a52;
+}
 """
 
-_SLOT_STYLE = "color: white; font-size: 12px; font-weight: 600; background: transparent;"
+_BADGE_STYLE = "color: #aaa; font-size: 11px; background: transparent;"
+_LABEL_STYLE = "color: white; font-size: 12px; font-weight: 600; background: transparent;"
 _PREVIEW_STYLE = "color: #7ee787; font-size: 12px; background: transparent;"
+_SEP_LABEL_STYLE = "color: #888; font-size: 11px; background: transparent;"
+
+
+def _kind_label(kind: str) -> str:
+    if kind == SLOT_KIND_SONG:
+        return "Song"
+    if kind == SLOT_KIND_ARTIST:
+        return "Artist"
+    return "Additional"
 
 
 class FormatConfigWidget(QWidget):
-    """Configure slots, separators, and suffix for filename composition."""
+    """Configure four reorderable slots and separators for filename composition."""
 
     format_changed = pyqtSignal(object)
 
@@ -60,6 +78,12 @@ class FormatConfigWidget(QWidget):
         super().__init__(parent)
         self._format = DEFAULT_KARAOKE_FORMAT.copy()
         self._building = False
+        self._slot_rows_layout = QVBoxLayout()
+        self._slot_rows_layout.setSpacing(4)
+        self._separator_fields: list[QLineEdit] = []
+        self._label_fields: dict[int, QLineEdit] = {}
+        self._hint_fields: dict[int, QLineEdit] = {}
+        self._hint_fixed_boxes: dict[int, QCheckBox] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -69,53 +93,7 @@ class FormatConfigWidget(QWidget):
         title.setStyleSheet("color: white; font-size: 13px; font-weight: bold;")
         layout.addWidget(title)
 
-        format_row = QHBoxLayout()
-        format_row.setSpacing(8)
-
-        self._slot1_label = QLabel()
-        self._slot1_label.setStyleSheet(_SLOT_STYLE)
-        format_row.addWidget(self._slot1_label)
-
-        self._sep1_field = QLineEdit()
-        self._sep1_field.setFixedSize(64, 28)
-        self._sep1_field.setStyleSheet(_FIELD_STYLE)
-        self._sep1_field.setToolTip("Separator between first and second fields")
-        self._sep1_field.textChanged.connect(self._on_field_changed)
-        format_row.addWidget(self._sep1_field)
-
-        self._slot2_label = QLabel()
-        self._slot2_label.setStyleSheet(_SLOT_STYLE)
-        format_row.addWidget(self._slot2_label)
-
-        swap_btn = QPushButton("⇄")
-        swap_btn.setFixedSize(32, 28)
-        swap_btn.setToolTip("Swap song and artist order")
-        swap_btn.setStyleSheet(_BUTTON_STYLE)
-        swap_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        swap_btn.clicked.connect(self._swap_slots)
-        format_row.addWidget(swap_btn)
-
-        self._sep2_field = QLineEdit()
-        self._sep2_field.setFixedSize(64, 28)
-        self._sep2_field.setStyleSheet(_FIELD_STYLE)
-        self._sep2_field.setToolTip("Separator before suffix")
-        self._sep2_field.textChanged.connect(self._on_field_changed)
-        format_row.addWidget(self._sep2_field)
-
-        self._suffix_checkbox = QCheckBox("Include suffix:")
-        self._suffix_checkbox.setStyleSheet(CHECKBOX_STYLE_WHITE_LABEL)
-        self._suffix_checkbox.toggled.connect(self._on_suffix_toggled)
-        format_row.addWidget(self._suffix_checkbox)
-
-        self._suffix_field = QLineEdit()
-        self._suffix_field.setPlaceholderText("Suffix text")
-        self._suffix_field.setFixedHeight(28)
-        self._suffix_field.setMinimumWidth(100)
-        self._suffix_field.setStyleSheet(_FIELD_STYLE)
-        self._suffix_field.textChanged.connect(self._on_field_changed)
-        format_row.addWidget(self._suffix_field, 1)
-
-        layout.addLayout(format_row)
+        layout.addLayout(self._slot_rows_layout)
 
         preset_row = QHBoxLayout()
         preset_row.setSpacing(8)
@@ -124,10 +102,10 @@ class FormatConfigWidget(QWidget):
         karaoke_btn.clicked.connect(self._apply_karaoke_preset)
         preset_row.addWidget(karaoke_btn)
 
-        no_suffix_btn = QPushButton("No suffix")
-        no_suffix_btn.setStyleSheet(_BUTTON_STYLE)
-        no_suffix_btn.clicked.connect(self._apply_no_suffix_preset)
-        preset_row.addWidget(no_suffix_btn)
+        song_artist_btn = QPushButton("Song + Artist only")
+        song_artist_btn.setStyleSheet(_BUTTON_STYLE)
+        song_artist_btn.clicked.connect(self._apply_song_artist_preset)
+        preset_row.addWidget(song_artist_btn)
         preset_row.addStretch()
         layout.addLayout(preset_row)
 
@@ -139,63 +117,143 @@ class FormatConfigWidget(QWidget):
         self.set_format(self._format)
 
     def format(self) -> FilenameFormat:
+        self._sync_from_fields()
         return self._format.copy()
 
     def set_format(self, fmt: FilenameFormat) -> None:
         self._building = True
         self._format = fmt.copy()
-        separators = self._format.normalized_separators()
-        self._sep1_field.setText(separators[0] if separators else " - ")
-        self._sep2_field.setText(
-            separators[len(self._format.slot_names) - 1]
-            if len(separators) > len(self._format.slot_names) - 1
-            else separators[-1] if len(separators) > 1
-            else " - "
-        )
-        self._suffix_checkbox.setChecked(self._format.suffix_enabled)
-        self._suffix_field.setText(self._format.suffix_text)
-        self._update_slot_labels()
-        self._update_suffix_controls()
+        self._rebuild_rows()
         self._update_preview()
         self._building = False
 
-    def _update_slot_labels(self) -> None:
-        names = self._format.slot_names
-        self._slot1_label.setText(names[0] if names else "Song Name")
-        self._slot2_label.setText(names[1] if len(names) > 1 else "Artist Name")
+    def _clear_layout(self, box_layout: QVBoxLayout) -> None:
+        while box_layout.count():
+            item = box_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                sip.delete(widget)
 
-    def _swap_slots(self) -> None:
-        if len(self._format.slot_names) < 2:
+    def _rebuild_rows(self) -> None:
+        self._clear_layout(self._slot_rows_layout)
+        self._separator_fields.clear()
+        self._label_fields.clear()
+        self._hint_fields.clear()
+        self._hint_fixed_boxes.clear()
+
+        for index, slot in enumerate(self._format.slots):
+            if index > 0:
+                sep_row = QHBoxLayout()
+                sep_label = QLabel("Separator")
+                sep_label.setStyleSheet(_SEP_LABEL_STYLE)
+                sep_field = QLineEdit()
+                sep_field.setFixedHeight(28)
+                sep_field.setMaximumWidth(120)
+                sep_field.setStyleSheet(_FIELD_STYLE)
+                sep_field.setText(self._format.separators[index - 1])
+                sep_field.textChanged.connect(self._on_field_changed)
+                sep_row.addWidget(sep_label)
+                sep_row.addWidget(sep_field)
+                sep_row.addStretch()
+                sep_container = QWidget()
+                sep_container.setLayout(sep_row)
+                self._slot_rows_layout.addWidget(sep_container)
+                self._separator_fields.append(sep_field)
+
+            row = QHBoxLayout()
+            row.setSpacing(8)
+
+            enabled_box = QCheckBox()
+            enabled_box.setStyleSheet(CHECKBOX_STYLE_WHITE_LABEL)
+            enabled_box.setChecked(slot.enabled)
+            enabled_box.setEnabled(slot.kind != SLOT_KIND_SONG)
+            enabled_box.setToolTip("Include this slot in the format")
+            enabled_box.toggled.connect(
+                lambda checked, slot_index=index: self._on_slot_enabled(slot_index, checked)
+            )
+            row.addWidget(enabled_box)
+
+            badge = QLabel(_kind_label(slot.kind))
+            badge.setFixedWidth(72)
+            badge.setStyleSheet(_BADGE_STYLE)
+            row.addWidget(badge)
+
+            if slot.kind == SLOT_KIND_ADDITIONAL:
+                label_field = QLineEdit(slot.label)
+                label_field.setStyleSheet(_FIELD_STYLE)
+                label_field.setPlaceholderText("Slot label")
+                label_field.textChanged.connect(self._on_field_changed)
+                self._label_fields[index] = label_field
+                row.addWidget(label_field, 1)
+
+                hint_field = QLineEdit(slot.hint)
+                hint_field.setStyleSheet(_FIELD_STYLE)
+                hint_field.setPlaceholderText("Hint or default value")
+                hint_field.textChanged.connect(self._on_field_changed)
+                self._hint_fields[index] = hint_field
+                row.addWidget(hint_field, 1)
+
+                fixed_box = QCheckBox("Fixed")
+                fixed_box.setStyleSheet(CHECKBOX_STYLE_WHITE_LABEL)
+                fixed_box.setChecked(slot.hint_fixed)
+                fixed_box.setToolTip("Pre-fill this value when renaming; it can still be changed per file")
+                fixed_box.toggled.connect(self._on_field_changed)
+                self._hint_fixed_boxes[index] = fixed_box
+                row.addWidget(fixed_box)
+            else:
+                fixed_label = QLabel(slot.label)
+                fixed_label.setStyleSheet(_LABEL_STYLE)
+                row.addWidget(fixed_label, 1)
+
+            up_btn = QPushButton("↑")
+            up_btn.setFixedSize(28, 28)
+            up_btn.setStyleSheet(_BUTTON_STYLE)
+            up_btn.setEnabled(index > 0)
+            up_btn.setToolTip("Move slot up")
+            up_btn.clicked.connect(lambda _checked=False, slot_index=index: self._move_slot(slot_index, -1))
+            row.addWidget(up_btn)
+
+            down_btn = QPushButton("↓")
+            down_btn.setFixedSize(28, 28)
+            down_btn.setStyleSheet(_BUTTON_STYLE)
+            down_btn.setEnabled(index < len(self._format.slots) - 1)
+            down_btn.setToolTip("Move slot down")
+            down_btn.clicked.connect(lambda _checked=False, slot_index=index: self._move_slot(slot_index, 1))
+            row.addWidget(down_btn)
+
+            container = QWidget()
+            container.setLayout(row)
+            self._slot_rows_layout.addWidget(container)
+
+    def _on_slot_enabled(self, index: int, checked: bool) -> None:
+        if self._building:
             return
         self._sync_from_fields()
-        self._format.slot_names = [
-            self._format.slot_names[1],
-            self._format.slot_names[0],
-        ]
-        self._update_slot_labels()
+        slot = self._format.slots[index]
+        if slot.kind != SLOT_KIND_SONG:
+            slot.enabled = checked
+        self._rebuild_rows()
         self._update_preview()
         self.format_changed.emit(self.format())
 
-    def _update_suffix_controls(self) -> None:
-        enabled = self._suffix_checkbox.isChecked()
-        self._sep2_field.setVisible(enabled)
-        self._suffix_field.setEnabled(enabled)
+    def _move_slot(self, index: int, direction: int) -> None:
+        new_index = index + direction
+        if not (0 <= new_index < len(self._format.slots)):
+            return
+        self._sync_from_fields()
+        slots = self._format.slots
+        slots[index], slots[new_index] = slots[new_index], slots[index]
+        self._rebuild_rows()
+        self._update_preview()
+        self.format_changed.emit(self.format())
 
     def _apply_karaoke_preset(self) -> None:
         self.set_format(DEFAULT_KARAOKE_FORMAT.copy())
         self.format_changed.emit(self.format())
 
-    def _apply_no_suffix_preset(self) -> None:
-        self.set_format(NO_SUFFIX_FORMAT.copy())
-        self.format_changed.emit(self.format())
-
-    def _on_suffix_toggled(self, checked: bool) -> None:
-        if self._building:
-            return
-        self._format.suffix_enabled = checked
-        self._update_suffix_controls()
-        self._sync_from_fields()
-        self._update_preview()
+    def _apply_song_artist_preset(self) -> None:
+        self.set_format(SONG_ARTIST_FORMAT.copy())
         self.format_changed.emit(self.format())
 
     def _on_field_changed(self, *_args) -> None:
@@ -206,15 +264,18 @@ class FormatConfigWidget(QWidget):
         self.format_changed.emit(self.format())
 
     def _sync_from_fields(self) -> None:
-        sep1 = self._sep1_field.text()
-        sep2 = self._sep2_field.text()
-        suffix_enabled = self._suffix_checkbox.isChecked()
-        if suffix_enabled:
-            self._format.separators = [sep1, sep2]
-        else:
-            self._format.separators = [sep1]
-        self._format.suffix_enabled = suffix_enabled
-        self._format.suffix_text = self._suffix_field.text().strip()
+        for index, sep_field in enumerate(self._separator_fields):
+            if index < len(self._format.separators):
+                self._format.separators[index] = sep_field.text()
+
+        for index, label_field in self._label_fields.items():
+            self._format.slots[index].label = label_field.text().strip() or "Additional"
+
+        for index, hint_field in self._hint_fields.items():
+            self._format.slots[index].hint = hint_field.text().strip()
+
+        for index, fixed_box in self._hint_fixed_boxes.items():
+            self._format.slots[index].hint_fixed = fixed_box.isChecked()
 
     def _update_preview(self) -> None:
         self._preview_label.setText(f"Pattern: {format_preview(self._format)}")

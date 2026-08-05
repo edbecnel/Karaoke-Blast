@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QVBoxLayout,
+    QWidget,
 )
 
 from karaoke_blast.ui.checkbox_style import CHECKBOX_STYLE_WHITE_LABEL
@@ -96,7 +97,7 @@ class BatchRenameDialog(QDialog):
 
         self.setWindowTitle("Batch Rename")
         self.setModal(True)
-        self.setMinimumWidth(680)
+        self.setMinimumWidth(820)
         self.setStyleSheet(_DIALOG_STYLE)
 
         layout = QVBoxLayout(self)
