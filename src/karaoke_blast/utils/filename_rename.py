@@ -147,19 +147,56 @@ def format_preview(fmt: FilenameFormat) -> str:
     return "".join(parts)
 
 
-def looks_canonical(path: Path, fmt: FilenameFormat) -> bool:
-    """Return True when *path* likely already matches the configured format."""
-    if _YOUTUBE_ID_SUFFIX.search(path.stem):
-        return False
+def parse_slots_from_stem(stem: str, fmt: FilenameFormat) -> dict[str, str] | None:
+    """Parse a filename stem into slot values when it matches *fmt*, else None."""
+    cleaned = strip_youtube_id(stem)
+    if not cleaned:
+        return None
 
-    stem = path.stem
+    separators = fmt.normalized_separators()
+    remaining = cleaned
+
     if fmt.suffix_enabled and fmt.suffix_text:
-        separators = fmt.normalized_separators()
-        suffix_sep = separators[len(fmt.slot_names) - 1] if separators else " - "
-        return stem.endswith(suffix_sep + fmt.suffix_text)
+        suffix_sep_index = len(fmt.slot_names) - 1
+        suffix_sep = (
+            separators[suffix_sep_index]
+            if suffix_sep_index < len(separators)
+            else " - "
+        )
+        suffix = suffix_sep + fmt.suffix_text
+        if not remaining.endswith(suffix):
+            return None
+        remaining = remaining[: -len(suffix)]
 
-    # Without a suffix, treat obvious download-style titles as non-canonical.
-    return "｜" not in stem and "|" not in stem and "Karaoke Version" not in stem
+    if not fmt.slot_names:
+        return None
+
+    values: list[str] = [""] * len(fmt.slot_names)
+    for index in range(len(fmt.slot_names) - 1, 0, -1):
+        sep = separators[index - 1] if index - 1 < len(separators) else " - "
+        if sep not in remaining:
+            return None
+        head, _, tail = remaining.rpartition(sep)
+        if not tail.strip():
+            return None
+        values[index] = tail.strip()
+        remaining = head
+    if not remaining.strip():
+        return None
+    values[0] = remaining.strip()
+
+    return dict(zip(fmt.slot_names, values, strict=True))
+
+
+def looks_canonical(path: Path, fmt: FilenameFormat) -> bool:
+    """Return True when *path* already matches the configured format."""
+    slots = parse_slots_from_stem(path.stem, fmt)
+    if slots is None:
+        return False
+    recomposed = compose_filename(slots, fmt)
+    if not recomposed:
+        return False
+    return recomposed == strip_youtube_id(path.stem)
 
 
 def safe_rename(path: Path, new_stem: str) -> Path:

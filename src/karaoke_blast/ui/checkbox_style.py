@@ -1,13 +1,14 @@
 """Shared stylesheet for application checkboxes."""
 
-_CHECKMARK_SVG = (
-    "data:image/svg+xml;charset=utf-8,"
-    "%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'%3E"
-    "%3Crect width='14' height='14' rx='3' fill='%23e94560'/%3E"
-    "%3Cpath d='M3.5 7.2 L5.8 9.5 L10.5 4.8' stroke='%23ffffff' stroke-width='1.6' "
-    "fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E"
-    "%3C/svg%3E"
-)
+_INDICATOR_CHECKED = """
+    border: 1px solid #e94560;
+    background-color: #e94560;
+"""
+
+_INDICATOR_CHECKED_HOVER = """
+    border: 1px solid #ff6b81;
+    background-color: #ff6b81;
+"""
 
 CHECKBOX_STYLE = f"""
 QCheckBox {{
@@ -26,9 +27,10 @@ QCheckBox::indicator:hover {{
     border-color: #7a7a92;
 }}
 QCheckBox::indicator:checked {{
-    border: none;
-    background: transparent;
-    image: url({_CHECKMARK_SVG});
+    {_INDICATOR_CHECKED}
+}}
+QCheckBox::indicator:checked:hover {{
+    {_INDICATOR_CHECKED_HOVER}
 }}
 """
 
@@ -49,8 +51,9 @@ QCheckBox::indicator:hover {{
     border-color: #7a7a92;
 }}
 QCheckBox::indicator:checked {{
-    border: none;
-    background: transparent;
-    image: url({_CHECKMARK_SVG});
+    {_INDICATOR_CHECKED}
+}}
+QCheckBox::indicator:checked:hover {{
+    {_INDICATOR_CHECKED_HOVER}
 }}
 """

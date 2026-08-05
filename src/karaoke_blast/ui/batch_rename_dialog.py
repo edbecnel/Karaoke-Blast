@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -119,6 +119,7 @@ class BatchRenameDialog(QDialog):
         self._skip_checkbox = QCheckBox("Skip files that already match the format")
         self._skip_checkbox.setStyleSheet(CHECKBOX_STYLE_WHITE_LABEL)
         self._skip_checkbox.setChecked(skip_canonical)
+        self._skip_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
         layout.addWidget(self._skip_checkbox)
 
         self._format_widget = FormatConfigWidget()
