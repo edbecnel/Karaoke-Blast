@@ -6,6 +6,7 @@ from enum import Enum
 from pathlib import Path
 
 from PyQt6.QtCore import QEvent, Qt, pyqtSignal
+from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QDialog,
@@ -108,6 +109,71 @@ QLineEdit {
     font-size: 13px;
 }
 """
+
+
+class HintableSlotField(QLineEdit):
+    """Slot input that can accept a configured hint via arrow keys."""
+
+    _HINT_ACCEPT_KEYS = frozenset(
+        key
+        for key in (
+            Qt.Key.Key_Right,
+            Qt.Key.Key_Down,
+            getattr(Qt.Key, "Key_KeypadRight", Qt.Key.Key_unknown),
+            getattr(Qt.Key, "Key_KeypadDown", Qt.Key.Key_unknown),
+        )
+        if key != Qt.Key.Key_unknown
+    )
+
+    def __init__(
+        self,
+        slot_index: int,
+        on_accept_hint,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._slot_index = slot_index
+        self._on_accept_hint = on_accept_hint
+        self._hint_available = False
+        self.setProperty("slot_index", slot_index)
+
+    def set_hint_available(self, available: bool) -> None:
+        self._hint_available = available
+
+    def _can_accept_hint_now(self) -> bool:
+        return (
+            self._hint_available
+            and not self.isReadOnly()
+            and not self.text().strip()
+        )
+
+    @classmethod
+    def _is_hint_accept_key(cls, key: int) -> bool:
+        return key in cls._HINT_ACCEPT_KEYS
+
+    @staticmethod
+    def _has_blocking_modifiers(event: QKeyEvent) -> bool:
+        blockers = (
+            Qt.KeyboardModifier.ShiftModifier
+            | Qt.KeyboardModifier.ControlModifier
+            | Qt.KeyboardModifier.AltModifier
+            | Qt.KeyboardModifier.MetaModifier
+        )
+        return bool(event.modifiers() & blockers)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if (
+            self._is_hint_accept_key(event.key())
+            and not self._has_blocking_modifiers(event)
+            and self._can_accept_hint_now()
+        ):
+            self._on_accept_hint(self._slot_index, self)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def setReadOnly(self, readonly: bool) -> None:
+        super().setReadOnly(readonly)
 
 
 class RenameResult(Enum):
@@ -276,6 +342,16 @@ class RenameFileDialog(QDialog):
         self._update_hint_button(slot_index)
         self._update_preview()
 
+    def _try_accept_hint_via_right_arrow(self, slot_index: int, field: QLineEdit) -> bool:
+        hint = self._slot_hint(slot_index)
+        if not hint or field.isReadOnly():
+            return False
+        text = field.text().strip()
+        if text:
+            return False
+        self._accept_slot_hint(slot_index)
+        return True
+
     def _update_hint_button(self, slot_index: int) -> None:
         button = self._hint_buttons.get(slot_index)
         if button is None:
@@ -350,7 +426,10 @@ class RenameFileDialog(QDialog):
             label = QLabel(f"{slot.label}:")
             label.setFixedWidth(110)
             label.setStyleSheet(_LABEL_STYLE)
-            field = QLineEdit()
+            field = HintableSlotField(
+                slot_index,
+                on_accept_hint=self._try_accept_hint_via_right_arrow,
+            )
             field.setStyleSheet(_FIELD_STYLE)
             field.textChanged.connect(self._update_preview)
             field.installEventFilter(self)
@@ -378,15 +457,16 @@ class RenameFileDialog(QDialog):
                 field.setPlaceholderText(slot.hint)
             elif slot.kind == SLOT_KIND_ADDITIONAL:
                 field.setPlaceholderText("Optional")
+            hint = self._slot_hint(slot_index)
+            field.set_hint_available(bool(hint))
             self._slot_fields[slot_index] = field
             row.addWidget(label)
             row.addWidget(field, 1)
-            hint = self._slot_hint(slot_index)
             if hint:
                 hint_button = QPushButton(hint)
                 hint_button.setStyleSheet(_HINT_CHIP_STYLE)
                 hint_button.setCursor(Qt.CursorShape.PointingHandCursor)
-                hint_button.setToolTip(f'Use "{hint}" (Right Arrow)')
+                hint_button.setToolTip(f'Use "{hint}" (Right Arrow or Down Arrow)')
                 hint_button.clicked.connect(
                     lambda _checked=False, index=slot_index: self._accept_slot_hint(index)
                 )
@@ -421,34 +501,18 @@ class RenameFileDialog(QDialog):
                 field.setStyleSheet(_FIELD_STYLE)
 
     def eventFilter(self, obj, event) -> bool:
-        if isinstance(obj, QLineEdit):
+        if event.type() == QEvent.Type.FocusIn and isinstance(obj, QLineEdit):
             slot_index = obj.property("slot_index")
-            if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Right:
-                if (
-                    event.modifiers() == Qt.KeyboardModifier.NoModifier
-                    and isinstance(slot_index, int)
-                    and slot_index in self._slot_fields
-                ):
-                    field = self._slot_fields[slot_index]
-                    hint = self._slot_hint(slot_index)
-                    if (
-                        hint
-                        and not field.isReadOnly()
-                        and not field.text().strip()
-                    ):
-                        self._accept_slot_hint(slot_index)
-                        return True
-            if event.type() == QEvent.Type.FocusIn:
-                if isinstance(slot_index, int) and slot_index in self._slot_fields:
-                    field = self._slot_fields[slot_index]
-                    if field.isReadOnly():
-                        self._update_target_highlight()
-                        return super().eventFilter(obj, event)
-                    self._focused_slot_index = slot_index
-                    radio = self._slot_radios.get(slot_index)
-                    if radio is not None:
-                        radio.setChecked(True)
+            if isinstance(slot_index, int) and slot_index in self._slot_fields:
+                field = self._slot_fields[slot_index]
+                if field.isReadOnly():
                     self._update_target_highlight()
+                    return super().eventFilter(obj, event)
+                self._focused_slot_index = slot_index
+                radio = self._slot_radios.get(slot_index)
+                if radio is not None:
+                    radio.setChecked(True)
+                self._update_target_highlight()
         return super().eventFilter(obj, event)
 
     def _on_format_changed(self, fmt: FilenameFormat) -> None:
