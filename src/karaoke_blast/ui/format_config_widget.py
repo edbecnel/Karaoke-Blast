@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6 import sip
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
@@ -133,7 +132,15 @@ class FormatConfigWidget(QWidget):
             widget = item.widget()
             if widget is not None:
                 widget.setParent(None)
-                sip.delete(widget)
+                widget.deleteLater()
+
+    def _schedule_rebuild(self) -> None:
+        QTimer.singleShot(0, self._finish_rebuild)
+
+    def _finish_rebuild(self) -> None:
+        self._rebuild_rows()
+        self._update_preview()
+        self.format_changed.emit(self.format())
 
     def _rebuild_rows(self) -> None:
         self._clear_layout(self._slot_rows_layout)
@@ -233,9 +240,7 @@ class FormatConfigWidget(QWidget):
         slot = self._format.slots[index]
         if slot.kind != SLOT_KIND_SONG:
             slot.enabled = checked
-        self._rebuild_rows()
-        self._update_preview()
-        self.format_changed.emit(self.format())
+        self._schedule_rebuild()
 
     def _move_slot(self, index: int, direction: int) -> None:
         new_index = index + direction
@@ -244,9 +249,7 @@ class FormatConfigWidget(QWidget):
         self._sync_from_fields()
         slots = self._format.slots
         slots[index], slots[new_index] = slots[new_index], slots[index]
-        self._rebuild_rows()
-        self._update_preview()
-        self.format_changed.emit(self.format())
+        self._schedule_rebuild()
 
     def _apply_karaoke_preset(self) -> None:
         self.set_format(DEFAULT_KARAOKE_FORMAT.copy())

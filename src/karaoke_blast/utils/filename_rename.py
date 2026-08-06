@@ -210,6 +210,17 @@ def split_title(stem: str) -> list[str]:
     return [part for part in parts if part]
 
 
+def fixed_slot_values(fmt: FilenameFormat) -> dict[int, str]:
+    """Return auto-fill values for slots configured with a fixed hint."""
+    fmt._normalize_shape()
+    values: dict[int, str] = {}
+    for slot_index in fmt.enabled_slot_indices():
+        slot = fmt.slots[slot_index]
+        if slot.kind == SLOT_KIND_ADDITIONAL and slot.hint_fixed and slot.hint:
+            values[slot_index] = slot.hint
+    return values
+
+
 def default_slot_values(stem: str, fmt: FilenameFormat) -> dict[int, str]:
     """Suggest initial rename values from a filename stem and format configuration."""
     fmt._normalize_shape()
@@ -327,8 +338,21 @@ def parse_slots_from_stem(stem: str, fmt: FilenameFormat) -> dict[int, str] | No
     return _parse_slots_backtrack(cleaned, fmt, enabled_indices, len(enabled_indices) - 1)
 
 
+def has_noncanonical_markers(stem: str) -> bool:
+    """Return True when *stem* contains delimiters stripped during normalization."""
+    if "_" in stem:
+        return True
+    if "[" in stem or "]" in stem:
+        return True
+    if _YOUTUBE_ID_SUFFIX.search(stem):
+        return True
+    return False
+
+
 def looks_canonical(path: Path, fmt: FilenameFormat) -> bool:
     """Return True when *path* already matches the configured format."""
+    if has_noncanonical_markers(path.stem):
+        return False
     slots = parse_slots_from_stem(path.stem, fmt)
     if slots is None:
         return False
