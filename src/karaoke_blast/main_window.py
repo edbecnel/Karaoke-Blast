@@ -1188,12 +1188,14 @@ class MainWindow(QWidget):
             initial_folder=self._youtube_downloads_path(),
             fmt=self._settings.filename_rename_format,
             skip_canonical=self._settings.filename_rename_skip_canonical,
+            auto_fill_slots=self._settings.filename_rename_auto_fill_slots,
             parent=self,
         )
         dialog.file_renamed.connect(self._on_file_renamed)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._settings.filename_rename_format = dialog.format()
             self._settings.filename_rename_skip_canonical = dialog.skip_canonical()
+            self._settings.filename_rename_auto_fill_slots = dialog.auto_fill_slots()
             self._settings.save()
 
     def _on_rename_requested(self, index: int) -> None:

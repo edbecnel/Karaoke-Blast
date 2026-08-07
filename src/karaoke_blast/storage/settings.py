@@ -30,6 +30,7 @@ class Settings:
         self.youtube_downloads_dir: str | None = None
         self.filename_rename_format: FilenameFormat = FilenameFormat()
         self.filename_rename_skip_canonical: bool = True
+        self.filename_rename_auto_fill_slots: bool = False
         self.load()
 
     def load(self) -> None:
@@ -73,6 +74,8 @@ class Settings:
                 self.filename_rename_format = FilenameFormat.from_dict(rename_data)
             if isinstance(data.get("filename_rename_skip_canonical"), bool):
                 self.filename_rename_skip_canonical = data["filename_rename_skip_canonical"]
+            if isinstance(data.get("filename_rename_auto_fill_slots"), bool):
+                self.filename_rename_auto_fill_slots = data["filename_rename_auto_fill_slots"]
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning("Could not load settings: %s", exc)
 
@@ -90,6 +93,7 @@ class Settings:
             "youtube_downloads_dir": self.youtube_downloads_dir,
             "filename_rename": self.filename_rename_format.to_dict(),
             "filename_rename_skip_canonical": self.filename_rename_skip_canonical,
+            "filename_rename_auto_fill_slots": self.filename_rename_auto_fill_slots,
         }
         try:
             _settings_file().write_text(

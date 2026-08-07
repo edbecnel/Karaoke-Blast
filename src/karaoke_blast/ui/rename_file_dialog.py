@@ -28,6 +28,7 @@ from karaoke_blast.utils.filename_rename import (
     SLOT_KIND_ADDITIONAL,
     SLOT_KIND_SONG,
     compose_filename,
+    default_slot_values,
     fixed_slot_values,
     safe_rename,
     split_title,
@@ -194,12 +195,17 @@ class RenameFileDialog(QDialog):
         fmt: FilenameFormat,
         progress_label: str | None = None,
         show_format_config: bool = False,
+        auto_fill_slots: bool = False,
         rename_button_label: str = "Rename & Next",
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._path = path
         self._fmt = fmt.copy()
+        self._auto_fill_slots = auto_fill_slots
+        self._auto_filled_values = (
+            default_slot_values(path.stem, self._fmt) if auto_fill_slots else {}
+        )
         self._parts = split_title(path.stem)
         self._result = RenameResult.CANCELLED
         self._new_path: Path | None = None
@@ -445,6 +451,8 @@ class RenameFileDialog(QDialog):
                 initial = slot.hint
             elif preserved_values is not None and slot_index in preserved_values:
                 initial = preserved_values[slot_index]
+            elif self._auto_fill_slots and slot_index in self._auto_filled_values:
+                initial = self._auto_filled_values[slot_index]
             elif slot_index in fixed:
                 initial = fixed[slot_index]
             if initial:

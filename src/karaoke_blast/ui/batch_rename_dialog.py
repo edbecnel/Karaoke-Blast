@@ -86,11 +86,13 @@ class BatchRenameDialog(QDialog):
         initial_folder: Path | None = None,
         fmt: FilenameFormat,
         skip_canonical: bool = True,
+        auto_fill_slots: bool = False,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._fmt = fmt.copy()
         self._skip_canonical = skip_canonical
+        self._auto_fill_slots = auto_fill_slots
         self._folder = initial_folder
         self._renamed_count = 0
         self._skipped_count = 0
@@ -123,6 +125,16 @@ class BatchRenameDialog(QDialog):
         self._skip_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
         layout.addWidget(self._skip_checkbox)
 
+        self._auto_fill_checkbox = QCheckBox("Auto-fill slots from filename")
+        self._auto_fill_checkbox.setStyleSheet(CHECKBOX_STYLE_WHITE_LABEL)
+        self._auto_fill_checkbox.setChecked(auto_fill_slots)
+        self._auto_fill_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._auto_fill_checkbox.setToolTip(
+            "Map split filename parts to enabled slots in order "
+            "(Song Name, Artist Name, and so on)."
+        )
+        layout.addWidget(self._auto_fill_checkbox)
+
         self._format_widget = FormatConfigWidget()
         self._format_widget.set_format(self._fmt)
         self._format_widget.format_changed.connect(self._on_format_changed)
@@ -153,6 +165,9 @@ class BatchRenameDialog(QDialog):
     def skip_canonical(self) -> bool:
         return self._skip_checkbox.isChecked()
 
+    def auto_fill_slots(self) -> bool:
+        return self._auto_fill_checkbox.isChecked()
+
     def _on_format_changed(self, fmt: FilenameFormat) -> None:
         self._fmt = fmt.copy()
 
@@ -176,6 +191,7 @@ class BatchRenameDialog(QDialog):
         self._folder = folder
         self._fmt = self._format_widget.format()
         self._skip_canonical = self._skip_checkbox.isChecked()
+        self._auto_fill_slots = self._auto_fill_checkbox.isChecked()
         self._run_batch()
 
     def _run_batch(self) -> None:
@@ -202,6 +218,7 @@ class BatchRenameDialog(QDialog):
                 fmt=self._fmt,
                 progress_label=progress,
                 show_format_config=False,
+                auto_fill_slots=self._auto_fill_slots,
                 parent=self.parentWidget(),
             )
             code = dialog.exec()

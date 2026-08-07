@@ -241,12 +241,24 @@ def default_slot_values(stem: str, fmt: FilenameFormat) -> dict[int, str]:
     return values
 
 
+def sanitize_slot_value(value: str) -> str:
+    """Remove invalid filename characters from a single slot value."""
+    cleaned = _INVALID_FILENAME_CHARS.sub("", value)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned.rstrip(". ")
+
+
 def sanitize_filename(name: str) -> str:
-    """Remove invalid filename characters while preserving intentional separators."""
+    """Remove invalid filename characters from a full filename stem."""
     cleaned = _INVALID_FILENAME_CHARS.sub("", name)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     cleaned = cleaned.rstrip(". ")
     return cleaned
+
+
+def finalize_filename(stem: str) -> str:
+    """Trim a composed filename stem without stripping configured separators."""
+    return stem.strip().rstrip(". ")
 
 
 def compose_filename(slot_values: dict[int, str], fmt: FilenameFormat) -> str:
@@ -268,13 +280,13 @@ def compose_filename(slot_values: dict[int, str], fmt: FilenameFormat) -> str:
     if not included:
         return ""
 
-    result = included[0][1]
+    result = sanitize_slot_value(included[0][1])
     for position in range(1, len(included)):
         index = included[position][0]
         separator = fmt.separators[index - 1] if index > 0 else " - "
-        result += separator + included[position][1]
+        result += separator + sanitize_slot_value(included[position][1])
 
-    return sanitize_filename(result)
+    return finalize_filename(result)
 
 
 def format_preview(fmt: FilenameFormat) -> str:
@@ -364,7 +376,7 @@ def looks_canonical(path: Path, fmt: FilenameFormat) -> bool:
 
 def safe_rename(path: Path, new_stem: str) -> Path:
     """Rename *path* to *new_stem* plus the original extension."""
-    cleaned = sanitize_filename(new_stem)
+    cleaned = finalize_filename(new_stem)
     if not cleaned:
         raise RenameError("Filename cannot be empty.")
 
