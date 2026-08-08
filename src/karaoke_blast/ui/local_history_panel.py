@@ -30,6 +30,7 @@ class LocalHistoryPanel(QListWidget):
     queue_requested = pyqtSignal(object)
     remove_requested = pyqtSignal(object)
     clear_requested = pyqtSignal()
+    edit_metadata_requested = pyqtSignal(object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -100,6 +101,10 @@ class LocalHistoryPanel(QListWidget):
         play_next = QAction("Play Next", self)
         play_next.triggered.connect(lambda: self._defer(self.queue_requested, path))
         menu.addAction(play_next)
+
+        edit_meta = QAction("Edit Metadata…", self)
+        edit_meta.triggered.connect(lambda: self._defer(self.edit_metadata_requested, path))
+        menu.addAction(edit_meta)
 
         remove = QAction("Remove from History", self)
         remove.triggered.connect(lambda: self._defer(self.remove_requested, path))

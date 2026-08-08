@@ -40,6 +40,7 @@ from karaoke_blast.storage.youtube_play_history import YouTubePlayHistory
 from karaoke_blast.ui.opening_screen import OpeningScreen
 from karaoke_blast.ui.batch_metadata_dialog import BatchMetadataDialog
 from karaoke_blast.ui.batch_rename_dialog import BatchRenameDialog
+from karaoke_blast.ui.edit_metadata_dialog import EditMetadataDialog
 from karaoke_blast.ui.panel_splitter import PanelSplitter
 from karaoke_blast.ui.rename_file_dialog import RenameFileDialog, RenameResult
 from karaoke_blast.ui.recent_folders_panel import RecentFoldersPanel
@@ -396,6 +397,7 @@ class MainWindow(QWidget):
         self._song_list.history_remove_requested.connect(self._on_history_remove_requested)
         self._song_list.history_clear_requested.connect(self._on_history_clear_requested)
         self._song_list.rename_requested.connect(self._on_rename_requested)
+        self._song_list.edit_metadata_requested.connect(self._on_edit_metadata_requested)
         self._song_list.folder_selected.connect(self._on_start_menu_folder_selected)
         self._song_list.browse_folder_requested.connect(self._open_folder_dialog)
         self._song_list.folder_entered.connect(self._on_folder_entered)
@@ -1625,6 +1627,13 @@ class MainWindow(QWidget):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._settings.filename_rename_format = dialog.format()
             self._settings.save()
+
+    def _on_edit_metadata_requested(self, path: object) -> None:
+        if not isinstance(path, Path):
+            return
+        dialog = EditMetadataDialog(path, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._song_list.refresh_display_labels()
 
     def _on_file_renamed(self, old_path: Path, new_path: Path) -> None:
         try:

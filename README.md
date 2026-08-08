@@ -85,9 +85,9 @@ Toggle **Metadata** to show embedded title, artist, and comments instead of file
 
 Press `L` or click **☰** on the control bar to show or hide the song list. You can also click **×** at the top of the song list panel.
 
-Right-click any song and choose **Play Next** to queue it after the current song finishes. Queued songs appear in the **Queue** panel above the list — click **×** on a song to remove it, or **Clear** to empty the queue. You can also right-click a queued song and choose **Remove from Queue**. Toggle **Current + queue** to show only the playing song and queued songs; the filter turns off automatically when the queue is empty.
+Right-click any song and choose **Play Next** to queue it after the current song finishes. Queued songs appear in the **Queue** panel above the list — click **×** on a song to remove it, or **Clear** to empty the queue. You can also right-click a queued song and choose **Remove from Queue**. Toggle **Current + queue** to show only the playing song and queued songs; the filter turns off automatically when the queue is empty. Right-click a song in the list, queue, **Current + queue**, or History and choose **Edit Metadata…** to change Song Title, Artist Name, and Comments (supported formats only).
 
-Use the **History** tab to see recently played songs from any folder. Double-click to play, or right-click for **Play Now**, **Play Next**, or **Remove from History**. Click **Clear** to empty the history list. History is saved across sessions.
+Use the **History** tab to see recently played songs from any folder. Double-click to play, or right-click for **Play Now**, **Play Next**, **Edit Metadata…**, or **Remove from History**. Click **Clear** to empty the history list. History is saved across sessions.
 
 ## Batch Rename
 

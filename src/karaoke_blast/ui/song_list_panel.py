@@ -160,6 +160,7 @@ class SongListPanel(QWidget):
     history_remove_requested = pyqtSignal(object)
     history_clear_requested = pyqtSignal()
     rename_requested = pyqtSignal(int)
+    edit_metadata_requested = pyqtSignal(object)
     folder_selected = pyqtSignal(object)
     browse_folder_requested = pyqtSignal()
     folder_entered = pyqtSignal(object)
@@ -413,6 +414,9 @@ class SongListPanel(QWidget):
         self._history_list.play_requested.connect(self.history_play_requested.emit)
         self._history_list.queue_requested.connect(self.history_queue_requested.emit)
         self._history_list.remove_requested.connect(self.history_remove_requested.emit)
+        self._history_list.edit_metadata_requested.connect(
+            self.edit_metadata_requested.emit
+        )
         history_layout.addWidget(self._history_list, 1)
 
         self._tabs.addTab(songs_tab, "Songs")
@@ -521,6 +525,10 @@ class SongListPanel(QWidget):
         self._display_format = dialog.format()
         self._refresh_display_labels()
         self.display_format_changed.emit(self._display_format.copy())
+
+    def refresh_display_labels(self) -> None:
+        """Reload list labels after metadata or display settings change."""
+        self._refresh_display_labels()
 
     def _refresh_display_labels(self) -> None:
         self._tag_cache.clear()
@@ -712,6 +720,12 @@ class SongListPanel(QWidget):
             if isinstance(folder, Path):
                 self._show_folder_item_context_menu(pos, folder)
                 return
+            path = item.data(_ROLE_PATH)
+            if isinstance(path, Path):
+                self._show_path_context_menu(
+                    self._list, pos, path, from_queue=False
+                )
+                return
         self._show_song_context_menu(self._list, pos, from_queue=False)
 
     def _show_folder_item_context_menu(self, pos, folder: Path) -> None:
@@ -782,6 +796,12 @@ class SongListPanel(QWidget):
             )
             menu.addAction(remove)
 
+        edit_meta = QAction("Edit Metadata…", self)
+        edit_meta.triggered.connect(
+            lambda: self.edit_metadata_requested.emit(path)
+        )
+        menu.addAction(edit_meta)
+
         menu.exec(list_widget.mapToGlobal(pos))
 
     @staticmethod
@@ -848,6 +868,14 @@ class SongListPanel(QWidget):
         rename = QAction("Rename…", self)
         rename.triggered.connect(lambda: self.rename_requested.emit(index))
         menu.addAction(rename)
+
+        if 0 <= index < len(self._paths):
+            path = self._paths[index]
+            edit_meta = QAction("Edit Metadata…", self)
+            edit_meta.triggered.connect(
+                lambda _checked=False, p=path: self.edit_metadata_requested.emit(p)
+            )
+            menu.addAction(edit_meta)
 
         menu.exec(list_widget.mapToGlobal(pos))
 
