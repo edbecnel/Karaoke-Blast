@@ -53,8 +53,10 @@ from karaoke_blast.ui.youtube_panel import YouTubePanel
 from karaoke_blast.utils.display import display_name
 from karaoke_blast.utils.resources import logo_default_window_size
 from karaoke_blast.utils.video_scanner import (
+    MEDIA_EXTENSIONS,
     child_folders_with_videos,
     folder_has_videos,
+    is_audio_file,
     scan_videos,
 )
 
@@ -423,9 +425,22 @@ class MainWindow(QWidget):
         self._canvas_stack = QStackedWidget(self._video_container)
         self._video_widget = VideoWidget(self._canvas_stack)
         self._youtube_widget = YouTubeWidget(self._canvas_stack)
+        self._message_page = QWidget(self._canvas_stack)
+        self._message_page.setStyleSheet("background-color: #000000;")
+        self._message_page.setMouseTracking(True)
+        message_layout = QVBoxLayout(self._message_page)
+        message_layout.setContentsMargins(24, 24, 24, 24)
+        self._message_label = QLabel(self._message_page)
+        self._message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._message_label.setWordWrap(True)
+        self._message_label.setStyleSheet(
+            "color: white; font-size: 24px; background-color: #000000;"
+        )
+        message_layout.addWidget(self._message_label)
         self._canvas_stack.addWidget(self._video_widget)
         self._canvas_stack.addWidget(self._youtube_widget)
-        self._canvas_stack.setCurrentIndex(0)
+        self._canvas_stack.addWidget(self._message_page)
+        self._canvas_stack.setCurrentWidget(self._video_widget)
 
         self._overlay = QLabel(self._video_container)
         self._overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -434,14 +449,6 @@ class MainWindow(QWidget):
             " padding: 8px 16px; border-radius: 4px; font-size: 14px;"
         )
         self._overlay.hide()
-
-        self._status_label = QLabel(self._video_container)
-        self._status_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._status_label.setStyleSheet(
-            "color: white; font-size: 24px; background: transparent;"
-        )
-        self._status_label.hide()
 
         self._splitter.addWidget(self._left_panel_stack)
         self._splitter.addWidget(self._video_container)
@@ -501,7 +508,7 @@ class MainWindow(QWidget):
             self._youtube_panel.clear_messages()
         self._hide_side_panel()
         self._overlay.hide()
-        self._status_label.hide()
+        self._hide_status_message()
         self._update_local_history_display()
         self._update_youtube_history_display()
         self._stack.setCurrentWidget(self._empty_state)
@@ -612,7 +619,7 @@ class MainWindow(QWidget):
         self._canvas_stack.setGeometry(left, 0, width, h)
         self._video_widget.setGeometry(0, 0, width, h)
         self._youtube_widget.setGeometry(0, 0, width, h)
-        self._reposition_status_label()
+        self._message_page.setGeometry(0, 0, width, h)
         self._reposition_overlay()
         if self._list_visible:
             if self._media_mode == MediaSourceMode.YOUTUBE:
@@ -620,23 +627,30 @@ class MainWindow(QWidget):
             else:
                 self._song_list.raise_edge_grip()
 
-    def _reposition_status_label(self, *, show: bool = False) -> None:
-        w = self._video_container.width()
-        h = self._video_container.height()
-        if w <= 0 or h <= 0:
-            return
-        should_show = show or self._status_label.isVisible()
-        if self._status_label.isVisible():
-            self._status_label.hide()
-            self._video_container.update()
-        self._status_label.setGeometry(0, 0, w, h)
-        if should_show:
-            self._status_label.show()
-            self._status_label.raise_()
-
     def _show_status_message(self, message: str) -> None:
-        self._status_label.setText(message)
-        self._reposition_status_label(show=True)
+        # Use a dedicated stack page (not an overlay on the native VLC HWND).
+        # Windows cannot reliably composite/erase sibling text over VideoWidget.
+        self._message_label.setText(message)
+        self._canvas_stack.setCurrentWidget(self._message_page)
+
+    def _hide_status_message(self) -> None:
+        self._message_label.clear()
+        if self._media_mode == MediaSourceMode.YOUTUBE:
+            self._canvas_stack.setCurrentWidget(self._youtube_widget)
+        else:
+            self._canvas_stack.setCurrentWidget(self._video_widget)
+            if (
+                self._vlc is not None
+                and self._stack.currentWidget() == self._player_page
+            ):
+                QTimer.singleShot(0, self._vlc.bind_output)
+
+    def _show_audio_title(self, path: Path) -> None:
+        """Show a persistent centered title while an audio file plays."""
+        self._show_status_message(display_name(path))
+
+    def _clear_audio_title(self) -> None:
+        self._hide_status_message()
 
     def mouseMoveEvent(self, event) -> None:
         super().mouseMoveEvent(event)
@@ -738,8 +752,6 @@ class MainWindow(QWidget):
             self._controls_timer.start(CONTROLS_HIDE_MS)
 
     def _raise_ui_layers(self) -> None:
-        if self._status_label.isVisible():
-            self._status_label.raise_()
         if self._overlay.isVisible():
             self._overlay.raise_()
 
@@ -800,11 +812,12 @@ class MainWindow(QWidget):
             return
 
         if not allow_empty and not folder_has_videos(folder):
+            formats = ", ".join(MEDIA_EXTENSIONS)
             QMessageBox.information(
                 self,
-                "No Videos Found",
-                f"No supported video files found in:\n{folder}\n\n"
-                "Supported formats: .mp4, .mkv, .avi, .mov, .webm, .m4v",
+                "No Media Found",
+                f"No supported media files found in:\n{folder}\n\n"
+                f"Supported formats: {formats}",
             )
             return
 
@@ -830,7 +843,7 @@ class MainWindow(QWidget):
         )
         self._stopped = True
         self._overlay.hide()
-        self._status_label.hide()
+        self._hide_status_message()
         self._stack.setCurrentWidget(self._player_page)
         self.showFullScreen()
         self._sync_fullscreen_control()
@@ -1080,8 +1093,6 @@ class MainWindow(QWidget):
         super().showEvent(event)
         if self._vlc is not None:
             self._vlc.bind_output()
-        if hasattr(self, "_status_label") and self._status_label.isVisible():
-            QTimer.singleShot(0, self._reposition_status_label)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._save_launch_window_geometry()
@@ -1103,6 +1114,7 @@ class MainWindow(QWidget):
         self._controls.set_playing(False)
         self._stop_seek_updates()
         self._seek_bar.reset()
+        self._clear_audio_title()
 
     def _switch_to_local_mode(self, *, clear_youtube_queue: bool = False) -> None:
         if self._youtube_player is not None:
@@ -1114,7 +1126,7 @@ class MainWindow(QWidget):
         self._media_mode = MediaSourceMode.LOCAL
         self._youtube_panel.clear_messages()
         self._left_panel_stack.setCurrentIndex(0)
-        self._canvas_stack.setCurrentIndex(0)
+        self._canvas_stack.setCurrentWidget(self._video_widget)
         self._controls.set_media_mode(MediaSourceMode.LOCAL)
         self._update_youtube_queue_display()
         self._update_youtube_history_display()
@@ -1126,7 +1138,7 @@ class MainWindow(QWidget):
         self._freeze_local_playback()
         self._media_mode = MediaSourceMode.YOUTUBE
         self._left_panel_stack.setCurrentIndex(1)
-        self._canvas_stack.setCurrentIndex(1)
+        self._canvas_stack.setCurrentWidget(self._youtube_widget)
         self._controls.set_media_mode(MediaSourceMode.YOUTUBE)
         self._stack.setCurrentWidget(self._player_page)
         self.showFullScreen()
@@ -1150,7 +1162,7 @@ class MainWindow(QWidget):
             self._freeze_local_playback()
             self._media_mode = MediaSourceMode.YOUTUBE
             self._left_panel_stack.setCurrentIndex(1)
-            self._canvas_stack.setCurrentIndex(1)
+            self._canvas_stack.setCurrentWidget(self._youtube_widget)
             self._controls.set_media_mode(MediaSourceMode.YOUTUBE)
             self._stack.setCurrentWidget(self._player_page)
             self.showFullScreen()
@@ -1158,7 +1170,8 @@ class MainWindow(QWidget):
             self._show_side_panel()
         self._current_youtube = video
         self._youtube_stopped = False
-        self._status_label.hide()
+        self._canvas_stack.setCurrentWidget(self._youtube_widget)
+        self._message_label.clear()
         if self._youtube_queue.contains(video.video_id):
             self._youtube_queue.remove(video.video_id)
         self._youtube_player.play(
@@ -1288,7 +1301,10 @@ class MainWindow(QWidget):
             queue_changed = True
         self._stopped = False
         self._external_path = None
-        self._status_label.hide()
+        if is_audio_file(current):
+            self._show_audio_title(current)
+        else:
+            self._clear_audio_title()
         self._show_overlay()
         self._show_controls()
         self._vlc.play(current)
@@ -1318,7 +1334,10 @@ class MainWindow(QWidget):
             return
         self._stopped = False
         self._external_path = path
-        self._status_label.hide()
+        if is_audio_file(path):
+            self._show_audio_title(path)
+        else:
+            self._clear_audio_title()
         self._show_overlay_for_path(path)
         self._show_controls()
         self._vlc.play(path)
@@ -1937,6 +1956,7 @@ class MainWindow(QWidget):
         self._controls.set_playing(False)
         self._stop_seek_updates()
         self._seek_bar.reset()
+        self._clear_audio_title()
         self._save_folder_state()
         self._update_local_history_display()
         self._show_controls()
