@@ -97,6 +97,17 @@ By default the pattern is `{Song Name} - {Artist Name} - {Karaoke}` with a fourt
 
 Settings are saved in `settings.json` under `filename_rename`. Legacy two-slot + suffix settings are migrated automatically on load.
 
+## Tag Metadata
+
+Use **Tag Metadata** on the startup screen to write embedded **Title**, **Artist**, and optional **Comment** tags from filename slots — without renaming files.
+
+1. Choose a folder and the same four-slot filename format used for Batch Rename.
+2. Check which slots should be copied into the **Comments** property (for example a fixed **Karaoke** slot).
+3. Optionally auto-fill slots from the filename and skip files that already have Title and Artist.
+4. Review each file one at a time with the same part-chip UI as rename, then **Apply Metadata & Next** or **Skip**.
+
+Supported containers: MP3, MP4/M4A/M4V, FLAC, OGG/Opus, and WAV. Unsupported types (for example some MKV/WebM/AVI files) are skipped and counted in the summary. Preferences are saved in `settings.json` (`metadata_comment_slot_indices`, `metadata_auto_fill_slots`, `metadata_skip_tagged`); the slot layout reuses `filename_rename`.
+
 ## YouTube Streaming
 
 Click **Search YouTube** on the startup screen, or press `Y`, to enter YouTube mode.

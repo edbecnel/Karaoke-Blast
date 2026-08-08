@@ -38,6 +38,7 @@ from karaoke_blast.storage.local_play_history import LocalPlayHistory
 from karaoke_blast.storage.settings import Settings
 from karaoke_blast.storage.youtube_play_history import YouTubePlayHistory
 from karaoke_blast.ui.opening_screen import OpeningScreen
+from karaoke_blast.ui.batch_metadata_dialog import BatchMetadataDialog
 from karaoke_blast.ui.batch_rename_dialog import BatchRenameDialog
 from karaoke_blast.ui.panel_splitter import PanelSplitter
 from karaoke_blast.ui.rename_file_dialog import RenameFileDialog, RenameResult
@@ -279,10 +280,20 @@ class MainWindow(QWidget):
         )
         rename_btn.clicked.connect(self._open_batch_rename_dialog)
 
+        metadata_btn = QPushButton("Tag Metadata")
+        metadata_btn.setFixedSize(180, 48)
+        metadata_btn.setStyleSheet(
+            "QPushButton { background: #2d2d42; color: white; border: 1px solid #5a5a72;"
+            " border-radius: 8px; font-size: 16px; font-weight: bold; }"
+            "QPushButton:hover { background: #3a3a52; border-color: #7a7a92; }"
+        )
+        metadata_btn.clicked.connect(self._open_batch_metadata_dialog)
+
         layout.addWidget(subtitle)
         layout.addWidget(open_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(youtube_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(rename_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(metadata_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self._recent_folders = RecentFoldersPanel()
         self._recent_folders.folder_selected.connect(self._on_start_menu_folder_selected)
@@ -1558,6 +1569,22 @@ class MainWindow(QWidget):
             self._settings.filename_rename_format = dialog.format()
             self._settings.filename_rename_skip_canonical = dialog.skip_canonical()
             self._settings.filename_rename_auto_fill_slots = dialog.auto_fill_slots()
+            self._settings.save()
+
+    def _open_batch_metadata_dialog(self) -> None:
+        dialog = BatchMetadataDialog(
+            initial_folder=self._youtube_downloads_path(),
+            fmt=self._settings.filename_rename_format,
+            skip_tagged=self._settings.metadata_skip_tagged,
+            auto_fill_slots=self._settings.metadata_auto_fill_slots,
+            comment_slot_indices=self._settings.metadata_comment_slot_indices,
+            parent=self,
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._settings.filename_rename_format = dialog.format()
+            self._settings.metadata_skip_tagged = dialog.skip_tagged()
+            self._settings.metadata_auto_fill_slots = dialog.auto_fill_slots()
+            self._settings.metadata_comment_slot_indices = dialog.comment_slot_indices()
             self._settings.save()
 
     def _on_rename_requested(self, index: int) -> None:

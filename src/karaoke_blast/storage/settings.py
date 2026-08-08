@@ -31,6 +31,9 @@ class Settings:
         self.filename_rename_format: FilenameFormat = FilenameFormat()
         self.filename_rename_skip_canonical: bool = True
         self.filename_rename_auto_fill_slots: bool = False
+        self.metadata_comment_slot_indices: list[int] | None = None
+        self.metadata_auto_fill_slots: bool = False
+        self.metadata_skip_tagged: bool = True
         self.load()
 
     def load(self) -> None:
@@ -76,6 +79,19 @@ class Settings:
                 self.filename_rename_skip_canonical = data["filename_rename_skip_canonical"]
             if isinstance(data.get("filename_rename_auto_fill_slots"), bool):
                 self.filename_rename_auto_fill_slots = data["filename_rename_auto_fill_slots"]
+            comment_indices = data.get("metadata_comment_slot_indices")
+            if comment_indices is None:
+                self.metadata_comment_slot_indices = None
+            elif isinstance(comment_indices, list):
+                parsed: list[int] = []
+                for item in comment_indices:
+                    if isinstance(item, int) and 0 <= item < 4 and item not in parsed:
+                        parsed.append(item)
+                self.metadata_comment_slot_indices = parsed
+            if isinstance(data.get("metadata_auto_fill_slots"), bool):
+                self.metadata_auto_fill_slots = data["metadata_auto_fill_slots"]
+            if isinstance(data.get("metadata_skip_tagged"), bool):
+                self.metadata_skip_tagged = data["metadata_skip_tagged"]
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning("Could not load settings: %s", exc)
 
@@ -94,6 +110,13 @@ class Settings:
             "filename_rename": self.filename_rename_format.to_dict(),
             "filename_rename_skip_canonical": self.filename_rename_skip_canonical,
             "filename_rename_auto_fill_slots": self.filename_rename_auto_fill_slots,
+            "metadata_comment_slot_indices": (
+                None
+                if self.metadata_comment_slot_indices is None
+                else list(self.metadata_comment_slot_indices)
+            ),
+            "metadata_auto_fill_slots": self.metadata_auto_fill_slots,
+            "metadata_skip_tagged": self.metadata_skip_tagged,
         }
         try:
             _settings_file().write_text(
