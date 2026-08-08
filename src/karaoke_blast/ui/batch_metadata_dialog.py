@@ -12,7 +12,6 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMenu,
     QMessageBox,
     QPushButton,
@@ -23,6 +22,7 @@ from PyQt6.QtWidgets import (
 from karaoke_blast.ui.checkbox_style import CHECKBOX_STYLE_WHITE_LABEL
 from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
 from karaoke_blast.ui.format_config_widget import FormatConfigWidget
+from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
 from karaoke_blast.ui.metadata_file_dialog import MetadataFileDialog, MetadataResult
 from karaoke_blast.ui.recent_folders_panel import PINNED_LABEL
 from karaoke_blast.utils.filename_rename import (
@@ -127,7 +127,7 @@ class BatchMetadataDialog(QDialog):
         folder_row = QHBoxLayout()
         folder_label = QLabel("Folder:")
         folder_label.setStyleSheet("color: #ccc; font-size: 13px;")
-        self._folder_field = QLineEdit()
+        self._folder_field = VisibleSpaceLineEdit()
         self._folder_field.setReadOnly(True)
         self._folder_field.setStyleSheet(_FIELD_STYLE)
         self._folder_btn = QPushButton("Choose…")

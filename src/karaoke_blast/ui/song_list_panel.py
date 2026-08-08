@@ -10,7 +10,6 @@ from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListWidgetItem,
     QMenu,
     QPushButton,
@@ -28,6 +27,7 @@ from karaoke_blast.ui.list_style import QUEUE_LIST_STYLE, SIDEBAR_LIST_STYLE
 from karaoke_blast.ui.local_history_panel import LocalHistoryPanel
 from karaoke_blast.ui.panel_splitter import EDGE_GRIP_WIDTH, PanelEdgeGrip
 from karaoke_blast.ui.recent_folders_panel import PINNED_LABEL
+from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
 from karaoke_blast.ui.queue_list_widget import PlayOrderListWidget, _ROLE_INDEX, _ROLE_PATH
 from karaoke_blast.utils.song_display import (
     DEFAULT_DISPLAY_FORMAT,
@@ -305,7 +305,7 @@ class SongListPanel(QWidget):
         self._sort_combo.currentIndexChanged.connect(self._on_sort_changed)
         songs_layout.addWidget(self._sort_combo)
 
-        self._search = QLineEdit()
+        self._search = VisibleSpaceLineEdit()
         self._search.setPlaceholderText("Search songs…")
         self._search.setClearButtonEnabled(True)
         self._search.setStyleSheet(SEARCH_STYLE)

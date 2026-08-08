@@ -8,7 +8,6 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMenu,
@@ -27,6 +26,7 @@ from karaoke_blast.ui.checkbox_style import CHECKBOX_STYLE
 from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
 from karaoke_blast.ui.list_style import SIDEBAR_LIST_STYLE
 from karaoke_blast.ui.panel_splitter import EDGE_GRIP_WIDTH, PanelEdgeGrip
+from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
 from karaoke_blast.ui.youtube_queue_widget import format_duration
 from karaoke_blast.utils.youtube_query import build_karaoke_query
 
@@ -194,8 +194,8 @@ class YouTubeSearchPanel(QWidget):
         self._edge_grip.dragged.connect(self.resize_dragged.emit)
         self._edge_grip.raise_()
 
-    def _make_input(self, placeholder: str) -> QLineEdit:
-        field = QLineEdit()
+    def _make_input(self, placeholder: str) -> VisibleSpaceLineEdit:
+        field = VisibleSpaceLineEdit()
         field.setPlaceholderText(placeholder)
         field.setClearButtonEnabled(True)
         field.setStyleSheet(INPUT_STYLE)

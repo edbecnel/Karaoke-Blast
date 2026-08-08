@@ -10,12 +10,12 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QLabel,
-    QLineEdit,
     QMessageBox,
     QVBoxLayout,
     QWidget,
 )
 
+from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
 from karaoke_blast.utils.display import display_name
 from karaoke_blast.utils.media_metadata import (
     MetadataError,
@@ -116,21 +116,21 @@ class EditMetadataDialog(QDialog):
         form.setSpacing(8)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
-        self._title_field = QLineEdit()
+        self._title_field = VisibleSpaceLineEdit()
         self._title_field.setStyleSheet(_FIELD_STYLE)
         self._title_field.setPlaceholderText("Song title (required)")
         title_label = QLabel("Song Title")
         title_label.setStyleSheet(_LABEL_STYLE)
         form.addRow(title_label, self._title_field)
 
-        self._artist_field = QLineEdit()
+        self._artist_field = VisibleSpaceLineEdit()
         self._artist_field.setStyleSheet(_FIELD_STYLE)
         self._artist_field.setPlaceholderText("Artist name")
         artist_label = QLabel("Artist Name")
         artist_label.setStyleSheet(_LABEL_STYLE)
         form.addRow(artist_label, self._artist_field)
 
-        self._comment_field = QLineEdit()
+        self._comment_field = VisibleSpaceLineEdit()
         self._comment_field.setStyleSheet(_FIELD_STYLE)
         self._comment_field.setPlaceholderText("Comments")
         comment_label = QLabel("Comments")

@@ -467,7 +467,7 @@ class MetadataFileDialog(QDialog):
         self._update_preview()
 
     def _slot_values(self) -> dict[int, str]:
-        return {index: field.text() for index, field in self._slot_fields.items()}
+        return {index: field.text().strip() for index, field in self._slot_fields.items()}
 
     def _resolved_title_artist_comment(self) -> tuple[str, str, str]:
         values = self._slot_values()

@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 )
 
 from karaoke_blast.ui.format_config_widget import FormatConfigWidget
+from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
 from karaoke_blast.utils.filename_rename import (
     FilenameFormat,
     FormatSlot,
@@ -112,7 +113,7 @@ QLineEdit {
 """
 
 
-class HintableSlotField(QLineEdit):
+class HintableSlotField(VisibleSpaceLineEdit):
     """Slot input that can accept a configured hint via arrow keys."""
 
     _HINT_ACCEPT_KEYS = frozenset(
@@ -132,7 +133,7 @@ class HintableSlotField(QLineEdit):
         on_accept_hint,
         parent: QWidget | None = None,
     ) -> None:
-        super().__init__(parent)
+        super().__init__(parent=parent)
         self._slot_index = slot_index
         self._on_accept_hint = on_accept_hint
         self._hint_available = False
@@ -543,7 +544,7 @@ class RenameFileDialog(QDialog):
         self._update_preview()
 
     def _slot_values(self) -> dict[int, str]:
-        return {index: field.text() for index, field in self._slot_fields.items()}
+        return {index: field.text().strip() for index, field in self._slot_fields.items()}
 
     def _update_preview(self, *_args) -> None:
         preview = compose_filename(self._slot_values(), self.format())

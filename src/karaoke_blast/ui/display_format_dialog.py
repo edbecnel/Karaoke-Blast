@@ -9,13 +9,13 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from karaoke_blast.ui.checkbox_style import CHECKBOX_STYLE_WHITE_LABEL
+from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
 from karaoke_blast.utils.song_display import (
     DisplayFormat,
     format_display_preview,
@@ -82,7 +82,7 @@ class DisplayFormatDialog(QDialog):
         self._building = False
         self._slot_rows_layout = QVBoxLayout()
         self._slot_rows_layout.setSpacing(4)
-        self._separator_fields: list[QLineEdit] = []
+        self._separator_fields: list[VisibleSpaceLineEdit] = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -149,7 +149,7 @@ class DisplayFormatDialog(QDialog):
                 sep_row = QHBoxLayout()
                 sep_label = QLabel("Separator")
                 sep_label.setStyleSheet(_SEP_LABEL_STYLE)
-                sep_field = QLineEdit()
+                sep_field = VisibleSpaceLineEdit(trim_edges=False)
                 sep_field.setFixedHeight(28)
                 sep_field.setMaximumWidth(120)
                 sep_field.setStyleSheet(_FIELD_STYLE)

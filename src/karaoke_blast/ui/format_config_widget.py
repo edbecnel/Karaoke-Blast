@@ -7,13 +7,13 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from karaoke_blast.ui.checkbox_style import CHECKBOX_STYLE_WHITE_LABEL
+from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
 from karaoke_blast.utils.filename_rename import (
     DEFAULT_KARAOKE_FORMAT,
     SLOT_KIND_ADDITIONAL,
@@ -79,9 +79,9 @@ class FormatConfigWidget(QWidget):
         self._building = False
         self._slot_rows_layout = QVBoxLayout()
         self._slot_rows_layout.setSpacing(4)
-        self._separator_fields: list[QLineEdit] = []
-        self._label_fields: dict[int, QLineEdit] = {}
-        self._hint_fields: dict[int, QLineEdit] = {}
+        self._separator_fields: list[VisibleSpaceLineEdit] = []
+        self._label_fields: dict[int, VisibleSpaceLineEdit] = {}
+        self._hint_fields: dict[int, VisibleSpaceLineEdit] = {}
         self._hint_fixed_boxes: dict[int, QCheckBox] = {}
 
         layout = QVBoxLayout(self)
@@ -154,7 +154,7 @@ class FormatConfigWidget(QWidget):
                 sep_row = QHBoxLayout()
                 sep_label = QLabel("Separator")
                 sep_label.setStyleSheet(_SEP_LABEL_STYLE)
-                sep_field = QLineEdit()
+                sep_field = VisibleSpaceLineEdit(trim_edges=False)
                 sep_field.setFixedHeight(28)
                 sep_field.setMaximumWidth(120)
                 sep_field.setStyleSheet(_FIELD_STYLE)
@@ -187,14 +187,16 @@ class FormatConfigWidget(QWidget):
             row.addWidget(badge)
 
             if slot.kind == SLOT_KIND_ADDITIONAL:
-                label_field = QLineEdit(slot.label)
+                label_field = VisibleSpaceLineEdit()
+                label_field.setText(slot.label)
                 label_field.setStyleSheet(_FIELD_STYLE)
                 label_field.setPlaceholderText("Slot label")
                 label_field.textChanged.connect(self._on_field_changed)
                 self._label_fields[index] = label_field
                 row.addWidget(label_field, 1)
 
-                hint_field = QLineEdit(slot.hint)
+                hint_field = VisibleSpaceLineEdit()
+                hint_field.setText(slot.hint)
                 hint_field.setStyleSheet(_FIELD_STYLE)
                 hint_field.setPlaceholderText("Hint or default value")
                 hint_field.textChanged.connect(self._on_field_changed)

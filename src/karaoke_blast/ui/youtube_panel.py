@@ -9,7 +9,6 @@ from PyQt6.QtGui import QColor, QPalette
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
     QTabWidget,
     QVBoxLayout,
@@ -18,6 +17,7 @@ from PyQt6.QtWidgets import (
 
 from karaoke_blast.models.youtube_video import YouTubeVideo
 from karaoke_blast.ui.panel_splitter import EDGE_GRIP_WIDTH
+from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
 from karaoke_blast.ui.youtube_download_status import YouTubeDownloadStatus
 from karaoke_blast.ui.youtube_downloads_folder_row import YouTubeDownloadsFolderRow
 from karaoke_blast.ui.youtube_history_panel import YouTubeHistoryPanel
@@ -158,7 +158,7 @@ class YouTubePanel(QWidget):
         url_header.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
         url_layout.addWidget(url_header)
 
-        self._url_input = QLineEdit()
+        self._url_input = VisibleSpaceLineEdit()
         self._url_input.setPlaceholderText("https://www.youtube.com/watch?v=…")
         self._url_input.setClearButtonEnabled(True)
         self._url_input.setStyleSheet(INPUT_STYLE)

@@ -251,6 +251,8 @@ def write_tags(
     """
     title = title.strip()
     artist = artist.strip()
+    if comment is not None:
+        comment = comment.strip()
     if not title:
         raise MetadataError("Title cannot be empty.")
 

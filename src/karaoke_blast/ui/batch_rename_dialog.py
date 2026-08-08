@@ -11,7 +11,6 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
@@ -20,6 +19,7 @@ from PyQt6.QtWidgets import (
 
 from karaoke_blast.ui.checkbox_style import CHECKBOX_STYLE_WHITE_LABEL
 from karaoke_blast.ui.format_config_widget import FormatConfigWidget
+from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
 from karaoke_blast.ui.rename_file_dialog import RenameFileDialog, RenameResult
 from karaoke_blast.utils.filename_rename import FilenameFormat, looks_canonical
 from karaoke_blast.utils.video_scanner import scan_videos
@@ -108,7 +108,7 @@ class BatchRenameDialog(QDialog):
         folder_row = QHBoxLayout()
         folder_label = QLabel("Folder:")
         folder_label.setStyleSheet("color: #ccc; font-size: 13px;")
-        self._folder_field = QLineEdit()
+        self._folder_field = VisibleSpaceLineEdit()
         self._folder_field.setReadOnly(True)
         self._folder_field.setStyleSheet(_FIELD_STYLE)
         browse_btn = QPushButton("Browse…")
