@@ -8,25 +8,29 @@ Full-screen karaoke video player and manager. Open a local folder of videos and 
 
 ## Requirements
 
-- Python 3.11+
-- [VLC media player](https://www.videolan.org/vlc/) installed on your system (for local files)
-- [ffmpeg](https://ffmpeg.org/) on your system PATH (required to merge YouTube video and audio when downloading)
+### Install manually (system)
 
-### Install VLC
+These must be installed on the machine before running the app:
 
-| Platform | Command |
+| Dependency | Why | macOS | Windows | Linux |
+|---|---|---|---|---|
+| Python 3.11+ | Runs the app | `brew install python@3.12` (or any 3.11+) | [python.org](https://www.python.org/downloads/) | Distro package manager |
+| [VLC](https://www.videolan.org/vlc/) | Local file playback (`python-vlc`) | `brew install vlc` | Download from [videolan.org](https://www.videolan.org/vlc/) | `sudo apt install vlc` (or your distro's package manager) |
+| [ffmpeg](https://ffmpeg.org/) on PATH | Merge YouTube video + audio when downloading | `brew install ffmpeg` | Download from [ffmpeg.org](https://ffmpeg.org/download.html) and add to PATH | `sudo apt install ffmpeg` (or your distro's package manager) |
+
+### Python packages (`pip install -e .`)
+
+These are installed automatically into your virtualenv when you run Quick Start below:
+
+| Package | Purpose |
 |---|---|
-| macOS | `brew install vlc` |
-| Windows | Download from [videolan.org](https://www.videolan.org/vlc/) |
-| Linux | `sudo apt install vlc` (or your distro's package manager) |
+| PyQt6 | Desktop UI |
+| PyQt6-WebEngine | Embedded YouTube player |
+| python-vlc | Local playback (requires VLC installed on the system) |
+| yt-dlp | YouTube search and download |
+| mutagen | Read/write media tags and metadata song-list labels |
 
-### Install ffmpeg (for YouTube downloads)
-
-| Platform | Command |
-|---|---|
-| macOS | `brew install ffmpeg` |
-| Windows | Download from [ffmpeg.org](https://ffmpeg.org/download.html) and add to PATH |
-| Linux | `sudo apt install ffmpeg` (or your distro's package manager) |
+If you already have a virtualenv from an older checkout, re-run `pip install -e .` so newer dependencies (such as mutagen) are installed.
 
 ## Quick Start
 
