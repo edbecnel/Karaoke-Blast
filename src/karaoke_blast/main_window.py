@@ -1623,10 +1623,15 @@ class MainWindow(QWidget):
             rename_button_label="Rename",
             parent=self,
         )
-        dialog.file_renamed.connect(self._on_file_renamed)
+        self.raise_()
+        self.activateWindow()
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._settings.filename_rename_format = dialog.format()
             self._settings.save()
+            if dialog.result_value() == RenameResult.RENAMED:
+                new_path = dialog.new_path()
+                if new_path is not None:
+                    self._on_file_renamed(path, new_path)
 
     def _on_edit_metadata_requested(self, path: object) -> None:
         if not isinstance(path, Path):

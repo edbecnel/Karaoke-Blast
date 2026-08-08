@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, Qt
 from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import (
     QButtonGroup,
@@ -187,8 +187,6 @@ class RenameResult(Enum):
 class RenameFileDialog(QDialog):
     """Assign split title parts to filename slots and rename a file."""
 
-    file_renamed = pyqtSignal(object, object)
-
     def __init__(
         self,
         path: Path,
@@ -224,7 +222,7 @@ class RenameFileDialog(QDialog):
         self._target_group.idToggled.connect(self._on_target_selected)
 
         self.setWindowTitle("Rename File")
-        self.setModal(True)
+        self.setWindowModality(Qt.WindowModality.WindowModal)
         self.setMinimumWidth(560)
         self.setStyleSheet(_DIALOG_STYLE)
 
@@ -573,5 +571,4 @@ class RenameFileDialog(QDialog):
 
         self._result = RenameResult.RENAMED
         self._new_path = new_path
-        self.file_renamed.emit(self._path, new_path)
         self.accept()
