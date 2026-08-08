@@ -67,6 +67,13 @@ def _same_paths(left: list[Path], right: list[Path]) -> bool:
     return all(a.resolve() == b.resolve() for a, b in zip(left, right, strict=True))
 
 
+def _resolved_path(path: Path) -> Path:
+    try:
+        return path.resolve()
+    except OSError:
+        return path
+
+
 class MainWindow(QWidget):
     """Full-screen karaoke player with folder-based playlist."""
 
@@ -336,6 +343,10 @@ class MainWindow(QWidget):
         self._song_list.song_selected.connect(self._on_song_selected)
         self._song_list.play_next_requested.connect(self._on_play_next_requested)
         self._song_list.remove_from_queue_requested.connect(self._on_remove_from_queue)
+        self._song_list.remove_path_from_queue_requested.connect(
+            self._on_remove_path_from_queue
+        )
+        self._song_list.play_path_requested.connect(self._play_local_path)
         self._song_list.clear_queue_requested.connect(self._on_clear_queue)
         self._song_list.queue_reordered.connect(self._on_queue_reordered)
         self._song_list.sort_changed.connect(self._on_sort_changed)
@@ -1043,8 +1054,9 @@ class MainWindow(QWidget):
         if not path.exists():
             self._show_toast(f'"{display_name(path)}" not found', duration_ms=5000)
             return
-        if path in self._playlist.paths:
-            self._playlist.go_to(self._playlist.paths.index(path))
+        index = self._playlist_index_for_path(path)
+        if index is not None:
+            self._playlist.go_to(index)
             self._play_current()
             return
         self._stopped = False
@@ -1057,11 +1069,29 @@ class MainWindow(QWidget):
         self._local_history.add(path)
         self._update_local_history_display()
         self._apply_saved_audio()
-        if path in self._playlist.paths:
-            self._song_list.set_current_index(self._playlist.paths.index(path))
+        self._song_list.clear_current_index()
         self._update_queue_display(include_now_playing=True)
         self._start_seek_updates()
         self._raise_ui_layers()
+
+    def _playlist_index_for_path(self, path: Path) -> int | None:
+        resolved = _resolved_path(path)
+        for index, playlist_path in enumerate(self._playlist.paths):
+            if _resolved_path(playlist_path) == resolved:
+                return index
+        return None
+
+    def _is_external_now_playing(self, path: Path) -> bool:
+        if self._stopped or self._external_path is None:
+            return False
+        return _resolved_path(self._external_path) == _resolved_path(path)
+
+    def _is_path_in_path_queue(self, path: Path) -> bool:
+        resolved = _resolved_path(path)
+        return any(_resolved_path(queued) == resolved for queued in self._path_queue.paths())
+
+    def _is_local_idle(self) -> bool:
+        return self._stopped and self._external_path is None
 
     def _show_overlay_for_path(self, path: Path) -> None:
         text = display_name(path)
@@ -1088,10 +1118,43 @@ class MainWindow(QWidget):
         self._play_local_path(path)
 
     def _on_history_queue_requested(self, path: Path) -> None:
-        if path in self._playlist.paths:
-            self._on_play_next_requested(self._playlist.paths.index(path))
+        index = self._playlist_index_for_path(path)
+        if index is not None:
+            self._queue_local_path_by_index(index)
+            return
+        self._queue_external_path(path)
+
+    def _queue_local_path_by_index(self, index: int) -> None:
+        if index < 0 or index >= self._playlist.count:
+            return
+        if not self._stopped and index == self._playlist.index and self._external_path is None:
+            self._show_toast("That song is already playing.")
+            return
+        if self._play_queue.contains(index):
+            self._show_toast("That song is already queued.")
+            return
+        if self._is_local_idle():
+            self._playlist.go_to(index)
+            self._play_current()
+            return
+        if self._play_queue.enqueue(index):
+            self._update_queue_display()
+            self._show_toast(
+                f'Queued "{display_name(self._playlist.paths[index])}"'
+            )
+
+    def _queue_external_path(self, path: Path) -> None:
+        if self._is_external_now_playing(path):
+            self._show_toast("That song is already playing.")
+            return
+        if self._is_path_in_path_queue(path):
+            self._show_toast("That song is already queued.")
+            return
+        if self._is_local_idle():
+            self._play_local_path(path)
             return
         if self._path_queue.enqueue(path):
+            self._update_queue_display()
             self._show_toast(f'Queued "{display_name(path)}"')
 
     def _on_history_remove_requested(self, path: Path) -> None:
@@ -1386,10 +1449,17 @@ class MainWindow(QWidget):
     def _on_play_next_requested(self, index: int) -> None:
         if index < 0 or index >= self._playlist.count:
             return
-        if not self._stopped and index == self._playlist.index:
+        if not self._stopped and index == self._playlist.index and self._external_path is None:
+            self._show_toast("That song is already playing.")
+            return
+        if self._play_queue.contains(index):
+            self._show_toast("That song is already queued.")
             return
         if self._play_queue.enqueue(index):
             self._update_queue_display()
+            self._show_toast(
+                f'Queued "{display_name(self._playlist.paths[index])}"'
+            )
 
     def _on_remove_from_queue(self, index: int) -> None:
         removing_now_playing = not self._stopped and index == self._playlist.index
@@ -1400,8 +1470,17 @@ class MainWindow(QWidget):
             return
         self._update_queue_display()
 
+    def _on_remove_path_from_queue(self, path: Path) -> None:
+        if self._is_external_now_playing(path):
+            self._on_stop()
+            self._update_queue_display(include_now_playing=False)
+            return
+        self._path_queue.remove(path)
+        self._update_queue_display()
+
     def _on_clear_queue(self) -> None:
         self._play_queue.clear()
+        self._path_queue.clear()
         if not self._stopped:
             self._on_stop()
         self._update_queue_display(include_now_playing=False)
@@ -1411,9 +1490,14 @@ class MainWindow(QWidget):
         self._update_queue_display()
 
     def _update_queue_display(self, *, include_now_playing: bool | None = None) -> None:
+        external_current = None
+        if include_now_playing is not False and not self._stopped:
+            external_current = self._external_path
         self._song_list.set_queue_indices(
             self._play_queue.indices(),
             include_now_playing=include_now_playing,
+            external_current=external_current,
+            path_queue=self._path_queue.paths(),
         )
         self._save_folder_state()
 
@@ -1500,11 +1584,7 @@ class MainWindow(QWidget):
         if self._vlc is None:
             return
         if self._stopped or self._playlist.current() is None:
-            if (
-                self._stopped
-                and self._play_queue
-                and self._song_list.playing_index() is None
-            ):
+            if self._stopped and (self._play_queue or self._path_queue):
                 self._advance_to_next_track()
             else:
                 self._play_current()

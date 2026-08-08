@@ -34,5 +34,8 @@ class PathQueue:
     def clear(self) -> None:
         self._paths.clear()
 
+    def paths(self) -> list[Path]:
+        return list(self._paths)
+
     def __len__(self) -> int:
         return len(self._paths)

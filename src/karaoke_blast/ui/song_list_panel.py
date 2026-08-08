@@ -24,7 +24,7 @@ from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
 from karaoke_blast.ui.list_style import QUEUE_LIST_STYLE, SIDEBAR_LIST_STYLE
 from karaoke_blast.ui.local_history_panel import LocalHistoryPanel
 from karaoke_blast.ui.panel_splitter import EDGE_GRIP_WIDTH, PanelEdgeGrip
-from karaoke_blast.ui.queue_list_widget import PlayOrderListWidget
+from karaoke_blast.ui.queue_list_widget import PlayOrderListWidget, _ROLE_INDEX, _ROLE_PATH
 from karaoke_blast.utils.display import display_name
 
 PANEL_DEFAULT_WIDTH = 320
@@ -106,6 +106,8 @@ class SongListPanel(QWidget):
     song_selected = pyqtSignal(int)
     play_next_requested = pyqtSignal(int)
     remove_from_queue_requested = pyqtSignal(int)
+    remove_path_from_queue_requested = pyqtSignal(object)
+    play_path_requested = pyqtSignal(object)
     clear_queue_requested = pyqtSignal()
     queue_reordered = pyqtSignal(list)
     sort_changed = pyqtSignal(object)
@@ -310,6 +312,8 @@ class SongListPanel(QWidget):
         self._current_index: int | None = None
         self._selected_index: int | None = None
         self._queue_indices: list[int] = []
+        self._path_queue_paths: list[Path] = []
+        self._external_current: Path | None = None
         self._queue_includes_now_playing = True
         self._now_playing_only = False
         self._queue_section_ratio: float | None = None
@@ -383,7 +387,7 @@ class SongListPanel(QWidget):
         self._apply_filter()
 
     def _update_now_playing_filter_state(self) -> None:
-        has_queue = bool(self._play_order_indices())
+        has_queue = self._queue_row_count() > 0
         self._now_playing_btn.setEnabled(has_queue)
         if not has_queue:
             self._clear_now_playing_filter()
@@ -394,7 +398,11 @@ class SongListPanel(QWidget):
             self.sort_changed.emit(strategy)
 
     def _on_item_clicked(self, item: QListWidgetItem) -> None:
-        index = item.data(Qt.ItemDataRole.UserRole)
+        path = item.data(_ROLE_PATH)
+        if isinstance(path, Path):
+            self.play_path_requested.emit(path)
+            return
+        index = item.data(_ROLE_INDEX)
         if index is None:
             return
         self._on_song_index_clicked(index)
@@ -409,7 +417,77 @@ class SongListPanel(QWidget):
         self._show_song_context_menu(self._list, pos, from_queue=False)
 
     def _show_queue_context_menu(self, pos) -> None:
-        self._show_song_context_menu(self._queue_list, pos, from_queue=True)
+        item = self._queue_list.itemAt(pos)
+        if item is None:
+            return
+        path = item.data(_ROLE_PATH)
+        if isinstance(path, Path):
+            self._show_path_context_menu(self._queue_list, pos, path, from_queue=True)
+            return
+        index = item.data(_ROLE_INDEX)
+        if index is None:
+            return
+        self._show_song_context_menu(self._queue_list, pos, from_queue=True, index=index)
+
+    def _show_path_context_menu(
+        self,
+        list_widget: PlayOrderListWidget,
+        pos,
+        path: Path,
+        *,
+        from_queue: bool,
+    ) -> None:
+        menu = QMenu(self)
+        menu.setStyleSheet(CONTEXT_MENU_STYLE)
+
+        play_now = QAction("Play Now", self)
+        play_now.triggered.connect(lambda: self.play_path_requested.emit(path))
+        menu.addAction(play_now)
+
+        play_next = QAction("Play Next", self)
+        play_next.triggered.connect(lambda: self.history_queue_requested.emit(path))
+        menu.addAction(play_next)
+
+        if from_queue and self._is_path_in_path_queue(path):
+            remove = QAction("Remove from Queue", self)
+            remove.triggered.connect(
+                lambda: self.remove_path_from_queue_requested.emit(path)
+            )
+            menu.addAction(remove)
+        elif (
+            from_queue
+            and self._external_current is not None
+            and self._paths_equal(path, self._external_current)
+            and self._queue_includes_now_playing
+        ):
+            remove = QAction("Remove", self)
+            remove.triggered.connect(
+                lambda: self.remove_path_from_queue_requested.emit(path)
+            )
+            menu.addAction(remove)
+
+        menu.exec(list_widget.mapToGlobal(pos))
+
+    @staticmethod
+    def _paths_equal(left: Path, right: Path) -> bool:
+        try:
+            return left.resolve() == right.resolve()
+        except OSError:
+            return left == right
+
+    def _is_path_in_path_queue(self, path: Path) -> bool:
+        try:
+            target = path.resolve()
+        except OSError:
+            target = path
+        for queued in self._path_queue_paths:
+            try:
+                if queued.resolve() == target:
+                    return True
+            except OSError:
+                if queued == path:
+                    return True
+        return False
 
     def _show_song_context_menu(
         self,
@@ -417,13 +495,15 @@ class SongListPanel(QWidget):
         pos,
         *,
         from_queue: bool,
+        index: int | None = None,
     ) -> None:
-        item = list_widget.itemAt(pos)
-        if item is None:
-            return
-        index = item.data(Qt.ItemDataRole.UserRole)
         if index is None:
-            return
+            item = list_widget.itemAt(pos)
+            if item is None:
+                return
+            index = item.data(_ROLE_INDEX)
+            if index is None:
+                return
 
         menu = QMenu(self)
         menu.setStyleSheet(CONTEXT_MENU_STYLE)
@@ -460,8 +540,12 @@ class SongListPanel(QWidget):
         indices: list[int],
         *,
         include_now_playing: bool | None = None,
+        external_current: Path | None = None,
+        path_queue: list[Path] | None = None,
     ) -> None:
         self._queue_indices = indices
+        self._external_current = external_current
+        self._path_queue_paths = list(path_queue or [])
         if include_now_playing is not None:
             self._queue_includes_now_playing = include_now_playing
         self._update_now_playing_filter_state()
@@ -480,19 +564,33 @@ class SongListPanel(QWidget):
         ]
 
     def _rebuild_queue_ui(self) -> None:
-        order = self._play_order_indices()
-        if not order:
+        order_count = self._queue_row_count()
+        if order_count == 0:
             self._queue_section.hide()
             self._apply_queue_split_sizes()
             return
 
         display_queue = self._display_queue_indices()
-        self._queue_title.setText(f"Now playing + queue ({len(order)})")
-        self._queue_list.set_reorder_enabled(len(display_queue) >= 2)
+        self._queue_title.setText(f"Now playing + queue ({order_count})")
+        self._queue_list.set_reorder_enabled(
+            not self._path_queue_paths and len(display_queue) >= 2
+        )
+        playlist_current = (
+            None
+            if self._external_current is not None
+            else self._current_index
+        )
+        external = (
+            self._external_current
+            if self._queue_includes_now_playing
+            else None
+        )
         self._queue_list.set_play_order(
             self._paths,
-            current_index=self._current_index,
+            current_index=playlist_current,
             queue_indices=self._queue_indices,
+            external_current=external,
+            path_queue=self._path_queue_paths,
         )
         self._queue_section.show()
         self._apply_queue_split_sizes()
@@ -525,7 +623,7 @@ class SongListPanel(QWidget):
             self._rebuild_queue_ui()
         self._apply_filter()
 
-    def set_current_index(self, index: int) -> None:
+    def set_current_index(self, index: int | None) -> None:
         self._current_index = index
         self._list.blockSignals(True)
         self._update_now_playing_filter_state()
@@ -533,6 +631,9 @@ class SongListPanel(QWidget):
             self._rebuild_queue_ui()
         self._apply_filter()
         self._list.blockSignals(False)
+
+    def clear_current_index(self) -> None:
+        self.set_current_index(None)
 
     def playing_index(self) -> int | None:
         return self._current_index
@@ -542,12 +643,27 @@ class SongListPanel(QWidget):
         order: list[int] = []
         if (
             self._queue_includes_now_playing
+            and self._external_current is None
             and self._current_index is not None
             and 0 <= self._current_index < len(self._paths)
         ):
             order.append(self._current_index)
         order.extend(self._display_queue_indices())
         return order
+
+    def _queue_row_count(self) -> int:
+        count = 0
+        if self._queue_includes_now_playing:
+            if self._external_current is not None:
+                count += 1
+            elif (
+                self._current_index is not None
+                and 0 <= self._current_index < len(self._paths)
+            ):
+                count += 1
+        count += len(self._path_queue_paths)
+        count += len(self._display_queue_indices())
+        return count
 
     def _apply_filter(self) -> None:
         query = self._search.text().strip().lower()
@@ -558,11 +674,26 @@ class SongListPanel(QWidget):
         self._list.blockSignals(True)
 
         if now_playing_only:
-            self._list.set_reorder_enabled(len(display_queue) >= 2)
+            display_queue = self._display_queue_indices()
+            self._list.set_reorder_enabled(
+                not self._path_queue_paths and len(display_queue) >= 2
+            )
+            playlist_current = (
+                None
+                if self._external_current is not None
+                else self._current_index
+            )
+            external = (
+                self._external_current
+                if self._queue_includes_now_playing
+                else None
+            )
             self._list.set_play_order(
                 self._paths,
-                current_index=self._current_index,
+                current_index=playlist_current,
                 queue_indices=self._queue_indices,
+                external_current=external,
+                path_queue=self._path_queue_paths,
             )
             visible = self._list.count()
             self._count_label.setText(
