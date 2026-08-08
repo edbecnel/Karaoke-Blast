@@ -53,6 +53,7 @@ from karaoke_blast.ui.song_list_panel import (
 from karaoke_blast.ui.youtube_panel import YouTubePanel
 from karaoke_blast.utils.display import display_name
 from karaoke_blast.utils.resources import logo_default_window_size
+from karaoke_blast.utils.song_display import DisplayFormat
 from karaoke_blast.utils.video_scanner import (
     MEDIA_EXTENSIONS,
     child_folders_with_videos,
@@ -384,6 +385,12 @@ class MainWindow(QWidget):
         self._song_list.resize_dragged.connect(self._on_panel_resize_drag)
         self._song_list.queue_split_changed.connect(self._on_queue_split_changed)
         self._song_list.set_queue_section_ratio(self._settings.queue_section_ratio)
+        self._song_list.set_display_format(self._settings.song_display_format)
+        self._song_list.set_display_mode(self._settings.song_display_mode)
+        self._song_list.display_mode_changed.connect(self._on_song_display_mode_changed)
+        self._song_list.display_format_changed.connect(
+            self._on_song_display_format_changed
+        )
         self._song_list.history_play_requested.connect(self._on_history_play_requested)
         self._song_list.history_queue_requested.connect(self._on_history_queue_requested)
         self._song_list.history_remove_requested.connect(self._on_history_remove_requested)
@@ -606,6 +613,14 @@ class MainWindow(QWidget):
 
     def _on_queue_split_changed(self, ratio: float) -> None:
         self._settings.queue_section_ratio = ratio
+        self._settings.save()
+
+    def _on_song_display_mode_changed(self, mode: str) -> None:
+        self._settings.song_display_mode = mode
+        self._settings.save()
+
+    def _on_song_display_format_changed(self, fmt: DisplayFormat) -> None:
+        self._settings.song_display_format = fmt
         self._settings.save()
 
     def _on_append_karaoke_changed(self, checked: bool) -> None:

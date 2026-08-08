@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
@@ -33,20 +34,32 @@ class LocalHistoryPanel(QListWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._current_path: Path | None = None
+        self._history_paths: list[Path] = []
+        self._display_resolver: Callable[[Path], str] = display_name
         self.itemDoubleClicked.connect(self._on_item_double_clicked)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
+    def set_display_resolver(self, resolver: Callable[[Path], str] | None) -> None:
+        self._display_resolver = resolver if resolver is not None else display_name
+        self.refresh_labels()
+
+    def refresh_labels(self) -> None:
+        if self._history_paths:
+            self.set_history(self._history_paths, current=self._current_path)
+
     def set_history(self, paths: list[Path], *, current: Path | None = None) -> None:
+        self._history_paths = list(paths)
         self._current_path = _safe_resolve(current) if current is not None else None
         self.clear()
         for path in paths:
             resolved = _safe_resolve(path)
             is_current = self._current_path is not None and resolved == self._current_path
             prefix = "▶ " if is_current else ""
-            item = QListWidgetItem(f"{prefix}{display_name(path)}")
+            label = self._display_resolver(path)
+            item = QListWidgetItem(f"{prefix}{label}")
             item.setData(_ROLE_PATH, resolved)
-            item.setToolTip(str(resolved))
+            item.setToolTip(f"{label}\n{resolved}")
             item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
             if is_current:
                 item.setForeground(QColor("#7ee787"))

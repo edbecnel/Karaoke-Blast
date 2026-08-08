@@ -6,6 +6,12 @@ from pathlib import Path
 
 from karaoke_blast.storage.paths import config_dir, default_downloads_dir
 from karaoke_blast.utils.filename_rename import FilenameFormat
+from karaoke_blast.utils.song_display import (
+    DEFAULT_DISPLAY_FORMAT,
+    DISPLAY_MODE_FILENAME,
+    DISPLAY_MODE_METADATA,
+    DisplayFormat,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +40,8 @@ class Settings:
         self.metadata_comment_slot_indices: list[int] | None = None
         self.metadata_auto_fill_slots: bool = False
         self.metadata_skip_tagged: bool = True
+        self.song_display_mode: str = DISPLAY_MODE_FILENAME
+        self.song_display_format: DisplayFormat = DEFAULT_DISPLAY_FORMAT.copy()
         self.load()
 
     def load(self) -> None:
@@ -92,6 +100,12 @@ class Settings:
                 self.metadata_auto_fill_slots = data["metadata_auto_fill_slots"]
             if isinstance(data.get("metadata_skip_tagged"), bool):
                 self.metadata_skip_tagged = data["metadata_skip_tagged"]
+            display_mode = data.get("song_display_mode")
+            if display_mode in {DISPLAY_MODE_FILENAME, DISPLAY_MODE_METADATA}:
+                self.song_display_mode = display_mode
+            display_format = data.get("song_display_format")
+            if isinstance(display_format, dict):
+                self.song_display_format = DisplayFormat.from_dict(display_format)
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning("Could not load settings: %s", exc)
 
@@ -117,6 +131,8 @@ class Settings:
             ),
             "metadata_auto_fill_slots": self.metadata_auto_fill_slots,
             "metadata_skip_tagged": self.metadata_skip_tagged,
+            "song_display_mode": self.song_display_mode,
+            "song_display_format": self.song_display_format.to_dict(),
         }
         try:
             _settings_file().write_text(

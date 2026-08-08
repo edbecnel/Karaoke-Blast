@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QColor, QPalette
 from PyQt6.QtWidgets import (
     QComboBox,
+    QDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -22,12 +23,21 @@ from PyQt6.QtWidgets import (
 
 from karaoke_blast.models.sort_strategy import SortStrategy
 from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
+from karaoke_blast.ui.display_format_dialog import DisplayFormatDialog
 from karaoke_blast.ui.list_style import QUEUE_LIST_STYLE, SIDEBAR_LIST_STYLE
 from karaoke_blast.ui.local_history_panel import LocalHistoryPanel
 from karaoke_blast.ui.panel_splitter import EDGE_GRIP_WIDTH, PanelEdgeGrip
 from karaoke_blast.ui.recent_folders_panel import PINNED_LABEL
 from karaoke_blast.ui.queue_list_widget import PlayOrderListWidget, _ROLE_INDEX, _ROLE_PATH
-from karaoke_blast.utils.display import display_name
+from karaoke_blast.utils.song_display import (
+    DEFAULT_DISPLAY_FORMAT,
+    DISPLAY_MODE_FILENAME,
+    DISPLAY_MODE_METADATA,
+    DisplayFormat,
+    TagCache,
+    song_display_label,
+    song_matches_query,
+)
 
 PANEL_DEFAULT_WIDTH = 320
 PANEL_MIN_WIDTH = 200
@@ -159,6 +169,8 @@ class SongListPanel(QWidget):
     play_all_folder_requested = pyqtSignal(object)
     queue_all_folder_requested = pyqtSignal(object)
     back_to_folders_requested = pyqtSignal()
+    display_mode_changed = pyqtSignal(str)
+    display_format_changed = pyqtSignal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -303,6 +315,36 @@ class SongListPanel(QWidget):
         self._search.textChanged.connect(self._apply_filter)
         songs_layout.addWidget(self._search)
 
+        display_row = QHBoxLayout()
+        display_row.setSpacing(6)
+        self._metadata_btn = QPushButton("Metadata")
+        self._metadata_btn.setCheckable(True)
+        self._metadata_btn.setToolTip(
+            "Show song title, artist, and comments from file metadata instead of the file name"
+        )
+        self._metadata_btn.setStyleSheet(
+            "QPushButton { background-color: #2d2d42; color: #b8b8c8; border: 1px solid #5a5a72;"
+            " border-radius: 4px; padding: 6px 10px; font-size: 12px; }"
+            "QPushButton:hover { border-color: #7a7a92; color: white; }"
+            "QPushButton:checked { background-color: #e94560; color: white; border-color: #e94560; }"
+        )
+        self._metadata_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._metadata_btn.toggled.connect(self._on_metadata_toggled)
+        display_row.addWidget(self._metadata_btn, 1)
+
+        self._display_format_btn = QPushButton("⚙")
+        self._display_format_btn.setFixedSize(32, 32)
+        self._display_format_btn.setToolTip("Configure metadata display format")
+        self._display_format_btn.setStyleSheet(
+            "QPushButton { background-color: #2d2d42; color: #b8b8c8; border: 1px solid #5a5a72;"
+            " border-radius: 4px; font-size: 14px; }"
+            "QPushButton:hover { border-color: #7a7a92; color: white; }"
+        )
+        self._display_format_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._display_format_btn.clicked.connect(self._open_display_format_dialog)
+        display_row.addWidget(self._display_format_btn)
+        songs_layout.addLayout(display_row)
+
         self._now_playing_btn = QPushButton("Current + queue")
         self._now_playing_btn.setCheckable(True)
         self._now_playing_btn.setToolTip(
@@ -393,6 +435,12 @@ class SongListPanel(QWidget):
         self._queue_includes_now_playing = True
         self._now_playing_only = False
         self._queue_section_ratio: float | None = None
+        self._display_mode = DISPLAY_MODE_FILENAME
+        self._display_format = DEFAULT_DISPLAY_FORMAT.copy()
+        self._tag_cache = TagCache()
+        self._list.set_display_resolver(self._leaf_label)
+        self._queue_list.set_display_resolver(self._leaf_label)
+        self._history_list.set_display_resolver(self._leaf_label)
 
         self._edge_grip = PanelEdgeGrip(self)
         self._edge_grip.dragged.connect(self.resize_dragged.emit)
@@ -422,6 +470,66 @@ class SongListPanel(QWidget):
 
     def set_queue_section_ratio(self, ratio: float | None) -> None:
         self._queue_section_ratio = ratio
+
+    def set_display_mode(self, mode: str) -> None:
+        normalized = (
+            DISPLAY_MODE_METADATA
+            if mode == DISPLAY_MODE_METADATA
+            else DISPLAY_MODE_FILENAME
+        )
+        if normalized == self._display_mode:
+            self._metadata_btn.blockSignals(True)
+            self._metadata_btn.setChecked(normalized == DISPLAY_MODE_METADATA)
+            self._metadata_btn.blockSignals(False)
+            return
+        self._display_mode = normalized
+        self._metadata_btn.blockSignals(True)
+        self._metadata_btn.setChecked(normalized == DISPLAY_MODE_METADATA)
+        self._metadata_btn.blockSignals(False)
+        self._refresh_display_labels()
+
+    def set_display_format(self, fmt: DisplayFormat) -> None:
+        self._display_format = fmt.copy()
+        self._refresh_display_labels()
+
+    def display_mode(self) -> str:
+        return self._display_mode
+
+    def display_format(self) -> DisplayFormat:
+        return self._display_format.copy()
+
+    def _leaf_label(self, path: Path) -> str:
+        return song_display_label(
+            path,
+            mode=self._display_mode,
+            fmt=self._display_format,
+            cache=self._tag_cache,
+        )
+
+    def _on_metadata_toggled(self, checked: bool) -> None:
+        mode = DISPLAY_MODE_METADATA if checked else DISPLAY_MODE_FILENAME
+        if mode == self._display_mode:
+            return
+        self._display_mode = mode
+        self._refresh_display_labels()
+        self.display_mode_changed.emit(mode)
+
+    def _open_display_format_dialog(self) -> None:
+        dialog = DisplayFormatDialog(self._display_format, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._display_format = dialog.format()
+        self._refresh_display_labels()
+        self.display_format_changed.emit(self._display_format.copy())
+
+    def _refresh_display_labels(self) -> None:
+        self._tag_cache.clear()
+        self._list.set_display_resolver(self._leaf_label)
+        self._queue_list.set_display_resolver(self._leaf_label)
+        self._history_list.set_display_resolver(self._leaf_label)
+        if not self._now_playing_only:
+            self._rebuild_queue_ui()
+        self._apply_filter()
 
     def _apply_queue_split_sizes(self) -> None:
         return
@@ -886,14 +994,15 @@ class SongListPanel(QWidget):
         return count
 
     def _song_label(self, path: Path) -> str:
+        leaf = self._leaf_label(path)
         if self._recursive_list_mode and self._label_root is not None:
             try:
                 relative = path.resolve().relative_to(self._label_root)
             except (OSError, ValueError):
-                return display_name(path)
-            parts = list(relative.parts[:-1]) + [display_name(path)]
-            return "/".join(parts) if parts else display_name(path)
-        return display_name(path)
+                return leaf
+            parts = list(relative.parts[:-1]) + [leaf]
+            return "/".join(parts) if parts else leaf
+        return leaf
 
     def _apply_filter(self) -> None:
         query = self._search.text().strip().lower()
@@ -969,9 +1078,14 @@ class SongListPanel(QWidget):
         for i in range(len(self._paths)):
             path = self._paths[i]
             label = self._song_label(path)
-            name = label.lower()
-            filename = path.name.lower()
-            if query and query not in name and query not in filename:
+            if query and not song_matches_query(
+                path,
+                query,
+                mode=self._display_mode,
+                fmt=self._display_format,
+                cache=self._tag_cache,
+                label=label,
+            ):
                 continue
             try:
                 mtime = datetime.fromtimestamp(path.stat().st_mtime)

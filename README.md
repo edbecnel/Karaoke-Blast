@@ -77,6 +77,8 @@ When a folder is loaded, a song list panel appears on the left. Subfolders that 
 - Name (A → Z / Z → A)
 - Date modified (oldest / newest first)
 
+Toggle **Metadata** to show embedded title, artist, and comments instead of file names (songs without a title still show the file name). Use **⚙** next to it to set the field order and separators. Search matches metadata first, then the file name. The same display mode applies to the queue, **Current + queue**, and History.
+
 Press `L` or click **☰** on the control bar to show or hide the song list. You can also click **×** at the top of the song list panel.
 
 Right-click any song and choose **Play Next** to queue it after the current song finishes. Queued songs appear in the **Queue** panel above the list — click **×** on a song to remove it, or **Clear** to empty the queue. You can also right-click a queued song and choose **Remove from Queue**. Toggle **Current + queue** to show only the playing song and queued songs; the filter turns off automatically when the queue is empty.

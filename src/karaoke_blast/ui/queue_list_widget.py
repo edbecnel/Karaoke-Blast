@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -25,10 +26,14 @@ class PlayOrderListWidget(QListWidget):
         self._current_index: int | None = None
         self._external_current: Path | None = None
         self._reorder_enabled = False
+        self._display_resolver: Callable[[Path], str] = display_name
         self.setDragDropMode(QAbstractItemView.DragDropMode.NoDragDrop)
         self.setDropIndicatorShown(True)
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
+
+    def set_display_resolver(self, resolver: Callable[[Path], str] | None) -> None:
+        self._display_resolver = resolver if resolver is not None else display_name
 
     def set_reorder_enabled(self, enabled: bool) -> None:
         self._reorder_enabled = enabled
@@ -86,6 +91,9 @@ class PlayOrderListWidget(QListWidget):
                 queue_pos=queue_pos,
             )
 
+    def _label_for(self, path: Path) -> str:
+        return self._display_resolver(path)
+
     def _add_path_row(
         self,
         path: Path,
@@ -93,11 +101,11 @@ class PlayOrderListWidget(QListWidget):
         is_current: bool,
         queue_pos: int | None,
     ) -> None:
-        title = display_name(path)
+        label = self._label_for(path)
         if is_current:
-            title = f"▶ {title}"
+            title = f"▶ {label}"
         else:
-            title = f"⏭ {queue_pos} · {title}"
+            title = f"⏭ {queue_pos} · {label}"
 
         item = QListWidgetItem(title)
         item.setData(_ROLE_INDEX, None)
@@ -107,7 +115,7 @@ class PlayOrderListWidget(QListWidget):
             mtime_text = mtime.strftime("%Y-%m-%d %H:%M")
         except OSError:
             mtime_text = "unknown"
-        tip = f"{display_name(path)}\n{path}\nModified: {mtime_text}"
+        tip = f"{label}\n{path}\nModified: {mtime_text}"
         if is_current:
             tip = f"Now playing\n{tip}"
         else:
@@ -136,11 +144,11 @@ class PlayOrderListWidget(QListWidget):
         queue_pos: int | None,
     ) -> None:
         path = paths[index]
-        title = display_name(path)
+        label = self._label_for(path)
         if is_current:
-            title = f"▶ {title}"
+            title = f"▶ {label}"
         else:
-            title = f"⏭ {queue_pos} · {title}"
+            title = f"⏭ {queue_pos} · {label}"
 
         item = QListWidgetItem(title)
         item.setData(_ROLE_INDEX, index)
@@ -150,7 +158,7 @@ class PlayOrderListWidget(QListWidget):
             mtime_text = mtime.strftime("%Y-%m-%d %H:%M")
         except OSError:
             mtime_text = "unknown"
-        tip = f"{display_name(path)}\n{path}\nModified: {mtime_text}"
+        tip = f"{label}\n{path}\nModified: {mtime_text}"
         if is_current:
             tip = f"Now playing\n{tip}"
         else:
