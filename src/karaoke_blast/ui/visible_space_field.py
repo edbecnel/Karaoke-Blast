@@ -1,4 +1,4 @@
-"""Line edit that renders spaces as visible middle dots."""
+"""Line edit that renders spaces as visible cap-height rectangles."""
 
 from __future__ import annotations
 
@@ -8,9 +8,7 @@ from PyQt6.QtWidgets import QLineEdit, QStyle, QStyleOptionFrame
 
 
 class VisibleSpaceLineEdit(QLineEdit):
-    """QLineEdit that shows spaces as dimmed middle dots (·)."""
-
-    GHOST_CHAR = "\u00b7"
+    """QLineEdit that shows spaces as dimmed cap-height rectangles within each space slot."""
 
     def __init__(self, *, trim_edges: bool = True, parent=None) -> None:
         super().__init__(parent)
@@ -42,6 +40,24 @@ class VisibleSpaceLineEdit(QLineEdit):
         super().focusOutEvent(event)
         self._cursor_blink_timer.stop()
         self._cursor_visible = True
+
+    def _draw_space_marker(
+        self,
+        painter: QPainter,
+        *,
+        x: float,
+        space_width: int,
+        baseline_y: int,
+        cap_height: int,
+        color: QColor,
+    ) -> None:
+        marker_rect = QRect(
+            int(x),
+            int(baseline_y - cap_height),
+            max(1, space_width),
+            cap_height,
+        )
+        painter.fillRect(marker_rect, color)
 
     def paintEvent(self, event) -> None:
         text = self.text()
@@ -76,11 +92,13 @@ class VisibleSpaceLineEdit(QLineEdit):
         font = self.font()
         painter.setFont(font)
         fm = painter.fontMetrics()
+        cap_height = fm.capHeight()
         baseline_y = contents_rect.center().y() + (fm.ascent() - fm.descent()) // 2
+        space_width = fm.horizontalAdvance(" ")
 
         chars = list(text)
         widths = [
-            fm.horizontalAdvance(self.GHOST_CHAR if char == " " else char)
+            space_width if char == " " else fm.horizontalAdvance(char)
             for char in chars
         ]
 
@@ -95,7 +113,7 @@ class VisibleSpaceLineEdit(QLineEdit):
 
         scroll = 0
         if cursor_x - scroll > content_width:
-            scroll = cursor_x - content_width + fm.horizontalAdvance(self.GHOST_CHAR)
+            scroll = cursor_x - content_width + space_width
         if cursor_x - scroll < 0:
             scroll = cursor_x
         if total_width - scroll < content_width:
@@ -116,15 +134,20 @@ class VisibleSpaceLineEdit(QLineEdit):
 
         x = origin_x
         for index, char in enumerate(chars):
-            display_char = self.GHOST_CHAR if char == " " else char
             in_selection = sel_start >= 0 and sel_start <= index < sel_end
-            if in_selection:
-                painter.setPen(highlight_fg)
-            elif char == " ":
-                painter.setPen(ghost_color)
+            if char == " ":
+                marker_color = highlight_fg if in_selection else ghost_color
+                self._draw_space_marker(
+                    painter,
+                    x=x,
+                    space_width=space_width,
+                    baseline_y=baseline_y,
+                    cap_height=cap_height,
+                    color=marker_color,
+                )
             else:
-                painter.setPen(text_color)
-            painter.drawText(int(x), baseline_y, display_char)
+                painter.setPen(highlight_fg if in_selection else text_color)
+                painter.drawText(int(x), baseline_y, char)
             x += widths[index]
 
         if self.hasFocus() and self._cursor_visible and not self.isReadOnly():
