@@ -102,8 +102,12 @@ class PlayOrderListWidget(QListWidget):
         item = QListWidgetItem(title)
         item.setData(_ROLE_INDEX, None)
         item.setData(_ROLE_PATH, path)
-        mtime = datetime.fromtimestamp(path.stat().st_mtime)
-        tip = f"{display_name(path)}\n{path}\nModified: {mtime.strftime('%Y-%m-%d %H:%M')}"
+        try:
+            mtime = datetime.fromtimestamp(path.stat().st_mtime)
+            mtime_text = mtime.strftime("%Y-%m-%d %H:%M")
+        except OSError:
+            mtime_text = "unknown"
+        tip = f"{display_name(path)}\n{path}\nModified: {mtime_text}"
         if is_current:
             tip = f"Now playing\n{tip}"
         else:
@@ -141,8 +145,12 @@ class PlayOrderListWidget(QListWidget):
         item = QListWidgetItem(title)
         item.setData(_ROLE_INDEX, index)
         item.setData(_ROLE_PATH, None)
-        mtime = datetime.fromtimestamp(path.stat().st_mtime)
-        tip = f"{display_name(path)}\n{path}\nModified: {mtime.strftime('%Y-%m-%d %H:%M')}"
+        try:
+            mtime = datetime.fromtimestamp(path.stat().st_mtime)
+            mtime_text = mtime.strftime("%Y-%m-%d %H:%M")
+        except OSError:
+            mtime_text = "unknown"
+        tip = f"{display_name(path)}\n{path}\nModified: {mtime_text}"
         if is_current:
             tip = f"Now playing\n{tip}"
         else:

@@ -38,6 +38,9 @@ QUEUE_SECTION_MAX_RATIO = 0.75
 QUEUE_SECTION_MIN_HEIGHT = 72
 LIST_MIN_HEIGHT = 80
 
+_ROLE_NAV_UP = Qt.ItemDataRole.UserRole + 2
+_ROLE_FOLDER = Qt.ItemDataRole.UserRole + 3
+
 COMBO_STYLE = """
 QComboBox {
     background-color: #2d2d42;
@@ -128,7 +131,7 @@ QPushButton::menu-indicator {
 
 
 class SongListPanel(QWidget):
-    """Left sidebar listing songs in the current folder."""
+    """Left sidebar listing songs and subfolders in the current browse folder."""
 
     song_selected = pyqtSignal(int)
     play_next_requested = pyqtSignal(int)
@@ -149,6 +152,13 @@ class SongListPanel(QWidget):
     rename_requested = pyqtSignal(int)
     folder_selected = pyqtSignal(object)
     browse_folder_requested = pyqtSignal()
+    folder_entered = pyqtSignal(object)
+    navigate_up_requested = pyqtSignal()
+    play_all_requested = pyqtSignal()
+    queue_all_requested = pyqtSignal()
+    play_all_folder_requested = pyqtSignal(object)
+    queue_all_folder_requested = pyqtSignal(object)
+    back_to_folders_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -172,6 +182,31 @@ class SongListPanel(QWidget):
         )
         self._folder_btn.clicked.connect(self._show_folder_menu)
         header_row.addWidget(self._folder_btn, 1)
+
+        self._back_folders_btn = QPushButton("←")
+        self._back_folders_btn.setToolTip("Back to folders")
+        self._back_folders_btn.setFixedSize(28, 28)
+        self._back_folders_btn.setStyleSheet(
+            "QPushButton { background: transparent; color: #aaa; border: none;"
+            " font-size: 16px; border-radius: 4px; }"
+            "QPushButton:hover { background: rgba(255,255,255,30); color: white; }"
+        )
+        self._back_folders_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._back_folders_btn.clicked.connect(self.back_to_folders_requested.emit)
+        self._back_folders_btn.hide()
+        header_row.addWidget(self._back_folders_btn)
+
+        self._folder_actions_btn = QPushButton("⋯")
+        self._folder_actions_btn.setToolTip("Folder actions")
+        self._folder_actions_btn.setFixedSize(28, 28)
+        self._folder_actions_btn.setStyleSheet(
+            "QPushButton { background: transparent; color: #aaa; border: none;"
+            " font-size: 18px; border-radius: 4px; }"
+            "QPushButton:hover { background: rgba(255,255,255,30); color: white; }"
+        )
+        self._folder_actions_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._folder_actions_btn.clicked.connect(self._show_folder_actions_menu)
+        header_row.addWidget(self._folder_actions_btn)
 
         refresh_btn = QPushButton("↻")
         refresh_btn.setToolTip("Refresh song list")
@@ -333,9 +368,9 @@ class SongListPanel(QWidget):
         self._history_list = LocalHistoryPanel()
         self._history_list.setStyleSheet(SIDEBAR_LIST_STYLE)
         self._history_list.setMinimumHeight(LIST_MIN_HEIGHT)
-        self._history_list.play_requested.connect(self.history_play_requested)
-        self._history_list.queue_requested.connect(self.history_queue_requested)
-        self._history_list.remove_requested.connect(self.history_remove_requested)
+        self._history_list.play_requested.connect(self.history_play_requested.emit)
+        self._history_list.queue_requested.connect(self.history_queue_requested.emit)
+        self._history_list.remove_requested.connect(self.history_remove_requested.emit)
         history_layout.addWidget(self._history_list, 1)
 
         self._tabs.addTab(songs_tab, "Songs")
@@ -343,6 +378,10 @@ class SongListPanel(QWidget):
         layout.addWidget(self._tabs, 1)
 
         self._paths: list[Path] = []
+        self._subfolders: list[Path] = []
+        self._can_navigate_up = False
+        self._recursive_list_mode = False
+        self._label_root: Path | None = None
         self._current_folder: Path | None = None
         self._recent_folders: list[Path] = []
         self._pinned_folders: list[Path] = []
@@ -407,6 +446,30 @@ class SongListPanel(QWidget):
     ) -> None:
         self._recent_folders = folders
         self._pinned_folders = pinned or []
+
+    def _show_folder_actions_menu(self) -> None:
+        menu = QMenu(self)
+        menu.setStyleSheet(CONTEXT_MENU_STYLE)
+
+        if self._recursive_list_mode:
+            back = QAction("Back to folders", self)
+            back.triggered.connect(self.back_to_folders_requested.emit)
+            menu.addAction(back)
+            menu.addSeparator()
+
+        play_all = QAction("Play all under this folder", self)
+        play_all.triggered.connect(self.play_all_requested.emit)
+        menu.addAction(play_all)
+
+        queue_all = QAction("Queue all under this folder", self)
+        queue_all.triggered.connect(self.queue_all_requested.emit)
+        menu.addAction(queue_all)
+
+        menu.exec(
+            self._folder_actions_btn.mapToGlobal(
+                self._folder_actions_btn.rect().bottomLeft()
+            )
+        )
 
     def _show_folder_menu(self) -> None:
         menu = QMenu(self)
@@ -510,6 +573,13 @@ class SongListPanel(QWidget):
             self.sort_changed.emit(strategy)
 
     def _on_item_clicked(self, item: QListWidgetItem) -> None:
+        if item.data(_ROLE_NAV_UP):
+            self.navigate_up_requested.emit()
+            return
+        folder = item.data(_ROLE_FOLDER)
+        if isinstance(folder, Path):
+            self.folder_entered.emit(folder)
+            return
         path = item.data(_ROLE_PATH)
         if isinstance(path, Path):
             self.play_path_requested.emit(path)
@@ -526,7 +596,33 @@ class SongListPanel(QWidget):
             self._selected_index = index
 
     def _show_context_menu(self, pos) -> None:
+        item = self._list.itemAt(pos)
+        if item is not None:
+            if item.data(_ROLE_NAV_UP):
+                return
+            folder = item.data(_ROLE_FOLDER)
+            if isinstance(folder, Path):
+                self._show_folder_item_context_menu(pos, folder)
+                return
         self._show_song_context_menu(self._list, pos, from_queue=False)
+
+    def _show_folder_item_context_menu(self, pos, folder: Path) -> None:
+        menu = QMenu(self)
+        menu.setStyleSheet(CONTEXT_MENU_STYLE)
+
+        open_folder = QAction("Open", self)
+        open_folder.triggered.connect(lambda: self.folder_entered.emit(folder))
+        menu.addAction(open_folder)
+
+        play_all = QAction("Play all under this folder", self)
+        play_all.triggered.connect(lambda: self.play_all_folder_requested.emit(folder))
+        menu.addAction(play_all)
+
+        queue_all = QAction("Queue all under this folder", self)
+        queue_all.triggered.connect(lambda: self.queue_all_folder_requested.emit(folder))
+        menu.addAction(queue_all)
+
+        menu.exec(self._list.mapToGlobal(pos))
 
     def _show_queue_context_menu(self, pos) -> None:
         item = self._queue_list.itemAt(pos)
@@ -720,10 +816,22 @@ class SongListPanel(QWidget):
         *,
         current_index: int | None = None,
         clear_search: bool = True,
+        subfolders: list[Path] | None = None,
+        can_navigate_up: bool = False,
+        recursive_list_mode: bool = False,
+        label_root: Path | None = None,
     ) -> None:
         self._paths = paths
+        self._subfolders = list(subfolders or [])
+        self._can_navigate_up = can_navigate_up and not recursive_list_mode
+        self._recursive_list_mode = recursive_list_mode
+        self._label_root = label_root.resolve() if label_root is not None else None
         self._current_index = current_index
         self._selected_index = None
+        if self._recursive_list_mode:
+            self._back_folders_btn.show()
+        else:
+            self._back_folders_btn.hide()
         if clear_search:
             self._search.blockSignals(True)
             self._search.clear()
@@ -777,6 +885,16 @@ class SongListPanel(QWidget):
         count += len(self._display_queue_indices())
         return count
 
+    def _song_label(self, path: Path) -> str:
+        if self._recursive_list_mode and self._label_root is not None:
+            try:
+                relative = path.resolve().relative_to(self._label_root)
+            except (OSError, ValueError):
+                return display_name(path)
+            parts = list(relative.parts[:-1]) + [display_name(path)]
+            return "/".join(parts) if parts else display_name(path)
+        return display_name(path)
+
     def _apply_filter(self) -> None:
         query = self._search.text().strip().lower()
         now_playing_only = self._now_playing_only
@@ -816,31 +934,62 @@ class SongListPanel(QWidget):
             return
 
         self._list.set_reorder_enabled(False)
-        candidate_indices = list(range(len(self._paths)))
         self._list.clear()
 
-        visible = 0
-        for i in candidate_indices:
-            path = self._paths[i]
-            name = display_name(path).lower()
-            filename = path.name.lower()
-            if (
-                not now_playing_only
-                and query
-                and query not in name
-                and query not in filename
-            ):
+        visible_folders = 0
+        if self._can_navigate_up and not query:
+            up_item = QListWidgetItem("‥  Up")
+            up_item.setData(_ROLE_INDEX, None)
+            up_item.setData(_ROLE_PATH, None)
+            up_item.setData(_ROLE_NAV_UP, True)
+            up_item.setData(_ROLE_FOLDER, None)
+            up_item.setToolTip("Go to parent folder")
+            up_item.setForeground(QColor("#8ab4f8"))
+            self._list.addItem(up_item)
+
+        for folder in self._subfolders:
+            name = folder.name
+            if query and query not in name.lower():
                 continue
-            mtime = datetime.fromtimestamp(path.stat().st_mtime)
-            title = display_name(path)
+            item = QListWidgetItem(f"{name}/")
+            item.setData(_ROLE_INDEX, None)
+            item.setData(_ROLE_PATH, None)
+            item.setData(_ROLE_NAV_UP, False)
+            item.setData(_ROLE_FOLDER, folder)
+            try:
+                tip_path = folder.resolve()
+            except OSError:
+                tip_path = folder
+            item.setToolTip(str(tip_path))
+            item.setForeground(QColor("#8ab4f8"))
+            self._list.addItem(item)
+            visible_folders += 1
+
+        visible = 0
+        for i in range(len(self._paths)):
+            path = self._paths[i]
+            label = self._song_label(path)
+            name = label.lower()
+            filename = path.name.lower()
+            if query and query not in name and query not in filename:
+                continue
+            try:
+                mtime = datetime.fromtimestamp(path.stat().st_mtime)
+                mtime_text = mtime.strftime("%Y-%m-%d %H:%M")
+            except OSError:
+                mtime_text = "unknown"
+            title = label
             if self._current_index is not None and i == self._current_index:
                 title = f"▶ {title}"
             elif i in display_queue:
                 queue_pos = display_queue.index(i) + 1
                 title = f"⏭ {queue_pos} · {title}"
             item = QListWidgetItem(title)
-            item.setData(Qt.ItemDataRole.UserRole, i)
-            tip = f"{display_name(path)}\n{path}\nModified: {mtime.strftime('%Y-%m-%d %H:%M')}"
+            item.setData(_ROLE_INDEX, i)
+            item.setData(_ROLE_PATH, None)
+            item.setData(_ROLE_NAV_UP, False)
+            item.setData(_ROLE_FOLDER, None)
+            tip = f"{label}\n{path}\nModified: {mtime_text}"
             if self._current_index is not None and i == self._current_index:
                 tip = f"Now playing\n{tip}"
             elif i in display_queue:
@@ -853,12 +1002,28 @@ class SongListPanel(QWidget):
             self._list.addItem(item)
             visible += 1
 
+        folder_part = ""
+        if not self._recursive_list_mode and self._subfolders:
+            if query:
+                folder_part = (
+                    f"{visible_folders} of {len(self._subfolders)} folder"
+                    f"{'s' if len(self._subfolders) != 1 else ''}"
+                )
+            else:
+                folder_part = (
+                    f"{len(self._subfolders)} folder"
+                    f"{'s' if len(self._subfolders) != 1 else ''}"
+                )
+
         if query:
-            self._count_label.setText(
-                f"{visible} of {total} song{'s' if total != 1 else ''}"
-            )
+            song_part = f"{visible} of {total} song{'s' if total != 1 else ''}"
         else:
-            self._count_label.setText(f"{total} song{'s' if total != 1 else ''}")
+            song_part = f"{total} song{'s' if total != 1 else ''}"
+
+        if folder_part:
+            self._count_label.setText(f"{folder_part} · {song_part}")
+        else:
+            self._count_label.setText(song_part)
 
         self._sync_list_selection()
         self._list.blockSignals(False)
@@ -870,7 +1035,7 @@ class SongListPanel(QWidget):
             return
         for row in range(self._list.count()):
             item = self._list.item(row)
-            if item.data(Qt.ItemDataRole.UserRole) == self._selected_index:
+            if item.data(_ROLE_INDEX) == self._selected_index:
                 self._list.setCurrentRow(row)
                 self._list.scrollToItem(item)
                 return

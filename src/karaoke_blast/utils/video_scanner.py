@@ -9,7 +9,7 @@ def scan_videos(folder: Path, *, recursive: bool = False) -> list[Path]:
     """Return video files in *folder* (unsorted).
 
     By default only the immediate folder contents are scanned. Set *recursive*
-    to include nested subfolders (future use).
+    to include nested subfolders.
     """
     folder = folder.resolve()
     if not folder.is_dir():
@@ -23,3 +23,35 @@ def scan_videos(folder: Path, *, recursive: bool = False) -> list[Path]:
             paths.append(entry)
 
     return paths
+
+
+def folder_has_videos(folder: Path) -> bool:
+    """Return True if *folder* or any descendant contains a supported video."""
+    folder = folder.resolve()
+    if not folder.is_dir():
+        return False
+
+    for entry in folder.rglob("*"):
+        if entry.is_file() and entry.suffix.lower() in VIDEO_EXTENSIONS:
+            return True
+    return False
+
+
+def child_folders_with_videos(folder: Path) -> list[Path]:
+    """Return immediate subfolders of *folder* that contain videos somewhere underneath."""
+    folder = folder.resolve()
+    if not folder.is_dir():
+        return []
+
+    children: list[Path] = []
+    try:
+        entries = list(folder.iterdir())
+    except OSError:
+        return []
+
+    for entry in entries:
+        if entry.is_dir() and folder_has_videos(entry):
+            children.append(entry)
+
+    children.sort(key=lambda path: path.name.lower())
+    return children

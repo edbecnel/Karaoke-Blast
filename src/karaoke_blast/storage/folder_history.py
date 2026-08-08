@@ -4,6 +4,7 @@ import json
 import logging
 from pathlib import Path
 
+from karaoke_blast.storage.path_filters import is_transient_path
 from karaoke_blast.storage.paths import config_dir
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ class FolderHistory:
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning("Could not load folder history: %s", exc)
             self._paths = []
-        self._prune_missing()
+        self._prune_invalid()
 
     def save(self) -> None:
         data = {"folders": [str(p) for p in self._paths]}
@@ -45,6 +46,8 @@ class FolderHistory:
 
     def add(self, folder: Path) -> None:
         folder = folder.resolve()
+        if is_transient_path(folder):
+            return
         self._paths = [p for p in self._paths if p != folder]
         self._paths.insert(0, folder)
         self._paths = self._paths[:MAX_HISTORY]
@@ -56,11 +59,15 @@ class FolderHistory:
         self.save()
 
     def folders(self) -> list[Path]:
-        self._prune_missing()
+        self._prune_invalid()
         return list(self._paths)
 
-    def _prune_missing(self) -> None:
-        existing = [p for p in self._paths if p.is_dir()]
-        if len(existing) != len(self._paths):
-            self._paths = existing
+    def _prune_invalid(self) -> None:
+        keep = [
+            path
+            for path in self._paths
+            if path.is_dir() and not is_transient_path(path)
+        ]
+        if keep != self._paths:
+            self._paths = keep
             self.save()

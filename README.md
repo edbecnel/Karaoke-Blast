@@ -37,7 +37,7 @@ pip install -e .
 python -m karaoke_blast
 ```
 
-Open a folder containing video files (`.mp4`, `.mkv`, `.avi`, `.mov`, `.webm`, `.m4v`) and playback starts automatically in full screen. Recently opened folders appear on the startup screen for quick access. Right-click a recent folder and choose **Remove from List** to hide it from the list.
+Open a folder containing video files (`.mp4`, `.mkv`, `.avi`, `.mov`, `.webm`, `.m4v`) — including folders that only have videos in subfolders — and the player opens in full screen. Recently opened folders appear on the startup screen for quick access. Right-click a recent folder and choose **Remove from List** to hide it from the list.
 
 You can also click **Search YouTube** on the startup screen to find and play karaoke videos online without downloading them first.
 
@@ -72,7 +72,7 @@ Move the mouse during playback to reveal the on-screen control bar. Use the play
 
 ## Song List
 
-When a folder is loaded, a song list panel appears on the left. Click a song once to select it, then click it again to start playback. Use the sort dropdown to reorder by:
+When a folder is loaded, a song list panel appears on the left. Subfolders that contain videos are listed with a trailing `/` — click one to drill down, or use **‥ Up** to go back (within the folder you opened). Click a song once to select it, then click it again to start playback. Use the **⋯** menu for **Play all under this folder** or **Queue all under this folder** (includes nested subfolders). After Play all, use **←** or **Back to folders** to return to hierarchical browsing. Use the sort dropdown to reorder by:
 
 - Name (A → Z / Z → A)
 - Date modified (oldest / newest first)
@@ -173,6 +173,9 @@ Set `youtube_search_backend` to `"yt-dlp"` to switch back. If the API key is mis
 ## Manual Test Checklist
 
 - [ ] Local folder opens and plays as before
+- [ ] Parent folder with videos only in subfolders can be opened
+- [ ] Song list shows subfolders; drill down and Up stay within the opened root
+- [ ] Play all / Queue all include nested videos; Back to folders restores hierarchy
 - [ ] **Search YouTube** opens player in YouTube mode with search panel visible
 - [ ] **Append "karaoke" to search** is checked by default; unchecking searches without adding `karaoke`
 - [ ] Checkbox state persists after restart
@@ -200,5 +203,4 @@ Set `youtube_search_backend` to `"yt-dlp"` to switch back. If the API key is mis
 - Custom playlists and sort order
 - Per-song properties and custom graphics
 - Persistent storage for playlists and settings
-- Recursive subfolder scanning
 - Song manager panel

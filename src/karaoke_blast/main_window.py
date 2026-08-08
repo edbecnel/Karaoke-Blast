@@ -52,7 +52,11 @@ from karaoke_blast.ui.song_list_panel import (
 from karaoke_blast.ui.youtube_panel import YouTubePanel
 from karaoke_blast.utils.display import display_name
 from karaoke_blast.utils.resources import logo_default_window_size
-from karaoke_blast.utils.video_scanner import scan_videos
+from karaoke_blast.utils.video_scanner import (
+    child_folders_with_videos,
+    folder_has_videos,
+    scan_videos,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +78,14 @@ def _resolved_path(path: Path) -> Path:
         return path
 
 
+def _is_playable_file(path: Path) -> bool:
+    """Return True if *path* is an existing regular file (OS errors treated as missing)."""
+    try:
+        return path.is_file()
+    except OSError:
+        return False
+
+
 class MainWindow(QWidget):
     """Full-screen karaoke player with folder-based playlist."""
 
@@ -84,7 +96,9 @@ class MainWindow(QWidget):
         self.setMouseTracking(True)
 
         self._playlist = Playlist()
-        self._folder: Path | None = None
+        self._folder: Path | None = None  # library root
+        self._browse_folder: Path | None = None
+        self._recursive_list_mode = False
         self._raw_paths: list[Path] = []
         self._sort_strategy = SortStrategy.NAME_ASC
         self._list_visible = False
@@ -364,6 +378,13 @@ class MainWindow(QWidget):
         self._song_list.rename_requested.connect(self._on_rename_requested)
         self._song_list.folder_selected.connect(self._on_start_menu_folder_selected)
         self._song_list.browse_folder_requested.connect(self._open_folder_dialog)
+        self._song_list.folder_entered.connect(self._on_folder_entered)
+        self._song_list.navigate_up_requested.connect(self._on_navigate_up)
+        self._song_list.play_all_requested.connect(self._on_play_all_requested)
+        self._song_list.queue_all_requested.connect(self._on_queue_all_requested)
+        self._song_list.play_all_folder_requested.connect(self._on_play_all_folder_requested)
+        self._song_list.queue_all_folder_requested.connect(self._on_queue_all_folder_requested)
+        self._song_list.back_to_folders_requested.connect(self._on_back_to_folders)
 
         self._youtube_panel = YouTubePanel()
         self._youtube_panel.hide()
@@ -761,7 +782,11 @@ class MainWindow(QWidget):
         self._show_overlay()
 
     def _open_folder_dialog(self) -> None:
-        start_dir = str(self._folder) if self._folder is not None else ""
+        start_dir = ""
+        if self._browse_folder is not None:
+            start_dir = str(self._browse_folder)
+        elif self._folder is not None:
+            start_dir = str(self._folder)
         folder = QFileDialog.getExistingDirectory(
             self, "Open Video Folder", start_dir
         )
@@ -774,8 +799,7 @@ class MainWindow(QWidget):
             QMessageBox.warning(self, "Invalid Folder", f"Not a directory:\n{folder}")
             return
 
-        paths = scan_videos(folder)
-        if not paths and not allow_empty:
+        if not allow_empty and not folder_has_videos(folder):
             QMessageBox.information(
                 self,
                 "No Videos Found",
@@ -788,11 +812,16 @@ class MainWindow(QWidget):
         self._switch_to_local_mode(clear_youtube_queue=True)
 
         self._folder = folder
-        self._raw_paths = paths
+        self._browse_folder = folder
+        self._recursive_list_mode = False
         self._folder_history.add(folder)
         self._refresh_recent_folders()
         self._song_list.set_folder(folder)
         self._sort_strategy = SortStrategy.NAME_ASC
+
+        paths = scan_videos(folder)
+        subfolders = child_folders_with_videos(folder)
+        self._raw_paths = paths
         sorted_paths = sort_paths(self._raw_paths, self._sort_strategy)
         restored_index = self._restore_folder_current(sorted_paths) if sorted_paths else None
         self._playlist = Playlist(
@@ -814,7 +843,13 @@ class MainWindow(QWidget):
         self._controls.set_playing(False)
         self._song_list.set_sort_strategy(self._sort_strategy)
         self._restore_folder_queue(sorted_paths)
-        self._song_list.set_songs(sorted_paths, current_index=restored_index)
+        self._song_list.set_songs(
+            sorted_paths,
+            current_index=restored_index,
+            subfolders=subfolders,
+            can_navigate_up=False,
+            recursive_list_mode=False,
+        )
         self._update_queue_display()
         self._update_local_history_display()
         self._show_song_list()
@@ -822,6 +857,13 @@ class MainWindow(QWidget):
         self._reposition_video_ui()
         if sorted_paths:
             QTimer.singleShot(0, self._show_ready_to_play)
+        elif subfolders:
+            QTimer.singleShot(
+                0,
+                lambda: self._show_status_message(
+                    "Open a subfolder to find songs"
+                ),
+            )
         else:
             QTimer.singleShot(
                 0,
@@ -829,6 +871,210 @@ class MainWindow(QWidget):
                     "No downloads yet — use YouTube mode to download videos"
                 ),
             )
+
+    def _is_under_library_root(self, folder: Path) -> bool:
+        if self._folder is None:
+            return False
+        try:
+            folder.resolve().relative_to(self._folder.resolve())
+            return True
+        except (OSError, ValueError):
+            return False
+
+    def _can_navigate_up(self) -> bool:
+        if self._folder is None or self._browse_folder is None:
+            return False
+        if self._recursive_list_mode:
+            return False
+        return self._browse_folder.resolve() != self._folder.resolve()
+
+    def _apply_browse_contents(
+        self,
+        *,
+        restore_queue: bool = False,
+        clear_search: bool = True,
+        keep_playback: bool = True,
+    ) -> None:
+        if self._browse_folder is None:
+            return
+
+        playing_path: Path | None = None
+        if keep_playback and not self._stopped:
+            playing_path = self._external_path or self._playlist.current()
+
+        if self._recursive_list_mode:
+            paths = scan_videos(self._browse_folder, recursive=True)
+            subfolders: list[Path] = []
+            can_up = False
+        else:
+            paths = scan_videos(self._browse_folder, recursive=False)
+            subfolders = child_folders_with_videos(self._browse_folder)
+            can_up = self._can_navigate_up()
+
+        self._raw_paths = paths
+        sorted_paths = sort_paths(self._raw_paths, self._sort_strategy)
+        old_paths = list(self._playlist.paths)
+
+        if restore_queue:
+            restored_index = (
+                self._restore_folder_current(sorted_paths) if sorted_paths else None
+            )
+            self._playlist = Playlist(
+                paths=sorted_paths,
+                index=restored_index if restored_index is not None else 0,
+            )
+            self._restore_folder_queue(sorted_paths)
+            current_index = restored_index
+        else:
+            keep_path = playing_path
+            self._remap_play_queue(old_paths, sorted_paths)
+            self._playlist.reorder(sorted_paths, keep_path=keep_path)
+            if self._playlist.current() is None and sorted_paths:
+                self._playlist.go_to(0)
+            current_index = self._playlist.index if sorted_paths else None
+            if playing_path is not None and not self._stopped:
+                playing_index = self._playlist_index_for_path(playing_path)
+                if playing_index is None:
+                    self._external_path = playing_path
+                    current_index = None
+                else:
+                    self._external_path = None
+                    current_index = playing_index
+                    self._playlist.go_to(playing_index)
+
+        self._song_list.set_folder(self._browse_folder)
+        self._song_list.set_songs(
+            self._playlist.paths,
+            current_index=current_index if self._external_path is None else None,
+            clear_search=clear_search,
+            subfolders=subfolders,
+            can_navigate_up=can_up,
+            recursive_list_mode=self._recursive_list_mode,
+            label_root=self._browse_folder if self._recursive_list_mode else None,
+        )
+        self._update_queue_display()
+
+    def _on_folder_entered(self, folder: Path) -> None:
+        folder = folder.resolve()
+        if not folder.is_dir() or not self._is_under_library_root(folder):
+            return
+        if not folder_has_videos(folder):
+            self._show_toast("No videos in that folder")
+            return
+        self._browse_folder = folder
+        self._recursive_list_mode = False
+        self._play_queue.clear()
+        self._apply_browse_contents(clear_search=True, keep_playback=True)
+
+    def _on_navigate_up(self) -> None:
+        if not self._can_navigate_up() or self._browse_folder is None:
+            return
+        parent = self._browse_folder.parent
+        if not self._is_under_library_root(parent):
+            return
+        self._browse_folder = parent.resolve()
+        self._recursive_list_mode = False
+        self._play_queue.clear()
+        self._apply_browse_contents(clear_search=True, keep_playback=True)
+
+    def _on_play_all_requested(self) -> None:
+        if self._browse_folder is None:
+            return
+        self._play_all_under(self._browse_folder)
+
+    def _on_play_all_folder_requested(self, folder: Path) -> None:
+        folder = folder.resolve()
+        if not self._is_under_library_root(folder):
+            return
+        self._browse_folder = folder
+        self._play_all_under(folder)
+
+    def _play_all_under(self, folder: Path) -> None:
+        paths = scan_videos(folder, recursive=True)
+        if not paths:
+            self._show_toast("No videos under that folder")
+            return
+        self._recursive_list_mode = True
+        self._browse_folder = folder.resolve()
+        self._raw_paths = paths
+        sorted_paths = sort_paths(self._raw_paths, self._sort_strategy)
+        self._play_queue.clear()
+        self._path_queue.clear()
+        self._playlist = Playlist(paths=sorted_paths, index=0)
+        self._song_list.set_folder(self._browse_folder)
+        self._song_list.set_songs(
+            sorted_paths,
+            current_index=0,
+            subfolders=[],
+            can_navigate_up=False,
+            recursive_list_mode=True,
+            label_root=self._browse_folder,
+        )
+        self._update_queue_display(include_now_playing=False)
+        if not self._ensure_vlc():
+            return
+        self._play_current()
+
+    def _on_queue_all_requested(self) -> None:
+        if self._browse_folder is None:
+            return
+        self._queue_all_under(self._browse_folder)
+
+    def _on_queue_all_folder_requested(self, folder: Path) -> None:
+        self._queue_all_under(folder.resolve())
+
+    def _queue_all_under(self, folder: Path) -> None:
+        folder = folder.resolve()
+        if not self._is_under_library_root(folder):
+            return
+        paths = sort_paths(scan_videos(folder, recursive=True), self._sort_strategy)
+        if not paths:
+            self._show_toast("No videos under that folder")
+            return
+        queued = 0
+        played_first = False
+        for path in paths:
+            index = self._playlist_index_for_path(path)
+            if self._is_local_idle() and not played_first:
+                if index is not None:
+                    self._playlist.go_to(index)
+                    self._play_current()
+                else:
+                    self._play_local_path(path)
+                played_first = True
+                continue
+            if index is not None:
+                if (
+                    not self._stopped
+                    and index == self._playlist.index
+                    and self._external_path is None
+                ):
+                    continue
+                if self._play_queue.contains(index):
+                    continue
+                if self._play_queue.enqueue(index):
+                    queued += 1
+            else:
+                if self._is_external_now_playing(path) or self._is_path_in_path_queue(path):
+                    continue
+                if self._path_queue.enqueue(path):
+                    queued += 1
+        self._update_queue_display()
+        if played_first and queued == 0:
+            self._show_toast(f'Playing all under "{folder.name}"')
+        elif queued:
+            self._show_toast(
+                f'Queued {queued} song{"s" if queued != 1 else ""} from "{folder.name}"'
+            )
+        else:
+            self._show_toast("Those songs are already queued or playing")
+
+    def _on_back_to_folders(self) -> None:
+        if self._browse_folder is None:
+            return
+        self._recursive_list_mode = False
+        self._play_queue.clear()
+        self._apply_browse_contents(clear_search=True, keep_playback=True)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -1026,12 +1272,14 @@ class MainWindow(QWidget):
         if current is None:
             self._show_end_of_playlist()
             return
-        if not current.exists():
+        if not _is_playable_file(current):
             logger.warning("File not found, skipping: %s", current)
             self._show_toast(
                 f'"{display_name(current)}" not found — try refreshing the song list',
                 duration_ms=5000,
             )
+            self._local_history.remove(current)
+            self._update_local_history_display()
             QTimer.singleShot(0, self._advance_to_next_track)
             return
         queue_changed = False
@@ -1060,8 +1308,8 @@ class MainWindow(QWidget):
             self._switch_to_local_mode(clear_youtube_queue=False)
         if not self._ensure_vlc():
             return
-        if not path.exists():
-            self._show_toast(f'"{display_name(path)}" not found', duration_ms=5000)
+        if not _is_playable_file(path):
+            self._handle_missing_local_path(path)
             return
         index = self._playlist_index_for_path(path)
         if index is not None:
@@ -1082,6 +1330,16 @@ class MainWindow(QWidget):
         self._update_queue_display(include_now_playing=True)
         self._start_seek_updates()
         self._raise_ui_layers()
+
+    def _handle_missing_local_path(self, path: Path) -> None:
+        self._show_toast(
+            f'"{display_name(path)}" not found — removed from history',
+            duration_ms=5000,
+        )
+        self._path_queue.remove(path)
+        self._local_history.remove(path)
+        self._update_local_history_display()
+        self._update_queue_display()
 
     def _playlist_index_for_path(self, path: Path) -> int | None:
         resolved = _resolved_path(path)
@@ -1124,9 +1382,15 @@ class MainWindow(QWidget):
         self._youtube_panel.set_history(self._youtube_history.videos(), current=current)
 
     def _on_history_play_requested(self, path: Path) -> None:
+        if not _is_playable_file(path):
+            self._handle_missing_local_path(path)
+            return
         self._play_local_path(path)
 
     def _on_history_queue_requested(self, path: Path) -> None:
+        if not _is_playable_file(path):
+            self._handle_missing_local_path(path)
+            return
         index = self._playlist_index_for_path(path)
         if index is not None:
             self._queue_local_path_by_index(index)
@@ -1135,6 +1399,10 @@ class MainWindow(QWidget):
 
     def _queue_local_path_by_index(self, index: int) -> None:
         if index < 0 or index >= self._playlist.count:
+            return
+        path = self._playlist.paths[index]
+        if not _is_playable_file(path):
+            self._handle_missing_local_path(path)
             return
         if not self._stopped and index == self._playlist.index and self._external_path is None:
             self._show_toast("That song is already playing.")
@@ -1153,6 +1421,9 @@ class MainWindow(QWidget):
             )
 
     def _queue_external_path(self, path: Path) -> None:
+        if not _is_playable_file(path):
+            self._handle_missing_local_path(path)
+            return
         if self._is_external_now_playing(path):
             self._show_toast("That song is already playing.")
             return
@@ -1332,10 +1603,19 @@ class MainWindow(QWidget):
         sorted_paths = sort_paths(updated_paths, self._sort_strategy)
         self._remap_play_queue(old_paths, sorted_paths)
         self._playlist.reorder(sorted_paths, keep_path=keep_path)
+        subfolders = (
+            []
+            if self._recursive_list_mode or self._browse_folder is None
+            else child_folders_with_videos(self._browse_folder)
+        )
         self._song_list.set_songs(
             self._playlist.paths,
             current_index=self._playlist.index,
             clear_search=False,
+            subfolders=subfolders,
+            can_navigate_up=self._can_navigate_up(),
+            recursive_list_mode=self._recursive_list_mode,
+            label_root=self._browse_folder if self._recursive_list_mode else None,
         )
         self._update_queue_display()
         self._update_local_history_display()
@@ -1347,25 +1627,40 @@ class MainWindow(QWidget):
         sorted_paths = sort_paths(self._raw_paths, strategy)
         self._remap_play_queue(old_paths, sorted_paths)
         self._playlist.reorder(sorted_paths, keep_path=current)
+        subfolders = (
+            []
+            if self._recursive_list_mode or self._browse_folder is None
+            else child_folders_with_videos(self._browse_folder)
+        )
         self._song_list.set_songs(
             self._playlist.paths,
             current_index=self._playlist.index,
             clear_search=False,
+            subfolders=subfolders,
+            can_navigate_up=self._can_navigate_up(),
+            recursive_list_mode=self._recursive_list_mode,
+            label_root=self._browse_folder if self._recursive_list_mode else None,
         )
         self._update_queue_display()
 
     def _refresh_song_list(self) -> None:
-        if self._folder is None:
+        if self._browse_folder is None:
             return
 
         current = self._playlist.current()
         old_paths = list(self._playlist.paths)
-        paths = scan_videos(self._folder)
-        if not paths:
+        if self._recursive_list_mode:
+            paths = scan_videos(self._browse_folder, recursive=True)
+            subfolders: list[Path] = []
+        else:
+            paths = scan_videos(self._browse_folder, recursive=False)
+            subfolders = child_folders_with_videos(self._browse_folder)
+
+        if not paths and not subfolders:
             QMessageBox.information(
                 self,
                 "No Videos Found",
-                f"No supported video files found in:\n{self._folder}",
+                f"No supported video files found in:\n{self._browse_folder}",
             )
             return
 
@@ -1380,6 +1675,10 @@ class MainWindow(QWidget):
             self._playlist.paths,
             current_index=self._playlist.index,
             clear_search=False,
+            subfolders=subfolders,
+            can_navigate_up=self._can_navigate_up(),
+            recursive_list_mode=self._recursive_list_mode,
+            label_root=self._browse_folder if self._recursive_list_mode else None,
         )
         self._update_queue_display()
 
@@ -1456,19 +1755,7 @@ class MainWindow(QWidget):
         return False
 
     def _on_play_next_requested(self, index: int) -> None:
-        if index < 0 or index >= self._playlist.count:
-            return
-        if not self._stopped and index == self._playlist.index and self._external_path is None:
-            self._show_toast("That song is already playing.")
-            return
-        if self._play_queue.contains(index):
-            self._show_toast("That song is already queued.")
-            return
-        if self._play_queue.enqueue(index):
-            self._update_queue_display()
-            self._show_toast(
-                f'Queued "{display_name(self._playlist.paths[index])}"'
-            )
+        self._queue_local_path_by_index(index)
 
     def _on_remove_from_queue(self, index: int) -> None:
         removing_now_playing = not self._stopped and index == self._playlist.index

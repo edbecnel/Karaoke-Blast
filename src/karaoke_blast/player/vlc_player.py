@@ -109,6 +109,16 @@ class VlcPlayer(QObject):
             return
 
         self._suppress_end_reached = False
+        try:
+            if not path.is_file():
+                self.playback_error.emit(f"File not found: {path.name}")
+                logger.error("VLC play skipped; file missing: %s", path)
+                return
+        except OSError as exc:
+            self.playback_error.emit(f"Cannot open: {path.name}")
+            logger.error("VLC play skipped; cannot access %s: %s", path, exc)
+            return
+
         media = self._instance.media_new(str(path))
         self._player.set_media(media)
         self.bind_output()

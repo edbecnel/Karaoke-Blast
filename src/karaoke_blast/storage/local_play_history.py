@@ -47,7 +47,16 @@ class LocalPlayHistory:
             resolved = path.resolve()
         except OSError:
             resolved = path
-        self._paths = [p for p in self._paths if p.resolve() != resolved]
+        kept: list[Path] = []
+        for existing in self._paths:
+            try:
+                if existing.resolve() == resolved:
+                    continue
+            except OSError:
+                if existing == resolved:
+                    continue
+            kept.append(existing)
+        self._paths = kept
         self._paths.insert(0, resolved)
         self._paths = self._paths[:MAX_HISTORY]
         self.save()
@@ -57,7 +66,16 @@ class LocalPlayHistory:
             resolved = path.resolve()
         except OSError:
             resolved = path
-        self._paths = [p for p in self._paths if p.resolve() != resolved]
+        kept: list[Path] = []
+        for existing in self._paths:
+            try:
+                if existing.resolve() == resolved:
+                    continue
+            except OSError:
+                if existing == resolved:
+                    continue
+            kept.append(existing)
+        self._paths = kept
         self.save()
 
     def clear(self) -> None:

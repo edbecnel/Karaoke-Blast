@@ -4,6 +4,7 @@ import json
 import logging
 from pathlib import Path
 
+from karaoke_blast.storage.path_filters import is_transient_path
 from karaoke_blast.storage.paths import config_dir
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,8 @@ class FolderQueues:
             self._state = {}
             for folder, entry in raw.items():
                 if not isinstance(folder, str):
+                    continue
+                if is_transient_path(Path(folder)):
                     continue
                 if isinstance(entry, list):
                     self._state[folder] = {
@@ -84,6 +87,8 @@ class FolderQueues:
         queue: list[Path],
         current: Path | None,
     ) -> None:
+        if is_transient_path(folder):
+            return
         key = self._key(folder)
         queue_paths = [str(path.resolve()) for path in queue]
         current_path = str(current.resolve()) if current is not None else None
