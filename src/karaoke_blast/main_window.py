@@ -1587,8 +1587,16 @@ class MainWindow(QWidget):
             self._settings.save()
 
     def _open_batch_metadata_dialog(self) -> None:
+        downloads = self._youtube_downloads_path()
+        recent = [
+            folder
+            for folder in self._folder_history.folders()
+            if folder.resolve() != downloads.resolve()
+        ]
         dialog = BatchMetadataDialog(
-            initial_folder=self._youtube_downloads_path(),
+            initial_folder=downloads,
+            recent_folders=recent,
+            pinned_folders=[downloads],
             fmt=self._settings.filename_rename_format,
             skip_tagged=self._settings.metadata_skip_tagged,
             auto_fill_slots=self._settings.metadata_auto_fill_slots,
