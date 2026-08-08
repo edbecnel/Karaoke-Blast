@@ -317,6 +317,8 @@ class MainWindow(QWidget):
             if folder.resolve() != downloads.resolve()
         ]
         self._recent_folders.set_folders(recent, pinned=[downloads])
+        if hasattr(self, "_song_list"):
+            self._song_list.set_recent_folders(recent, pinned=[downloads])
 
     def _on_start_menu_folder_selected(self, folder: Path) -> None:
         allow_empty = folder.resolve() == self._youtube_downloads_path().resolve()
@@ -360,6 +362,8 @@ class MainWindow(QWidget):
         self._song_list.history_remove_requested.connect(self._on_history_remove_requested)
         self._song_list.history_clear_requested.connect(self._on_history_clear_requested)
         self._song_list.rename_requested.connect(self._on_rename_requested)
+        self._song_list.folder_selected.connect(self._on_start_menu_folder_selected)
+        self._song_list.browse_folder_requested.connect(self._open_folder_dialog)
 
         self._youtube_panel = YouTubePanel()
         self._youtube_panel.hide()
@@ -757,7 +761,10 @@ class MainWindow(QWidget):
         self._show_overlay()
 
     def _open_folder_dialog(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Open Video Folder")
+        start_dir = str(self._folder) if self._folder is not None else ""
+        folder = QFileDialog.getExistingDirectory(
+            self, "Open Video Folder", start_dir
+        )
         if folder:
             self._load_folder(Path(folder))
 
@@ -777,12 +784,14 @@ class MainWindow(QWidget):
             )
             return
 
+        self._save_folder_state()
         self._switch_to_local_mode(clear_youtube_queue=True)
 
         self._folder = folder
         self._raw_paths = paths
         self._folder_history.add(folder)
         self._refresh_recent_folders()
+        self._song_list.set_folder(folder)
         self._sort_strategy = SortStrategy.NAME_ASC
         sorted_paths = sort_paths(self._raw_paths, self._sort_strategy)
         restored_index = self._restore_folder_current(sorted_paths) if sorted_paths else None

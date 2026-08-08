@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QPushButton,
+    QSizePolicy,
     QSplitter,
     QTabWidget,
     QVBoxLayout,
@@ -24,6 +25,7 @@ from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
 from karaoke_blast.ui.list_style import QUEUE_LIST_STYLE, SIDEBAR_LIST_STYLE
 from karaoke_blast.ui.local_history_panel import LocalHistoryPanel
 from karaoke_blast.ui.panel_splitter import EDGE_GRIP_WIDTH, PanelEdgeGrip
+from karaoke_blast.ui.recent_folders_panel import PINNED_LABEL
 from karaoke_blast.ui.queue_list_widget import PlayOrderListWidget, _ROLE_INDEX, _ROLE_PATH
 from karaoke_blast.utils.display import display_name
 
@@ -99,6 +101,31 @@ QSplitter::handle:vertical:hover {
 }
 """
 
+FOLDER_BTN_STYLE = """
+QPushButton {
+    background: transparent;
+    color: white;
+    border: none;
+    font-size: 16px;
+    font-weight: bold;
+    text-align: left;
+    padding: 2px 4px;
+    border-radius: 4px;
+}
+QPushButton:hover {
+    background: rgba(255, 255, 255, 30);
+}
+QPushButton::menu-indicator {
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 12px;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 6px solid #ffffff;
+    margin-right: 4px;
+}
+"""
+
 
 class SongListPanel(QWidget):
     """Left sidebar listing songs in the current folder."""
@@ -120,6 +147,8 @@ class SongListPanel(QWidget):
     history_remove_requested = pyqtSignal(object)
     history_clear_requested = pyqtSignal()
     rename_requested = pyqtSignal(int)
+    folder_selected = pyqtSignal(object)
+    browse_folder_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -134,10 +163,15 @@ class SongListPanel(QWidget):
         layout.setSpacing(8)
 
         header_row = QHBoxLayout()
-        header = QLabel("Songs")
-        header.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
-        header_row.addWidget(header)
-        header_row.addStretch()
+        self._folder_btn = QPushButton("Songs")
+        self._folder_btn.setStyleSheet(FOLDER_BTN_STYLE)
+        self._folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._folder_btn.setToolTip("Switch folder")
+        self._folder_btn.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        self._folder_btn.clicked.connect(self._show_folder_menu)
+        header_row.addWidget(self._folder_btn, 1)
 
         refresh_btn = QPushButton("↻")
         refresh_btn.setToolTip("Refresh song list")
@@ -309,6 +343,9 @@ class SongListPanel(QWidget):
         layout.addWidget(self._tabs, 1)
 
         self._paths: list[Path] = []
+        self._current_folder: Path | None = None
+        self._recent_folders: list[Path] = []
+        self._pinned_folders: list[Path] = []
         self._current_index: int | None = None
         self._selected_index: int | None = None
         self._queue_indices: list[int] = []
@@ -352,6 +389,81 @@ class SongListPanel(QWidget):
 
     def set_history(self, paths: list[Path], *, current: Path | None = None) -> None:
         self._history_list.set_history(paths, current=current)
+
+    def set_folder(self, folder: Path | None) -> None:
+        self._current_folder = folder.resolve() if folder is not None else None
+        if folder is None:
+            self._folder_btn.setText("Songs")
+            self._folder_btn.setToolTip("Switch folder")
+        else:
+            self._folder_btn.setText(folder.name)
+            self._folder_btn.setToolTip(str(folder.resolve()))
+
+    def set_recent_folders(
+        self,
+        folders: list[Path],
+        *,
+        pinned: list[Path] | None = None,
+    ) -> None:
+        self._recent_folders = folders
+        self._pinned_folders = pinned or []
+
+    def _show_folder_menu(self) -> None:
+        menu = QMenu(self)
+        menu.setStyleSheet(CONTEXT_MENU_STYLE)
+        current = self._current_folder
+        pinned_resolved = {path.resolve() for path in self._pinned_folders}
+
+        for folder in self._pinned_folders:
+            action = QAction(PINNED_LABEL, self)
+            action.setToolTip(str(folder))
+            resolved = folder.resolve()
+            if current == resolved:
+                action.setCheckable(True)
+                action.setChecked(True)
+                action.setEnabled(False)
+            else:
+                action.triggered.connect(
+                    lambda _checked=False, selected=folder: self.folder_selected.emit(
+                        selected
+                    )
+                )
+            menu.addAction(action)
+
+        recent = [
+            folder
+            for folder in self._recent_folders
+            if folder.resolve() not in pinned_resolved
+        ]
+        if recent and self._pinned_folders:
+            menu.addSeparator()
+
+        for folder in recent:
+            action = QAction(folder.name, self)
+            action.setToolTip(str(folder))
+            resolved = folder.resolve()
+            if current == resolved:
+                action.setCheckable(True)
+                action.setChecked(True)
+                action.setEnabled(False)
+            else:
+                action.triggered.connect(
+                    lambda _checked=False, selected=folder: self.folder_selected.emit(
+                        selected
+                    )
+                )
+            menu.addAction(action)
+
+        if self._pinned_folders or recent:
+            menu.addSeparator()
+
+        browse = QAction("Browse…", self)
+        browse.triggered.connect(self.browse_folder_requested.emit)
+        menu.addAction(browse)
+
+        menu.exec(
+            self._folder_btn.mapToGlobal(self._folder_btn.rect().bottomLeft())
+        )
 
     def _on_refresh_clicked(self, _checked: bool = False) -> None:
         self.refresh_requested.emit()
