@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -12,6 +13,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
@@ -19,8 +21,10 @@ from PyQt6.QtWidgets import (
 )
 
 from karaoke_blast.ui.checkbox_style import CHECKBOX_STYLE_WHITE_LABEL
+from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
 from karaoke_blast.ui.format_config_widget import FormatConfigWidget
 from karaoke_blast.ui.metadata_file_dialog import MetadataFileDialog, MetadataResult
+from karaoke_blast.ui.recent_folders_panel import PINNED_LABEL
 from karaoke_blast.utils.filename_rename import (
     FilenameFormat,
     SLOT_KIND_ADDITIONAL,
@@ -88,6 +92,8 @@ class BatchMetadataDialog(QDialog):
         self,
         *,
         initial_folder: Path | None = None,
+        recent_folders: list[Path] | None = None,
+        pinned_folders: list[Path] | None = None,
         fmt: FilenameFormat,
         skip_tagged: bool = True,
         auto_fill_slots: bool = False,
@@ -102,6 +108,8 @@ class BatchMetadataDialog(QDialog):
             list(comment_slot_indices) if comment_slot_indices is not None else None
         )
         self._folder = initial_folder
+        self._recent_folders = list(recent_folders or [])
+        self._pinned_folders = list(pinned_folders or [])
         self._applied_count = 0
         self._skipped_count = 0
         self._unsupported_count = 0
@@ -122,12 +130,13 @@ class BatchMetadataDialog(QDialog):
         self._folder_field = QLineEdit()
         self._folder_field.setReadOnly(True)
         self._folder_field.setStyleSheet(_FIELD_STYLE)
-        browse_btn = QPushButton("Browse…")
-        browse_btn.setStyleSheet(_SECONDARY_BUTTON_STYLE)
-        browse_btn.clicked.connect(self._browse_folder)
+        self._folder_btn = QPushButton("Choose…")
+        self._folder_btn.setStyleSheet(_SECONDARY_BUTTON_STYLE)
+        self._folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._folder_btn.clicked.connect(self._show_folder_menu)
         folder_row.addWidget(folder_label)
         folder_row.addWidget(self._folder_field, 1)
-        folder_row.addWidget(browse_btn)
+        folder_row.addWidget(self._folder_btn)
         layout.addLayout(folder_row)
 
         self._skip_checkbox = QCheckBox("Skip files that already have Title and Artist")
@@ -179,7 +188,7 @@ class BatchMetadataDialog(QDialog):
         layout.addLayout(button_row)
 
         if initial_folder is not None:
-            self._folder_field.setText(str(initial_folder))
+            self._set_folder(initial_folder)
 
     def format(self) -> FilenameFormat:
         return self._format_widget.format()
@@ -252,11 +261,77 @@ class BatchMetadataDialog(QDialog):
         self._fmt = fmt.copy()
         self._rebuild_comment_checkboxes()
 
+    def _current_folder(self) -> Path | None:
+        text = self._folder_field.text().strip()
+        if not text:
+            return None
+        try:
+            return Path(text).resolve()
+        except OSError:
+            return None
+
+    def _set_folder(self, folder: Path) -> None:
+        self._folder = folder
+        self._folder_field.setText(str(folder))
+
+    def _show_folder_menu(self) -> None:
+        menu = QMenu(self)
+        menu.setStyleSheet(CONTEXT_MENU_STYLE)
+        current = self._current_folder()
+        pinned_resolved = {path.resolve() for path in self._pinned_folders}
+
+        for folder in self._pinned_folders:
+            action = QAction(PINNED_LABEL, self)
+            action.setToolTip(str(folder))
+            resolved = folder.resolve()
+            if current == resolved:
+                action.setCheckable(True)
+                action.setChecked(True)
+                action.setEnabled(False)
+            else:
+                action.triggered.connect(
+                    lambda _checked=False, selected=folder: self._set_folder(selected)
+                )
+            menu.addAction(action)
+
+        recent = [
+            folder
+            for folder in self._recent_folders
+            if folder.resolve() not in pinned_resolved
+        ]
+        if recent and self._pinned_folders:
+            menu.addSeparator()
+
+        for folder in recent:
+            action = QAction(folder.name, self)
+            action.setToolTip(str(folder))
+            resolved = folder.resolve()
+            if current == resolved:
+                action.setCheckable(True)
+                action.setChecked(True)
+                action.setEnabled(False)
+            else:
+                action.triggered.connect(
+                    lambda _checked=False, selected=folder: self._set_folder(selected)
+                )
+            menu.addAction(action)
+
+        if self._pinned_folders or recent:
+            menu.addSeparator()
+
+        browse = QAction("Browse…", self)
+        browse.triggered.connect(self._browse_folder)
+        menu.addAction(browse)
+
+        menu.exec(
+            self._folder_btn.mapToGlobal(self._folder_btn.rect().bottomLeft())
+        )
+
     def _browse_folder(self) -> None:
         start_dir = self._folder_field.text() or str(Path.home())
         folder = QFileDialog.getExistingDirectory(self, "Select Folder", start_dir)
         if folder:
-            self._folder_field.setText(folder)
+            self._set_folder(Path(folder))
 
     def _start(self) -> None:
         folder_text = self._folder_field.text().strip()
