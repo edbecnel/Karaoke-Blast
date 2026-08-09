@@ -23,11 +23,6 @@ QSplitter::handle:horizontal {{
 GRIP_STYLE = "background: rgba(255, 255, 255, 30);"
 GRIP_ACTIVE_STYLE = "background: rgba(233, 69, 96, 160);"
 
-# Match SeekBar (40) + ControlsBar (56) fixed heights for the reveal hit area.
-CONTROLS_BAR_HEIGHT = 56
-SEEK_BAR_HEIGHT = 40
-CONTROLS_REVEAL_HEIGHT = CONTROLS_BAR_HEIGHT + SEEK_BAR_HEIGHT
-
 
 class PanelEdgeGrip(QWidget):
     """Right-edge drag strip hosted on the song list (non-native)."""
@@ -91,26 +86,6 @@ class PanelEdgeGrip(QWidget):
             event.accept()
             return
         super().mouseReleaseEvent(event)
-
-
-class ControlsRevealZone(QWidget):
-    """Bottom hover strip that stays hittable when auto-hidden controls are collapsed."""
-
-    hovered = pyqtSignal()
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
-        self.setMouseTracking(True)
-        self.setStyleSheet("background: transparent;")
-
-    def enterEvent(self, event) -> None:
-        self.hovered.emit()
-        super().enterEvent(event)
-
-    def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        self.hovered.emit()
-        super().mouseMoveEvent(event)
 
 
 class PanelSplitterHandle(QSplitterHandle):
