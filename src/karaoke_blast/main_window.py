@@ -41,7 +41,12 @@ from karaoke_blast.ui.opening_screen import OpeningScreen
 from karaoke_blast.ui.batch_metadata_dialog import BatchMetadataDialog
 from karaoke_blast.ui.batch_rename_dialog import BatchRenameDialog
 from karaoke_blast.ui.edit_metadata_dialog import EditMetadataDialog
-from karaoke_blast.ui.panel_splitter import PanelSplitter
+from karaoke_blast.ui.panel_splitter import (
+    CONTROLS_BAR_HEIGHT,
+    CONTROLS_REVEAL_HEIGHT,
+    ControlsRevealZone,
+    PanelSplitter,
+)
 from karaoke_blast.ui.rename_file_dialog import RenameFileDialog, RenameResult
 from karaoke_blast.ui.recent_folders_panel import RecentFoldersPanel
 from karaoke_blast.ui.youtube_downloads_folder_row import YouTubeDownloadsFolderRow
@@ -470,6 +475,11 @@ class MainWindow(QWidget):
         )
         self._overlay.hide()
 
+        self._controls_reveal_zone = ControlsRevealZone(self._video_container)
+        self._controls_reveal_zone.hovered.connect(self._show_controls)
+        self._controls_reveal_zone.installEventFilter(self)
+        self._controls_reveal_zone.hide()
+
         self._splitter.addWidget(self._left_panel_stack)
         self._splitter.addWidget(self._video_container)
         self._splitter.setStretchFactor(0, 0)
@@ -540,7 +550,13 @@ class MainWindow(QWidget):
     def eventFilter(self, obj, event) -> bool:
         if (
             event.type() == QEvent.Type.MouseMove
-            and obj in (self._video_container, self._controls, self._seek_bar)
+            and obj
+            in (
+                self._video_container,
+                self._controls,
+                self._seek_bar,
+                self._controls_reveal_zone,
+            )
             and self._stack.currentWidget() == self._player_page
         ):
             self._show_controls()
@@ -575,6 +591,9 @@ class MainWindow(QWidget):
             QTimer.singleShot(0, self._rearm_panel_resize)
         if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "_controls"):
             self._sync_fullscreen_control()
+            if self._stack.currentWidget() == self._player_page:
+                QTimer.singleShot(0, self._rearm_panel_resize)
+                QTimer.singleShot(100, self._rearm_panel_resize)
 
     def _toggle_fullscreen(self) -> None:
         if self.isFullScreen():
@@ -600,15 +619,14 @@ class MainWindow(QWidget):
 
     def _rearm_panel_resize(self) -> None:
         panel = self._active_side_panel()
-        if not self._list_visible or not panel.isVisible():
-            return
-        if self._media_mode == MediaSourceMode.YOUTUBE:
-            self._youtube_panel.raise_edge_grip()
-        else:
-            self._song_list.raise_edge_grip()
-        handle = self._splitter.handle(1)
-        handle.raise_()
-        handle.setCursor(Qt.CursorShape.SizeHorCursor)
+        if self._list_visible and panel.isVisible():
+            if self._media_mode == MediaSourceMode.YOUTUBE:
+                self._youtube_panel.raise_edge_grip()
+            else:
+                self._song_list.raise_edge_grip()
+            handle = self._splitter.handle(1)
+            handle.raise_()
+            handle.setCursor(Qt.CursorShape.SizeHorCursor)
         self._reposition_video_ui()
         if self._vlc is not None and self._media_mode == MediaSourceMode.LOCAL:
             self._vlc.bind_output()
@@ -637,6 +655,13 @@ class MainWindow(QWidget):
         if self._vlc is not None and self._media_mode == MediaSourceMode.LOCAL:
             QTimer.singleShot(0, self._vlc.bind_output)
 
+    def _controls_reveal_height(self) -> int:
+        if not self._settings.controls_auto_hide or self._controls.isVisible():
+            return 0
+        if self._media_mode == MediaSourceMode.YOUTUBE:
+            return CONTROLS_BAR_HEIGHT
+        return CONTROLS_REVEAL_HEIGHT
+
     def _reposition_video_ui(self) -> None:
         w = self._video_container.width()
         h = self._video_container.height()
@@ -644,10 +669,16 @@ class MainWindow(QWidget):
         # swallow hover on the panel grip / splitter in fullscreen.
         left = 4 if self._list_visible else 0
         width = max(0, w - left)
-        self._canvas_stack.setGeometry(left, 0, width, h)
-        self._video_widget.setGeometry(0, 0, width, h)
-        self._youtube_widget.setGeometry(0, 0, width, h)
-        self._message_page.setGeometry(0, 0, width, h)
+        reveal = self._controls_reveal_height()
+        canvas_h = max(0, h - reveal)
+        self._canvas_stack.setGeometry(left, 0, width, canvas_h)
+        self._video_widget.setGeometry(0, 0, width, canvas_h)
+        self._youtube_widget.setGeometry(0, 0, width, canvas_h)
+        self._message_page.setGeometry(0, 0, width, canvas_h)
+        self._controls_reveal_zone.setVisible(reveal > 0)
+        if reveal > 0:
+            self._controls_reveal_zone.setGeometry(0, h - reveal, w, reveal)
+            self._controls_reveal_zone.raise_()
         self._reposition_overlay()
         if self._list_visible:
             if self._media_mode == MediaSourceMode.YOUTUBE:
@@ -769,6 +800,9 @@ class MainWindow(QWidget):
             return
         self._seek_bar.hide()
         self._controls.hide()
+        self._reposition_video_ui()
+        if self._vlc is not None and self._media_mode == MediaSourceMode.LOCAL:
+            QTimer.singleShot(0, self._vlc.bind_output)
 
     def _on_controls_pin_toggled(self, pinned: bool) -> None:
         self._settings.controls_auto_hide = not pinned
@@ -792,6 +826,8 @@ class MainWindow(QWidget):
             self._seek_bar.show()
         self._controls.show()
         self._reposition_video_ui()
+        if self._vlc is not None and self._media_mode == MediaSourceMode.LOCAL:
+            QTimer.singleShot(0, self._vlc.bind_output)
         if self._settings.controls_auto_hide:
             self._controls_timer.start(CONTROLS_HIDE_MS)
         else:
