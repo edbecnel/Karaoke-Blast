@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 import sys
 from pathlib import Path
 
@@ -21,60 +20,7 @@ VLC_FORMAT = (
     "best[ext=mp4]/best"
 )
 
-# GUI launches often omit Homebrew / WinGet shim dirs from PATH.
-_MAC_FFMPEG_SEARCH_DIRS = (
-    "/opt/homebrew/bin",
-    "/usr/local/bin",
-)
-
-
-def _ffmpeg_search_dirs() -> list[str]:
-    dirs: list[str] = []
-    if sys.platform == "darwin":
-        dirs.extend(_MAC_FFMPEG_SEARCH_DIRS)
-    elif sys.platform == "win32":
-        local = os.environ.get("LOCALAPPDATA", "")
-        if local:
-            winget_links = Path(local) / "Microsoft" / "WinGet" / "Links"
-            if winget_links.is_dir():
-                dirs.append(str(winget_links))
-            winget_packages = Path(local) / "Microsoft" / "WinGet" / "Packages"
-            if winget_packages.is_dir():
-                for package_dir in winget_packages.iterdir():
-                    if not package_dir.is_dir() or "ffmpeg" not in package_dir.name.lower():
-                        continue
-                    for candidate in package_dir.glob("*/bin"):
-                        if candidate.is_dir():
-                            dirs.append(str(candidate))
-    return [d for d in dirs if os.path.isdir(d)]
-
-
-def _ffmpeg_binary_names() -> tuple[str, ...]:
-  return ("ffmpeg.exe", "ffmpeg") if sys.platform == "win32" else ("ffmpeg",)
-
-
-def resolve_ffmpeg_location() -> str | None:
-    """Return an ffmpeg binary path, including common install locations."""
-    found = shutil.which("ffmpeg")
-    if found:
-        return found
-
-    extra_dirs = _ffmpeg_search_dirs()
-    if extra_dirs:
-        found = shutil.which("ffmpeg", path=os.pathsep.join(extra_dirs))
-        if found:
-            return found
-
-    for directory in extra_dirs:
-        for name in _ffmpeg_binary_names():
-            candidate = Path(directory) / name
-            if candidate.is_file():
-                return str(candidate)
-
-    return None
-
-
-def downloaded_file_for(video_id: str, folder: Path | None = None) -> Path | None:
+from karaoke_blast.utils.runtime_deps import resolve_ffmpeg_location(video_id: str, folder: Path | None = None) -> Path | None:
     """Return an existing download path for *video_id*, if any."""
     target_dir = folder or default_downloads_dir()
     if not target_dir.is_dir():

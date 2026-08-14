@@ -6,9 +6,89 @@
 
 Full-screen karaoke video player and manager. Open a local folder of videos and play them in alphabetical order, or search YouTube for karaoke tracks and play them in an embedded player.
 
-## Requirements
+## Install (Windows and macOS)
 
-### Install manually (system)
+Download the latest installers from [GitHub Releases](https://github.com/edbecnel/Karaoke-Blast/releases). You do **not** need Python, Inno Setup, or any developer tools.
+
+### Windows
+
+1. Download `KaraokeBlast-Setup.exe` from the latest release.
+2. Run the installer. If Windows SmartScreen appears (“Windows protected your PC”), click **More info** → **Run anyway** (unsigned builds show this until the app is code-signed).
+3. Follow the setup wizard:
+   - Karaoke Blast is installed to `%LOCALAPPDATA%\Programs\Karaoke Blast`.
+   - Leave **Install VLC if it is not already on this computer** checked if you want local file playback and you do not already have VLC.
+   - Optionally check **Create a desktop shortcut**.
+4. After install, open **Karaoke Blast** from the Start Menu (or the desktop shortcut).
+5. To uninstall: **Settings** → **Apps** → **Karaoke Blast** → **Uninstall**, or use **Karaoke Blast** in the Start Menu uninstall entry.
+
+**What you need separately**
+
+| Component | Required for | Installed by setup? |
+|---|---|---|
+| Karaoke Blast + Python | Running the app | Yes (always) |
+| VLC | Local videos and downloaded YouTube files | Only if missing (optional winget step) |
+| ffmpeg | YouTube downloads | Bundled in app folder if not on PATH |
+
+YouTube streaming in the embedded player works without VLC.
+
+### macOS
+
+1. Download `Karaoke Blast.dmg` from the latest release.
+2. Open the DMG and drag **Karaoke Blast** to **Applications**.
+3. Open **Karaoke Blast** from Applications or Spotlight.
+4. If Gatekeeper blocks the app (“cannot be opened because the developer cannot be verified”), open **System Settings** → **Privacy & Security** and click **Open Anyway**, or right-click the app → **Open** → **Open** (unsigned builds show this until the app is notarized).
+5. On first launch, the app may offer to install **VLC** via Homebrew if VLC is not installed (`brew install --cask vlc`). Local playback needs VLC; YouTube streaming does not.
+
+**What you need separately**
+
+| Component | Required for | Installed automatically? |
+|---|---|---|
+| Karaoke Blast + Python | Running the app | Yes (inside the app) |
+| VLC | Local videos and downloaded YouTube files | Attempted via Homebrew on first launch if missing |
+| ffmpeg | YouTube downloads | Bundled in app if not on PATH |
+
+### Dependencies (all platforms)
+
+The installers always ship Karaoke Blast and Python. **VLC** and **ffmpeg** are installed or bundled only when they are not already on your computer:
+
+- **VLC** — required for local file playback. The Windows installer can install it via winget when missing. On macOS, first launch tries Homebrew (`brew install --cask vlc`) if VLC is not found.
+- **ffmpeg** — required for YouTube downloads. If ffmpeg is not on PATH, the installer bundles a copy inside the app directory.
+
+YouTube streaming works without VLC. Local folder playback and downloaded YouTube videos need VLC.
+
+### Unsigned builds
+
+Release installers are not code-signed yet. Windows SmartScreen and macOS Gatekeeper may warn on first launch. You can still run the app after confirming the prompt. For public distribution, Apple Developer ID notarization and Windows Authenticode signing are recommended.
+
+### Building and publishing installers (maintainers)
+
+See **[packaging/README.md](packaging/README.md)** for:
+
+- How to publish installers on **GitHub Releases** (recommended — no Inno Setup on your PC)
+- Building `KaraokeBlast-Setup.exe` on your **Windows machine** (with Inno Setup)
+- **Three options** if you do not have Inno Setup locally (GitHub Actions, staging-only test build, manual release upload)
+- Why installer binaries should **not** be committed to git
+
+Quick local build commands:
+
+**macOS DMG**
+
+```bash
+./packaging/macos/build-dmg.sh
+# Output: packaging/macos/dist/Karaoke Blast.dmg
+```
+
+**Windows installer** (requires [Inno Setup 6](https://jrsoftware.org/isinfo.php), or use GitHub Actions instead)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\windows\build-installer.ps1
+# Output: packaging\windows\dist\KaraokeBlast-Setup.exe
+```
+
+## Run from source (developers)
+
+
+### Requirements
 
 These must be installed on the machine before running the app:
 

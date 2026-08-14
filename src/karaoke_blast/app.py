@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import QApplication
 
 from karaoke_blast.main_window import MainWindow
 from karaoke_blast.utils.resources import app_icon
+from karaoke_blast.utils.runtime_deps import configure_runtime_dependencies
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -43,6 +44,7 @@ def _configure_windows_app_id() -> None:
 
 
 def run(initial_folder: Path | None = None) -> int:
+    configure_runtime_dependencies()
     _configure_windows_app_id()
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     app = QApplication(sys.argv)

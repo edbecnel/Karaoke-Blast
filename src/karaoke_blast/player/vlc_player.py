@@ -7,6 +7,7 @@ from pathlib import Path
 from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal
 
 from karaoke_blast.player.video_widget import VideoWidget
+from karaoke_blast.utils.runtime_deps import configure_vlc_environment
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,8 @@ class VlcPlayer(QObject):
         self._play_generation = 0
         self._suppress_end_reached = False
         self._audio_verify_attempts = 0
+
+        configure_vlc_environment()
 
         try:
             import vlc
