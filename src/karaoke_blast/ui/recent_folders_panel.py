@@ -9,12 +9,14 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMenu,
+    QMessageBox,
     QVBoxLayout,
     QWidget,
 )
 
 from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
 from karaoke_blast.ui.list_style import RECENT_FOLDERS_LIST_STYLE
+from karaoke_blast.utils.file_manager import open_folder_in_file_manager
 
 PINNED_LABEL = "YouTube Downloads"
 
@@ -94,17 +96,39 @@ class RecentFoldersPanel(QWidget):
         if folder is not None:
             self.folder_selected.emit(folder)
 
+    def _open_folder_in_file_manager(self, folder: Path) -> None:
+        if not open_folder_in_file_manager(folder):
+            QMessageBox.warning(
+                self,
+                "Folder Not Found",
+                f"The folder no longer exists:\n{folder}",
+            )
+
     def _show_context_menu(self, pos) -> None:
         item = self._list.itemAt(pos)
         folder = self._folder_from_item(item)
-        if folder is None or self._is_pinned_item(item):
+        if folder is None:
             return
 
         menu = QMenu(self)
         menu.setStyleSheet(CONTEXT_MENU_STYLE)
 
-        remove = QAction("Remove from List", self)
-        remove.triggered.connect(lambda: self.folder_remove_requested.emit(folder))
-        menu.addAction(remove)
+        browse_folder = QAction("Browse folder", self)
+        browse_folder.triggered.connect(
+            lambda _checked=False, selected=folder: self._open_folder_in_file_manager(
+                selected
+            )
+        )
+        menu.addAction(browse_folder)
+
+        if not self._is_pinned_item(item):
+            menu.addSeparator()
+            remove = QAction("Remove from List", self)
+            remove.triggered.connect(
+                lambda _checked=False, selected=folder: self.folder_remove_requested.emit(
+                    selected
+                )
+            )
+            menu.addAction(remove)
 
         menu.exec(self._list.mapToGlobal(pos))
