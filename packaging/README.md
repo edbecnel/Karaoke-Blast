@@ -31,6 +31,15 @@ git commit -m "Prepare release 0.1.0"
 git push origin main
 ```
 
+**After a packaging fix:** the release tag must point at the commit that contains the fix. CI builds the **tag**, not “latest main”. If you already published `v0.1.0` on an older commit, move the tag before republishing:
+
+```bash
+git tag -f v0.1.0
+git push origin v0.1.0 --force
+```
+
+Then delete and republish the GitHub release (or publish a new tag such as `v0.1.1`). Do **not** use “Re-run failed jobs” on an old workflow run — that rebuilds the old commit.
+
 ### 2. Create a GitHub Release
 
 1. Open [Karaoke Blast Releases](https://github.com/edbecnel/Karaoke-Blast/releases).
