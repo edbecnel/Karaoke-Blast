@@ -8,6 +8,8 @@ STAGING="$SCRIPT_DIR/staging"
 DIST="$SCRIPT_DIR/dist"
 VERSIONS_FILE="$ROOT/packaging/common/versions.env"
 APP_NAME="Karaoke Blast"
+# Build paths must not contain spaces: venv ensurepip aborts on macOS (SIGABRT).
+BUILD_APP_BUNDLE="KaraokeBlast.app"
 BUNDLE_ID="com.karaokeblast.app"
 ICON_PNG="$ROOT/src/karaoke_blast/assets/icon.png"
 
@@ -81,7 +83,7 @@ log "Preparing staging..."
 rm -rf "$STAGING"
 ensure_dir "$STAGING"
 
-APP_PATH="$STAGING/${APP_NAME}.app"
+APP_PATH="$STAGING/$BUILD_APP_BUNDLE"
 CONTENTS="$APP_PATH/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
@@ -180,6 +182,7 @@ DMG_PATH="$DIST/${APP_NAME}.dmg"
 DMG_STAGING="$TMP/dmg-root"
 ensure_dir "$DMG_STAGING"
 cp -R "$APP_PATH" "$DMG_STAGING/"
+mv "$DMG_STAGING/$BUILD_APP_BUNDLE" "$DMG_STAGING/${APP_NAME}.app"
 
 if [[ -f "$DMG_PATH" ]]; then
   rm -f "$DMG_PATH"
