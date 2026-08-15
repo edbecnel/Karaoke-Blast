@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QListWidgetItem,
     QMenu,
+    QMessageBox,
     QPushButton,
     QSizePolicy,
     QSplitter,
@@ -29,6 +30,11 @@ from karaoke_blast.ui.panel_splitter import EDGE_GRIP_WIDTH, PanelEdgeGrip
 from karaoke_blast.ui.recent_folders_panel import PINNED_LABEL
 from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
 from karaoke_blast.ui.queue_list_widget import PlayOrderListWidget, _ROLE_INDEX, _ROLE_PATH
+from karaoke_blast.utils.file_manager import (
+    open_folder_in_file_manager,
+    reveal_action_label,
+    reveal_in_file_manager,
+)
 from karaoke_blast.utils.song_display import (
     DEFAULT_DISPLAY_FORMAT,
     DISPLAY_MODE_FILENAME,
@@ -563,9 +569,36 @@ class SongListPanel(QWidget):
         self._recent_folders = folders
         self._pinned_folders = pinned or []
 
+    def _open_folder_in_file_manager(self, folder: Path) -> None:
+        if not open_folder_in_file_manager(folder):
+            QMessageBox.warning(
+                self,
+                "Folder Not Found",
+                f"The folder no longer exists:\n{folder}",
+            )
+
+    def _reveal_path_in_file_manager(self, path: Path) -> None:
+        if not reveal_in_file_manager(path):
+            QMessageBox.warning(
+                self,
+                "File Not Found",
+                f"The file no longer exists:\n{path}",
+            )
+
+    def _open_current_folder_in_file_manager(self) -> None:
+        if self._current_folder is None:
+            return
+        self._open_folder_in_file_manager(self._current_folder)
+
     def _show_folder_actions_menu(self) -> None:
         menu = QMenu(self)
         menu.setStyleSheet(CONTEXT_MENU_STYLE)
+
+        browse_folder = QAction("Browse folder", self)
+        browse_folder.setEnabled(self._current_folder is not None)
+        browse_folder.triggered.connect(self._open_current_folder_in_file_manager)
+        menu.addAction(browse_folder)
+        menu.addSeparator()
 
         if self._recursive_list_mode:
             back = QAction("Back to folders", self)
@@ -778,6 +811,12 @@ class SongListPanel(QWidget):
         play_next.triggered.connect(lambda: self.history_queue_requested.emit(path))
         menu.addAction(play_next)
 
+        browse_folder = QAction(reveal_action_label(), self)
+        browse_folder.triggered.connect(
+            lambda _checked=False, p=path: self._reveal_path_in_file_manager(p)
+        )
+        menu.addAction(browse_folder)
+
         if from_queue and self._is_path_in_path_queue(path):
             remove = QAction("Remove from Queue", self)
             remove.triggered.connect(
@@ -851,6 +890,14 @@ class SongListPanel(QWidget):
         play_next = QAction("Play Next", self)
         play_next.triggered.connect(lambda: self.play_next_requested.emit(index))
         menu.addAction(play_next)
+
+        if 0 <= index < len(self._paths):
+            path = self._paths[index]
+            reveal_file = QAction(reveal_action_label(), self)
+            reveal_file.triggered.connect(
+                lambda _checked=False, p=path: self._reveal_path_in_file_manager(p)
+            )
+            menu.addAction(reveal_file)
 
         if index in self._queue_indices:
             remove = QAction("Remove from Queue", self)

@@ -156,7 +156,7 @@ Move the mouse during playback to reveal the on-screen control bar. Use the play
 
 ## Song List
 
-When a folder is loaded, a song list panel appears on the left. Subfolders that contain videos are listed with a trailing `/` — click one to drill down, or use **‥ Up** to go back (within the folder you opened). Click a song once to select it, then click it again to start playback. Use the **⋯** menu for **Play all under this folder** or **Queue all under this folder** (includes nested subfolders). After Play all, use **←** or **Back to folders** to return to hierarchical browsing. Use the sort dropdown to reorder by:
+When a folder is loaded, a song list panel appears on the left. Subfolders that contain videos are listed with a trailing `/` — click one to drill down, or use **‥ Up** to go back (within the folder you opened). Click a song once to select it, then click it again to start playback. Use the **⋯** menu for **Browse folder** (opens the folder in Explorer, Finder, or your file manager), **Play all under this folder**, or **Queue all under this folder** (includes nested subfolders). After Play all, use **←** or **Back to folders** to return to hierarchical browsing. Use the sort dropdown to reorder by:
 
 - Name (A → Z / Z → A)
 - Date modified (oldest / newest first)
