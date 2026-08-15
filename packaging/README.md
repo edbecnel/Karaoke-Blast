@@ -184,7 +184,7 @@ Both bundles include a private Python runtime. **VLC** and **ffmpeg** are used f
 | `iscc` not found | Install Inno Setup 6, or use Option B (GitHub Actions) |
 | `tar` not found on Windows | Use Windows 10+ (built-in `tar`), or run the build on CI |
 | macOS build fails moving `python` into `.app` | Fixed in `build-dmg.sh` — ensure `Contents/Resources` exists before `mv` |
-| macOS `ensurepip` SIGABRT during venv create | Spaces in `Karaoke Blast.app` path — build uses `KaraokeBlast.app` then renames for DMG |
+| macOS `ensurepip` SIGABRT during venv create | Use bundled Python directly (no venv) in `build-dmg.sh`; `ensurepip` fails on CI |
 | SmartScreen / Gatekeeper warning | Expected for unsigned builds; see README |
 | winget VLC install fails | Install VLC manually from [videolan.org](https://www.videolan.org/vlc/) |
 | Build fails downloading Python/ffmpeg | Check network; URLs are in `packaging/common/versions.env` |

@@ -40,7 +40,7 @@ def packaged_app_root() -> Path | None:
     """Return the install root when running from a packaged app layout."""
     if sys.platform == "darwin":
         exe = Path(sys.executable).resolve()
-        # .../Karaoke Blast.app/Contents/Resources/venv/bin/python
+        # .../Karaoke Blast.app/Contents/Resources/python/bin/python3
         parts = exe.parts
         if "Contents" in parts:
             contents_idx = parts.index("Contents")
