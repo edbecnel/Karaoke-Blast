@@ -20,7 +20,10 @@ VLC_FORMAT = (
     "best[ext=mp4]/best"
 )
 
-from karaoke_blast.utils.runtime_deps import resolve_ffmpeg_location(video_id: str, folder: Path | None = None) -> Path | None:
+from karaoke_blast.utils.runtime_deps import resolve_ffmpeg_location
+
+
+def downloaded_file_for(video_id: str, folder: Path | None = None) -> Path | None:
     """Return an existing download path for *video_id*, if any."""
     target_dir = folder or default_downloads_dir()
     if not target_dir.is_dir():

@@ -40,7 +40,7 @@ class VlcPlayer(QObject):
 
         try:
             import vlc
-        except OSError as exc:
+        except (OSError, SystemExit) as exc:
             raise RuntimeError(
                 "Could not load VLC libraries. Install VLC from https://www.videolan.org/vlc/ "
                 "and ensure its architecture matches your Python installation."

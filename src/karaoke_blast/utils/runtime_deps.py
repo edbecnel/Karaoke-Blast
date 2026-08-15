@@ -204,12 +204,52 @@ def is_ffmpeg_available() -> bool:
     return resolve_ffmpeg_location() is not None
 
 
+def _mac_vlc_plugin_dir(lib_path: Path) -> Path | None:
+    """Return VLC's plugin directory next to *lib_path*, if it exists."""
+    app_plugins = lib_path.parent.parent / "plugins"
+    if app_plugins.is_dir():
+        return app_plugins
+    brew_plugins = lib_path.parent / "vlc" / "plugins"
+    if brew_plugins.is_dir():
+        return brew_plugins
+    return None
+
+
 def configure_vlc_environment() -> bool:
-    """Set PYTHON_VLC_LIB_PATH when VLC is installed. Returns True if configured."""
+    """Set python-vlc search paths when VLC is installed. Returns True if configured."""
+    lib_path = resolve_vlc_lib_path()
+    if lib_path is None and not os.environ.get("PYTHON_VLC_LIB_PATH"):
+        return False
+
+    if sys.platform == "darwin":
+        # python-vlc's macOS loader pre-loads libvlccore and finds plugins under
+        # VLC.app. PYTHON_VLC_LIB_PATH skips that path and crashes on `import vlc`.
+        standard_lib = Path("/Applications/VLC.app/Contents/MacOS/lib/libvlc.dylib")
+        if standard_lib.is_file():
+            os.environ.pop("PYTHON_VLC_LIB_PATH", None)
+            plugin_dir = Path("/Applications/VLC.app/Contents/MacOS/plugins")
+            if plugin_dir.is_dir():
+                os.environ["PYTHON_VLC_MODULE_PATH"] = str(plugin_dir)
+                os.environ["VLC_PLUGIN_PATH"] = str(plugin_dir)
+            logger.debug("Using standard VLC.app for python-vlc")
+            return True
+        if lib_path is not None:
+            plugin_dir = _mac_vlc_plugin_dir(lib_path)
+            if plugin_dir is not None:
+                os.environ["PYTHON_VLC_MODULE_PATH"] = str(plugin_dir)
+                os.environ["VLC_PLUGIN_PATH"] = str(plugin_dir)
+            core = lib_path.parent / "libvlccore.dylib"
+            if core.is_file():
+                import ctypes
+
+                ctypes.CDLL(str(core))
+            os.environ["PYTHON_VLC_LIB_PATH"] = str(lib_path)
+            logger.debug("Configured Homebrew/non-standard VLC library path: %s", lib_path)
+            return True
+        return False
+
     if os.environ.get("PYTHON_VLC_LIB_PATH"):
         return True
-
-    lib_path = resolve_vlc_lib_path()
     if lib_path is None:
         return False
 
@@ -219,13 +259,6 @@ def configure_vlc_environment() -> bool:
         os.environ.setdefault("PATH", "")
         if str(vlc_dir) not in os.environ["PATH"]:
             os.environ["PATH"] = f"{vlc_dir}{os.pathsep}{os.environ['PATH']}"
-    elif sys.platform == "darwin":
-        vlc_dir = lib_path.parent
-        os.environ.setdefault("DYLD_LIBRARY_PATH", "")
-        if str(vlc_dir) not in os.environ["DYLD_LIBRARY_PATH"]:
-            os.environ["DYLD_LIBRARY_PATH"] = (
-                f"{vlc_dir}{os.pathsep}{os.environ['DYLD_LIBRARY_PATH']}"
-            )
 
     logger.debug("Configured VLC library path: %s", lib_path)
     return True
