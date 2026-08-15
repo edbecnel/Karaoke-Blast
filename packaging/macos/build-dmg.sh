@@ -96,7 +96,8 @@ fi
 cp "$FFMPEG_BIN" "$FFMPEG_DIR/ffmpeg"
 chmod +x "$FFMPEG_DIR/ffmpeg"
 
-ensure_dir "$MACOS" "$RESOURCES"
+ensure_dir "$MACOS"
+ensure_dir "$RESOURCES"
 mv "$PYTHON_DIR" "$RESOURCES/python"
 mv "$VENV_DIR" "$RESOURCES/venv"
 mv "$FFMPEG_DIR" "$RESOURCES/ffmpeg"
