@@ -47,6 +47,20 @@ download() {
   curl -fsSL "$url" -o "$dest"
 }
 
+venv_python() {
+  local venv_dir="$1"
+  if [[ -x "$venv_dir/bin/python3" ]]; then
+    echo "$venv_dir/bin/python3"
+    return 0
+  fi
+  if [[ -x "$venv_dir/bin/python" ]]; then
+    echo "$venv_dir/bin/python"
+    return 0
+  fi
+  echo "Python interpreter not found in $venv_dir/bin" >&2
+  return 1
+}
+
 log "Building wheel..."
 ensure_dir "$DIST"
 if ! python3 -m pip wheel "$ROOT" -w "$DIST"; then
@@ -67,22 +81,27 @@ log "Preparing staging..."
 rm -rf "$STAGING"
 ensure_dir "$STAGING"
 
-PYTHON_DIR="$STAGING/python"
-VENV_DIR="$STAGING/venv"
-FFMPEG_DIR="$STAGING/ffmpeg"
 APP_PATH="$STAGING/${APP_NAME}.app"
 CONTENTS="$APP_PATH/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
+PYTHON_DIR="$RESOURCES/python"
+VENV_DIR="$RESOURCES/venv"
+FFMPEG_DIR="$RESOURCES/ffmpeg"
+
+ensure_dir "$MACOS"
+ensure_dir "$RESOURCES"
 
 download "$PYTHON_URL" "$TMP/$PYTHON_ARCHIVE"
 tar -xzf "$TMP/$PYTHON_ARCHIVE" -C "$TMP"
 mv "$TMP/python" "$PYTHON_DIR"
 
-log "Creating virtual environment..."
-"$PYTHON_DIR/bin/python3" -m venv "$VENV_DIR"
-"$VENV_DIR/bin/python" -m pip install --upgrade pip wheel
-"$VENV_DIR/bin/python" -m pip install "$PROJECT_WHEEL"
+log "Creating virtual environment in app bundle..."
+# Create venv after python is in its final path; --copies avoids broken symlinks if moved.
+"$PYTHON_DIR/bin/python3" -m venv --copies "$VENV_DIR"
+VENV_PY="$(venv_python "$VENV_DIR")"
+"$VENV_PY" -m pip install --upgrade pip wheel
+"$VENV_PY" -m pip install "$PROJECT_WHEEL"
 
 log "Downloading bundled ffmpeg..."
 ensure_dir "$FFMPEG_DIR"
@@ -96,12 +115,6 @@ fi
 cp "$FFMPEG_BIN" "$FFMPEG_DIR/ffmpeg"
 chmod +x "$FFMPEG_DIR/ffmpeg"
 
-ensure_dir "$MACOS"
-ensure_dir "$RESOURCES"
-mv "$PYTHON_DIR" "$RESOURCES/python"
-mv "$VENV_DIR" "$RESOURCES/venv"
-mv "$FFMPEG_DIR" "$RESOURCES/ffmpeg"
-
 cp "$SCRIPT_DIR/install-optional-deps.sh" "$RESOURCES/install-optional-deps.sh"
 chmod +x "$RESOURCES/install-optional-deps.sh"
 
@@ -111,6 +124,7 @@ set -euo pipefail
 APP_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 RESOURCES="$APP_DIR/Contents/Resources"
 MARKER="$HOME/Library/Application Support/Karaoke Blast/.optional-deps-checked"
+VENV_BIN="$RESOURCES/venv/bin"
 
 export PATH="$RESOURCES/ffmpeg:$PATH"
 
@@ -118,7 +132,14 @@ if [[ ! -f "$MARKER" ]]; then
   "$RESOURCES/install-optional-deps.sh" || true
 fi
 
-exec "$RESOURCES/venv/bin/python" -m karaoke_blast "$@"
+if [[ -x "$VENV_BIN/python3" ]]; then
+  exec "$VENV_BIN/python3" -m karaoke_blast "$@"
+fi
+if [[ -x "$VENV_BIN/python" ]]; then
+  exec "$VENV_BIN/python" -m karaoke_blast "$@"
+fi
+echo "Karaoke Blast: Python runtime not found in $VENV_BIN" >&2
+exit 1
 EOF
 chmod +x "$MACOS/launcher"
 
@@ -152,7 +173,7 @@ cat >"$CONTENTS/Info.plist" <<EOF
 EOF
 
 log "Building app icon..."
-"$RESOURCES/venv/bin/python" "$ROOT/scripts/build_app_icon.py" "$ICON_PNG" "$RESOURCES/AppIcon.icns"
+"$VENV_PY" "$ROOT/scripts/build_app_icon.py" "$ICON_PNG" "$RESOURCES/AppIcon.icns"
 
 ensure_dir "$DIST"
 DMG_PATH="$DIST/${APP_NAME}.dmg"
