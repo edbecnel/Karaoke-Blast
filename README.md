@@ -145,8 +145,8 @@ python -m karaoke_blast --folder /path/to/videos
 | `+` / `↑` | Volume up (local and YouTube) |
 | `-` / `↓` | Volume down (local and YouTube) |
 | `O` | Open a different folder |
-| `Y` | Open YouTube search (or focus search when in YouTube mode) |
-| `L` | Toggle song list / YouTube panel |
+| `Y` | Focus library search on the YouTube tab |
+| `L` | Toggle library panel |
 | `⌂` (Start menu button) | Return to the start screen |
 | `F` or `F11` | Toggle full screen |
 | `Esc` | Exit full screen (or quit if already windowed) |
@@ -154,20 +154,46 @@ python -m karaoke_blast --folder /path/to/videos
 
 Move the mouse during playback to reveal the on-screen control bar. Use the play/pause toggle on the control bar, or press `Space`, to play and pause local files.
 
-## Song List
+## Library Panel
 
-When a folder is loaded, a song list panel appears on the left. Subfolders that contain videos are listed with a trailing `/` — click one to drill down, or use **‥ Up** to go back (within the folder you opened). Click a song once to select it, then click it again to start playback. Use the **⋯** menu for **Browse folder** (opens the folder in Explorer, Finder, or your file manager), **Play all under this folder**, or **Queue all under this folder** (includes nested subfolders). After Play all, use **←** or **Back to folders** to return to hierarchical browsing. Use the sort dropdown to reorder by:
+During playback, press `L` or click **☰** on the control bar to show the **library panel** on the left. One search box at the top filters the active tab:
+
+- **Local** — live search across the opened folder and all subfolders (empty search shows normal folder browse)
+- **YouTube** — press Enter or click **Search** (with optional **Append "karaoke"** and **Search more**)
+
+The panel has three tabs:
+
+### Local
+
+When a folder is loaded, subfolders that contain videos are listed with a trailing `/` — click one to drill down, or use **‥ Up** to go back (within the folder you opened). Click a song once to select it, then click it again to start playback. Use the folder header menu for **Browse folder**, **Play all under this folder**, or **Queue all under this folder** (includes nested subfolders). After Play all, use **← Back to folders** to return to hierarchical browsing. Use the sort dropdown to reorder by:
 
 - Name (A → Z / Z → A)
 - Date modified (oldest / newest first)
 
-Toggle **Metadata** to show embedded title, artist, and comments instead of file names (songs without a title still show the file name). Use **⚙** next to it to set the field order and separators. Search matches metadata first, then the file name. The same display mode applies to the queue, **Current + queue**, and History.
+Toggle **Metadata** to show embedded title, artist, and comments instead of file names (songs without a title still show the file name). Use **⚙** next to it to set the field order and separators. Search matches metadata first, then the file name.
 
-Press `L` or click **☰** on the control bar to show or hide the song list. You can also click **×** at the top of the song list panel.
+Right-click any song and choose **Play Next** to queue it. You can also right-click and choose **Edit Metadata…** to change Song Title, Artist Name, and Comments (supported formats only).
 
-Right-click any song and choose **Play Next** to queue it after the current song finishes. Queued songs appear in the **Queue** panel above the list — click **×** on a song to remove it, or **Clear** to empty the queue. You can also right-click a queued song and choose **Remove from Queue**. Toggle **Current + queue** to show only the playing song and queued songs; the filter turns off automatically when the queue is empty. Right-click a song in the list, queue, **Current + queue**, or History and choose **Edit Metadata…** to change Song Title, Artist Name, and Comments (supported formats only).
+### YouTube
 
-Use the **History** tab to see recently played songs from any folder. Double-click to play, or right-click for **Play Now**, **Play Next**, **Edit Metadata…**, or **Remove from History**. Click **Clear** to empty the history list. History is saved across sessions.
+1. Switch to the **YouTube** tab and enter a search query.
+2. Leave **Append "karaoke" to search** checked to add `karaoke` to the query when it is not already present, or uncheck it to search for any YouTube video.
+3. Click **Search** or press Enter. Double-click a result to play it, or right-click and choose **Play Next** to queue it.
+4. Click **Search more** to load the next 15 results and append them to the list (up to 60 total).
+
+Use the **Paste URL** sub-tab to play a video when you already have a YouTube link or video ID.
+
+### Queue
+
+Queued local files and YouTube videos share one **Queue** section at the top of the library panel. When the current item ends, the next queued item plays automatically (switching between VLC and the embedded YouTube player as needed). Press `N` or click **Next** on the control bar to skip ahead manually. Press `S` or **Stop** to end playback; the queue is kept.
+
+### History
+
+The **History** tab lists recently played local files and YouTube videos in one list (newest first). Double-click to play, or right-click for **Play Now**, **Play Next**, **Edit Metadata…** (local), **Download** (YouTube), or **Remove from History**. Click **Clear** to empty history. History is saved across sessions in `play_history.json` (legacy local/YouTube history files are migrated on first launch).
+
+Volume and mute on the control bar work in both local and YouTube playback and share the same saved settings.
+
+You can open a local folder or search YouTube mid-session without returning to the start screen. Opening a folder while a YouTube video is playing updates the local library without interrupting playback.
 
 ## Batch Rename
 
@@ -196,30 +222,9 @@ Supported containers: MP3, MP4/M4A/M4V, FLAC, OGG/Opus, and WAV. Unsupported typ
 
 ## YouTube Streaming
 
-Click **Search YouTube** on the startup screen, or press `Y`, to enter YouTube mode.
+Click **Search YouTube** on the startup screen, or press `Y`, to open the player with the YouTube tab focused.
 
-### Search
-
-1. Enter a **song** name (required) and optionally an **artist / band**.
-2. Leave **Append "karaoke" to search** checked to add `karaoke` to the query when it is not already present, or uncheck it to search for any YouTube video.
-3. Click **Search**. Double-click a result to play it, or right-click and choose **Play Next** to queue it.
-4. Click **Search more** to load the next 15 results and append them to the list (up to 60 total). A new **Search** clears the list and starts over.
-
-### Paste URL
-
-Switch to the **Paste URL** tab to play a video when you already have a YouTube link or video ID.
-
-### Queue
-
-Queued YouTube videos appear in the **Queue** section at the top of the search panel. When the current video ends, the next queued video plays automatically. Press `N` or click **Next** on the control bar to skip ahead manually. Press `S` or **Stop** to end playback; the queue is kept.
-
-Volume and mute on the control bar work in YouTube mode and share the same saved settings as local playback.
-
-The **History** tab lists recently played YouTube videos with the same play, queue, and remove actions as search results. History persists across sessions and can be cleared with the **Clear** button.
-
-Opening a local folder switches back to local playback and clears the YouTube queue.
-
-### Downloads
+Downloads and API configuration are unchanged — see below.
 
 Download YouTube videos for offline playback in the local VLC player:
 
@@ -234,7 +239,7 @@ Videos are saved as VLC-compatible **MP4** files (H.264 video + AAC audio when a
 - Linux: `~/.config/karaoke-blast/youtube-downloads`
 - Windows: `%APPDATA%\Karaoke Blast\youtube-downloads`
 
-Use **Change…** on the startup screen or in the YouTube panel (below the download status) to pick a different folder. The choice is saved across sessions. Changing the folder does not move existing downloads.
+Use **Change…** on the startup screen or in the library panel (below the download status) to pick a different folder. The choice is saved across sessions. Changing the folder does not move existing downloads.
 
 You can also set the path manually in `settings.json`:
 
@@ -273,17 +278,20 @@ Set `youtube_search_backend` to `"yt-dlp"` to switch back. If the API key is mis
 - [ ] Parent folder with videos only in subfolders can be opened
 - [ ] Song list shows subfolders; drill down and Up stay within the opened root
 - [ ] Play all / Queue all include nested videos; Back to folders restores hierarchy
-- [ ] **Search YouTube** opens player in YouTube mode with search panel visible
+- [ ] Library panel: Local tab browse + recursive search; YouTube tab search and Paste URL
+- [ ] Mixed queue plays local files and YouTube videos in order
+- [ ] **History** tab shows local and YouTube plays together
+- [ ] **Search YouTube** opens player with YouTube tab focused
 - [ ] **Append "karaoke" to search** is checked by default; unchecking searches without adding `karaoke`
 - [ ] Checkbox state persists after restart
 - [ ] **Search more** appends additional results; new **Search** clears the list
 - [ ] Double-click result plays video in embedded player
-- [ ] Right-click **Play Next** queues video; queue shows in panel
-- [ ] Video end auto-advances to next queued item
-- [ ] **Next** skips to next queued video; **Stop** stops playback but keeps queue
-- [ ] **Paste URL** tab plays a direct link
-- [ ] `Y` focuses search; `L` toggles YouTube panel
-- [ ] Opening a local folder switches back to VLC and clears YouTube queue
+- [ ] Right-click **Play Next** queues item; queue shows in panel
+- [ ] Video end auto-advances to next queued item (local or YouTube)
+- [ ] **Next** skips to next queued item; **Stop** stops playback but keeps queue
+- [ ] **Paste URL** sub-tab plays a direct link
+- [ ] `Y` focuses YouTube search; `L` toggles library panel
+- [ ] Opening a folder mid-session does not interrupt YouTube or clear the queue
 - [ ] Fullscreen works in both local and YouTube modes
 - [ ] Right-click **Download** on a search result; progress appears in the sidebar
 - [ ] Download completes and shows success; **Open Downloads** opens the local player
@@ -291,7 +299,7 @@ Set `youtube_search_backend` to `"yt-dlp"` to switch back. If the API key is mis
 - [ ] Can play and search YouTube while a download is in progress
 - [ ] Second download while one is active shows a notice
 - [ ] Re-downloading an existing video reports it is already downloaded
-- [ ] **Change…** on startup screen and YouTube panel opens a folder picker
+- [ ] **Change…** on startup screen and library panel opens a folder picker
 - [ ] Custom download folder persists after restart and is used for new downloads
 - [ ] Right-click **Remove from List** on a recent folder removes it from the startup list after restart
 

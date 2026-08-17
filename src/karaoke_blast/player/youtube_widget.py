@@ -46,6 +46,11 @@ class YouTubeWidget(QWebEngineView):
         )
 
     def clear(self) -> None:
+        if self._current_video_id is not None:
+            self.page().runJavaScript(
+                "if (window.player && window.player.stopVideo) {"
+                " window.player.stopVideo(); }"
+            )
         self._current_video_id = None
         self.setHtml(_blank_html(), QUrl("about:blank"))
 

@@ -19,11 +19,10 @@ from PyQt6.QtWidgets import (
 )
 
 from karaoke_blast.models.media_source import MediaSourceMode
-from karaoke_blast.models.path_queue import PathQueue
-from karaoke_blast.models.play_queue import PlayQueue
 from karaoke_blast.models.playlist import Playlist
+from karaoke_blast.models.play_history_entry import PlayHistoryEntry
+from karaoke_blast.models.queue_item import MixedQueue, QueueItem
 from karaoke_blast.models.sort_strategy import SortStrategy, sort_paths
-from karaoke_blast.models.youtube_queue import YouTubeQueue
 from karaoke_blast.models.youtube_video import YouTubeVideo
 from karaoke_blast.player.controls_bar import ControlsBar
 from karaoke_blast.player.seek_bar import SeekBar
@@ -34,9 +33,8 @@ from karaoke_blast.player.youtube_widget import YouTubeWidget
 from karaoke_blast.services.youtube_download import downloaded_file_for, start_download
 from karaoke_blast.storage.folder_history import FolderHistory
 from karaoke_blast.storage.folder_queues import FolderQueues
-from karaoke_blast.storage.local_play_history import LocalPlayHistory
+from karaoke_blast.storage.play_history import PlayHistory
 from karaoke_blast.storage.settings import Settings
-from karaoke_blast.storage.youtube_play_history import YouTubePlayHistory
 from karaoke_blast.ui.opening_screen import OpeningScreen
 from karaoke_blast.ui.batch_metadata_dialog import BatchMetadataDialog
 from karaoke_blast.ui.batch_rename_dialog import BatchRenameDialog
@@ -45,16 +43,15 @@ from karaoke_blast.ui.panel_splitter import PanelSplitter
 from karaoke_blast.ui.rename_file_dialog import RenameFileDialog, RenameResult
 from karaoke_blast.ui.recent_folders_panel import RecentFoldersPanel
 from karaoke_blast.ui.youtube_downloads_folder_row import YouTubeDownloadsFolderRow
-from karaoke_blast.ui.song_list_panel import (
+from karaoke_blast.ui.library_panel import (
     PANEL_DEFAULT_WIDTH,
     PANEL_MAX_WIDTH,
     PANEL_MIN_WIDTH,
-    SongListPanel,
+    LibraryPanel,
 )
-from karaoke_blast.ui.youtube_panel import YouTubePanel
 from karaoke_blast.utils.display import display_name
 from karaoke_blast.utils.resources import logo_default_window_size
-from karaoke_blast.utils.song_display import DisplayFormat
+from karaoke_blast.utils.song_display import DisplayFormat, song_matches_query
 from karaoke_blast.utils.video_scanner import (
     MEDIA_EXTENSIONS,
     child_folders_with_videos,
@@ -110,17 +107,16 @@ class MainWindow(QWidget):
         self._browse_folder: Path | None = None
         self._recursive_list_mode = False
         self._raw_paths: list[Path] = []
+        self._library_paths: list[Path] = []
         self._sort_strategy = SortStrategy.NAME_ASC
         self._list_visible = False
         self._stopped = False
         self._saved_splitter_sizes: list[int] | None = None
-        self._play_queue = PlayQueue()
-        self._path_queue = PathQueue()
-        self._youtube_queue = YouTubeQueue()
-        self._local_history = LocalPlayHistory()
-        self._youtube_history = YouTubePlayHistory()
+        self._mixed_queue = MixedQueue()
+        self._play_history = PlayHistory()
         self._media_mode = MediaSourceMode.LOCAL
         self._current_youtube: YouTubeVideo | None = None
+        self._current_queue_item: QueueItem | None = None
         self._youtube_stopped = True
         self._external_path: Path | None = None
         self._folder_history = FolderHistory()
@@ -331,8 +327,8 @@ class MainWindow(QWidget):
     def _update_downloads_folder_display(self) -> None:
         path = self._youtube_downloads_path()
         self._startup_downloads_folder_row.set_folder(path)
-        if hasattr(self, "_youtube_panel"):
-            self._youtube_panel.set_downloads_folder(path)
+        if hasattr(self, "_library_panel"):
+            self._library_panel.set_downloads_folder(path)
 
     def _browse_youtube_downloads_folder(self) -> None:
         current = self._youtube_downloads_path()
@@ -355,8 +351,8 @@ class MainWindow(QWidget):
             if folder.resolve() != downloads.resolve()
         ]
         self._recent_folders.set_folders(recent, pinned=[downloads])
-        if hasattr(self, "_song_list"):
-            self._song_list.set_recent_folders(recent, pinned=[downloads])
+        if hasattr(self, "_library_panel"):
+            self._library_panel.set_recent_folders(recent, pinned=[downloads])
 
     def _on_start_menu_folder_selected(self, folder: Path) -> None:
         allow_empty = folder.resolve() == self._youtube_downloads_path().resolve()
@@ -378,73 +374,56 @@ class MainWindow(QWidget):
         self._splitter.setChildrenCollapsible(True)
         self._splitter.splitterMoved.connect(self._on_splitter_moved)
 
-        self._song_list = SongListPanel()
-        self._song_list.hide()
-        self._song_list.song_selected.connect(self._on_song_selected)
-        self._song_list.play_next_requested.connect(self._on_play_next_requested)
-        self._song_list.remove_from_queue_requested.connect(self._on_remove_from_queue)
-        self._song_list.remove_path_from_queue_requested.connect(
-            self._on_remove_path_from_queue
-        )
-        self._song_list.play_path_requested.connect(self._play_local_path)
-        self._song_list.clear_queue_requested.connect(self._on_clear_queue)
-        self._song_list.queue_reordered.connect(self._on_queue_reordered)
-        self._song_list.sort_changed.connect(self._on_sort_changed)
-        self._song_list.close_requested.connect(self._hide_song_list)
-        self._song_list.refresh_requested.connect(self._refresh_song_list)
-        self._song_list.resize_dragged.connect(self._on_panel_resize_drag)
-        self._song_list.queue_split_changed.connect(self._on_queue_split_changed)
-        self._song_list.set_queue_section_ratio(self._settings.queue_section_ratio)
-        self._song_list.set_display_format(self._settings.song_display_format)
-        self._song_list.set_display_mode(self._settings.song_display_mode)
-        self._song_list.display_mode_changed.connect(self._on_song_display_mode_changed)
-        self._song_list.display_format_changed.connect(
-            self._on_song_display_format_changed
-        )
-        self._song_list.history_play_requested.connect(self._on_history_play_requested)
-        self._song_list.history_queue_requested.connect(self._on_history_queue_requested)
-        self._song_list.history_remove_requested.connect(self._on_history_remove_requested)
-        self._song_list.history_clear_requested.connect(self._on_history_clear_requested)
-        self._song_list.rename_requested.connect(self._on_rename_requested)
-        self._song_list.edit_metadata_requested.connect(self._on_edit_metadata_requested)
-        self._song_list.folder_selected.connect(self._on_start_menu_folder_selected)
-        self._song_list.browse_folder_requested.connect(self._open_folder_dialog)
-        self._song_list.folder_entered.connect(self._on_folder_entered)
-        self._song_list.navigate_up_requested.connect(self._on_navigate_up)
-        self._song_list.play_all_requested.connect(self._on_play_all_requested)
-        self._song_list.queue_all_requested.connect(self._on_queue_all_requested)
-        self._song_list.play_all_folder_requested.connect(self._on_play_all_folder_requested)
-        self._song_list.queue_all_folder_requested.connect(self._on_queue_all_folder_requested)
-        self._song_list.back_to_folders_requested.connect(self._on_back_to_folders)
-
-        self._youtube_panel = YouTubePanel()
-        self._youtube_panel.hide()
-        self._youtube_panel.configure_search(
+        self._library_panel = LibraryPanel()
+        self._library_panel.hide()
+        self._library_panel.configure_search(
             backend_name=self._settings.youtube_search_backend,
             api_key=self._settings.youtube_api_key,
         )
-        self._youtube_panel.set_append_karaoke(self._settings.youtube_append_karaoke)
-        self._youtube_panel.append_karaoke_changed.connect(self._on_append_karaoke_changed)
-        self._youtube_panel.play_requested.connect(self._on_youtube_play_requested)
-        self._youtube_panel.queue_requested.connect(self._on_youtube_queue_requested)
-        self._youtube_panel.remove_from_queue_requested.connect(
-            self._on_youtube_remove_from_queue
+        self._library_panel.set_append_karaoke(self._settings.youtube_append_karaoke)
+        self._library_panel.append_karaoke_changed.connect(self._on_append_karaoke_changed)
+        self._library_panel.song_selected.connect(self._on_song_selected)
+        self._library_panel.play_next_requested.connect(self._on_play_next_requested)
+        self._library_panel.play_path_requested.connect(self._play_local_path)
+        self._library_panel.sort_changed.connect(self._on_sort_changed)
+        self._library_panel.close_requested.connect(self._hide_side_panel)
+        self._library_panel.refresh_requested.connect(self._refresh_song_list)
+        self._library_panel.resize_dragged.connect(self._on_panel_resize_drag)
+        self._library_panel.local_search_changed.connect(self._on_local_search_changed)
+        self._library_panel.display_mode_changed.connect(self._on_song_display_mode_changed)
+        self._library_panel.display_format_changed.connect(
+            self._on_song_display_format_changed
         )
-        self._youtube_panel.clear_queue_requested.connect(self._on_youtube_clear_queue)
-        self._youtube_panel.close_requested.connect(self._hide_side_panel)
-        self._youtube_panel.resize_dragged.connect(self._on_panel_resize_drag)
-        self._youtube_panel.search_backend_fallback.connect(self._show_toast)
-        self._youtube_panel.history_remove_requested.connect(self._on_youtube_history_remove)
-        self._youtube_panel.history_clear_requested.connect(self._on_youtube_history_clear)
-        self._youtube_panel.download_requested.connect(self._on_youtube_download_requested)
-        self._youtube_panel.browse_downloads_folder_requested.connect(
+        self._library_panel.history_play_requested.connect(self._on_history_play_requested)
+        self._library_panel.history_queue_requested.connect(self._on_history_queue_requested)
+        self._library_panel.history_remove_requested.connect(self._on_history_remove_requested)
+        self._library_panel.history_clear_requested.connect(self._on_history_clear_requested)
+        self._library_panel.rename_requested.connect(self._on_rename_requested)
+        self._library_panel.edit_metadata_requested.connect(self._on_edit_metadata_requested)
+        self._library_panel.folder_selected.connect(self._on_start_menu_folder_selected)
+        self._library_panel.browse_folder_requested.connect(self._open_folder_dialog)
+        self._library_panel.folder_entered.connect(self._on_folder_entered)
+        self._library_panel.navigate_up_requested.connect(self._on_navigate_up)
+        self._library_panel.play_all_requested.connect(self._on_play_all_requested)
+        self._library_panel.queue_all_requested.connect(self._on_queue_all_requested)
+        self._library_panel.play_all_folder_requested.connect(self._on_play_all_folder_requested)
+        self._library_panel.queue_all_folder_requested.connect(self._on_queue_all_folder_requested)
+        self._library_panel.back_to_folders_requested.connect(self._on_back_to_folders)
+        self._library_panel.play_requested.connect(self._on_queue_item_play_requested)
+        self._library_panel.queue_requested.connect(self._on_queue_item_queue_requested)
+        self._library_panel.youtube_play_requested.connect(self._on_youtube_play_requested)
+        self._library_panel.youtube_queue_requested.connect(self._on_youtube_queue_requested)
+        self._library_panel.remove_from_queue_requested.connect(self._on_remove_queue_item)
+        self._library_panel.clear_queue_requested.connect(self._on_clear_queue)
+        self._library_panel.queue_reordered.connect(self._on_queue_reordered)
+        self._library_panel.search_backend_fallback.connect(self._show_toast)
+        self._library_panel.download_requested.connect(self._on_youtube_download_requested)
+        self._library_panel.browse_downloads_folder_requested.connect(
             self._browse_youtube_downloads_folder
         )
-        self._youtube_panel.set_downloads_folder(self._youtube_downloads_path())
-
-        self._left_panel_stack = QStackedWidget()
-        self._left_panel_stack.addWidget(self._song_list)
-        self._left_panel_stack.addWidget(self._youtube_panel)
+        self._library_panel.set_downloads_folder(self._youtube_downloads_path())
+        self._library_panel.set_display_format(self._settings.song_display_format)
+        self._library_panel.set_display_mode(self._settings.song_display_mode)
 
         self._video_container = QWidget()
         self._video_container.setStyleSheet("background-color: black;")
@@ -479,7 +458,7 @@ class MainWindow(QWidget):
         )
         self._overlay.hide()
 
-        self._splitter.addWidget(self._left_panel_stack)
+        self._splitter.addWidget(self._library_panel)
         self._splitter.addWidget(self._video_container)
         self._splitter.setStretchFactor(0, 0)
         self._splitter.setStretchFactor(1, 1)
@@ -531,15 +510,15 @@ class MainWindow(QWidget):
             if self._youtube_player is not None:
                 self._youtube_player.stop()
             self._current_youtube = None
+            self._current_queue_item = None
             self._youtube_stopped = True
             self._controls.set_playing(False)
-            self._update_youtube_queue_display()
-            self._youtube_panel.clear_messages()
+            self._update_queue_display()
+            self._library_panel.clear_messages()
         self._hide_side_panel()
         self._overlay.hide()
         self._hide_status_message()
-        self._update_local_history_display()
-        self._update_youtube_history_display()
+        self._update_history_display()
         self._stack.setCurrentWidget(self._empty_state)
         if self.isFullScreen():
             self.showNormal()
@@ -583,18 +562,11 @@ class MainWindow(QWidget):
         # native view until layout/z-order is re-armed.
         if (
             event.type() == QEvent.Type.WindowStateChange
-            and hasattr(self, "_song_list")
+            and hasattr(self, "_library_panel")
             and self._list_visible
         ):
             QTimer.singleShot(0, self._rearm_panel_resize)
             QTimer.singleShot(100, self._rearm_panel_resize)
-        if (
-            event.type() == QEvent.Type.WindowStateChange
-            and hasattr(self, "_youtube_panel")
-            and self._list_visible
-            and self._media_mode == MediaSourceMode.YOUTUBE
-        ):
-            QTimer.singleShot(0, self._rearm_panel_resize)
         if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "_controls"):
             self._sync_fullscreen_control()
             if self._stack.currentWidget() == self._player_page:
@@ -624,12 +596,8 @@ class MainWindow(QWidget):
         self._splitter.setSizes([new_left, total - new_left])
 
     def _rearm_panel_resize(self) -> None:
-        panel = self._active_side_panel()
-        if self._list_visible and panel.isVisible():
-            if self._media_mode == MediaSourceMode.YOUTUBE:
-                self._youtube_panel.raise_edge_grip()
-            else:
-                self._song_list.raise_edge_grip()
+        if self._list_visible and self._library_panel.isVisible():
+            self._library_panel.raise_edge_grip()
             handle = self._splitter.handle(1)
             handle.raise_()
             handle.setCursor(Qt.CursorShape.SizeHorCursor)
@@ -655,8 +623,7 @@ class MainWindow(QWidget):
 
     def _on_splitter_moved(self, _pos: int, _index: int) -> None:
         sizes = self._splitter.sizes()
-        panel = self._active_side_panel()
-        self._list_visible = sizes[0] > 0 and panel.isVisible()
+        self._list_visible = sizes[0] > 0 and self._library_panel.isVisible()
         self._reposition_video_ui()
         if self._vlc is not None and self._media_mode == MediaSourceMode.LOCAL:
             QTimer.singleShot(0, self._vlc.bind_output)
@@ -697,10 +664,7 @@ class MainWindow(QWidget):
         self._message_page.setGeometry(0, 0, width, h)
         self._reposition_overlay()
         if self._list_visible:
-            if self._media_mode == MediaSourceMode.YOUTUBE:
-                self._youtube_panel.raise_edge_grip()
-            else:
-                self._song_list.raise_edge_grip()
+            self._library_panel.raise_edge_grip()
 
     def _show_status_message(self, message: str) -> None:
         # Use a dedicated stack page (not an overlay on the native VLC HWND).
@@ -747,14 +711,11 @@ class MainWindow(QWidget):
         self._reposition_video_ui()
 
     def _active_side_panel(self) -> QWidget:
-        if self._media_mode == MediaSourceMode.YOUTUBE:
-            return self._youtube_panel
-        return self._song_list
+        return self._library_panel
 
     def _show_side_panel(self) -> None:
-        panel = self._active_side_panel()
         self._list_visible = True
-        panel.show()
+        self._library_panel.show()
         total = max(self._splitter.width(), PANEL_DEFAULT_WIDTH + 400)
         if self._saved_splitter_sizes and self._saved_splitter_sizes[0] > 0:
             self._splitter.setSizes(self._saved_splitter_sizes)
@@ -764,27 +725,14 @@ class MainWindow(QWidget):
         handle.raise_()
         handle.setCursor(Qt.CursorShape.SizeHorCursor)
         if self._media_mode == MediaSourceMode.LOCAL and self._playlist.paths:
-            self._song_list.set_current_index(self._playlist.index)
-        if self._media_mode == MediaSourceMode.YOUTUBE:
-            self._youtube_panel.raise_edge_grip()
-        else:
-            self._song_list.raise_edge_grip()
+            self._library_panel.set_current_index(self._playlist.index)
+        self._library_panel.raise_edge_grip()
 
     def _show_song_list(self) -> None:
-        if self._media_mode != MediaSourceMode.LOCAL:
-            return
         self._show_side_panel()
 
     def _toggle_song_list(self) -> None:
         if self._stack.currentWidget() != self._player_page:
-            return
-        if self._media_mode == MediaSourceMode.YOUTUBE:
-            if self._list_visible:
-                self._hide_side_panel()
-            else:
-                self._show_side_panel()
-            return
-        if not self._playlist.paths:
             return
         if self._list_visible:
             self._hide_side_panel()
@@ -792,20 +740,17 @@ class MainWindow(QWidget):
             self._show_side_panel()
 
     def _hide_side_panel(self) -> None:
-        panel = self._active_side_panel()
         sizes = self._splitter.sizes()
-        if sizes[0] <= 0 and not panel.isVisible():
+        if sizes[0] <= 0 and not self._library_panel.isVisible():
             return
         if sizes[0] > 0:
             self._saved_splitter_sizes = sizes
         self._list_visible = False
         total = sum(sizes) or self._splitter.width()
         self._splitter.setSizes([0, total])
-        panel.hide()
+        self._library_panel.hide()
 
     def _hide_song_list(self) -> None:
-        if self._media_mode != MediaSourceMode.LOCAL:
-            return
         self._hide_side_panel()
 
     def _hide_controls(self) -> None:
@@ -904,17 +849,25 @@ class MainWindow(QWidget):
             return
 
         self._save_folder_state()
-        self._switch_to_local_mode(clear_youtube_queue=True)
+        youtube_active = (
+            self._media_mode == MediaSourceMode.YOUTUBE
+            and not self._youtube_stopped
+            and self._current_youtube is not None
+        )
+        if not youtube_active:
+            self._prepare_local_playback(stop_youtube=False)
 
         self._folder = folder
         self._browse_folder = folder
         self._recursive_list_mode = False
         self._folder_history.add(folder)
         self._refresh_recent_folders()
-        self._song_list.set_folder(folder)
+        self._library_panel.set_folder(folder)
+        self._library_panel.set_library_root(folder)
         self._sort_strategy = SortStrategy.NAME_ASC
 
         paths = scan_videos(folder)
+        self._library_paths = scan_videos(folder, recursive=True)
         subfolders = child_folders_with_videos(folder)
         self._raw_paths = paths
         sorted_paths = sort_paths(self._raw_paths, self._sort_strategy)
@@ -923,22 +876,22 @@ class MainWindow(QWidget):
             paths=sorted_paths,
             index=restored_index if restored_index is not None else 0,
         )
-        self._stopped = True
-        self._overlay.hide()
-        self._hide_status_message()
-        self._stack.setCurrentWidget(self._player_page)
-        self.showFullScreen()
-        self._sync_fullscreen_control()
-        QApplication.processEvents()
-        if not self._ensure_vlc():
-            self._stack.setCurrentWidget(self._empty_state)
-            self.showNormal()
-            return
-        self._vlc.stop()
-        self._controls.set_playing(False)
-        self._song_list.set_sort_strategy(self._sort_strategy)
+        if not youtube_active:
+            self._stopped = True
+            self._current_queue_item = None
+            self._overlay.hide()
+            self._hide_status_message()
+        self._enter_player_page(tab="local")
+        if not youtube_active:
+            if not self._ensure_vlc():
+                self._stack.setCurrentWidget(self._empty_state)
+                self.showNormal()
+                return
+            self._vlc.stop()
+            self._controls.set_playing(False)
+        self._library_panel.set_sort_strategy(self._sort_strategy)
         self._restore_folder_queue(sorted_paths)
-        self._song_list.set_songs(
+        self._library_panel.set_songs(
             sorted_paths,
             current_index=restored_index,
             subfolders=subfolders,
@@ -946,10 +899,14 @@ class MainWindow(QWidget):
             recursive_list_mode=False,
         )
         self._update_queue_display()
-        self._update_local_history_display()
-        self._show_song_list()
+        self._update_history_display()
+        if not youtube_active:
+            self._library_panel.set_active_tab("local")
+        self._show_side_panel()
         self._show_controls()
         self._reposition_video_ui()
+        if youtube_active:
+            return
         if sorted_paths:
             QTimer.singleShot(0, self._show_ready_to_play)
         elif subfolders:
@@ -1022,7 +979,6 @@ class MainWindow(QWidget):
             current_index = restored_index
         else:
             keep_path = playing_path
-            self._remap_play_queue(old_paths, sorted_paths)
             self._playlist.reorder(sorted_paths, keep_path=keep_path)
             if self._playlist.current() is None and sorted_paths:
                 self._playlist.go_to(0)
@@ -1037,8 +993,8 @@ class MainWindow(QWidget):
                     current_index = playing_index
                     self._playlist.go_to(playing_index)
 
-        self._song_list.set_folder(self._browse_folder)
-        self._song_list.set_songs(
+        self._library_panel.set_folder(self._browse_folder)
+        self._library_panel.set_songs(
             self._playlist.paths,
             current_index=current_index if self._external_path is None else None,
             clear_search=clear_search,
@@ -1058,7 +1014,6 @@ class MainWindow(QWidget):
             return
         self._browse_folder = folder
         self._recursive_list_mode = False
-        self._play_queue.clear()
         self._apply_browse_contents(clear_search=True, keep_playback=True)
 
     def _on_navigate_up(self) -> None:
@@ -1069,7 +1024,6 @@ class MainWindow(QWidget):
             return
         self._browse_folder = parent.resolve()
         self._recursive_list_mode = False
-        self._play_queue.clear()
         self._apply_browse_contents(clear_search=True, keep_playback=True)
 
     def _on_play_all_requested(self) -> None:
@@ -1093,11 +1047,9 @@ class MainWindow(QWidget):
         self._browse_folder = folder.resolve()
         self._raw_paths = paths
         sorted_paths = sort_paths(self._raw_paths, self._sort_strategy)
-        self._play_queue.clear()
-        self._path_queue.clear()
         self._playlist = Playlist(paths=sorted_paths, index=0)
-        self._song_list.set_folder(self._browse_folder)
-        self._song_list.set_songs(
+        self._library_panel.set_folder(self._browse_folder)
+        self._library_panel.set_songs(
             sorted_paths,
             current_index=0,
             subfolders=[],
@@ -1129,31 +1081,18 @@ class MainWindow(QWidget):
         queued = 0
         played_first = False
         for path in paths:
-            index = self._playlist_index_for_path(path)
-            if self._is_local_idle() and not played_first:
-                if index is not None:
-                    self._playlist.go_to(index)
-                    self._play_current()
-                else:
-                    self._play_local_path(path)
+            item = QueueItem(kind="local", path=path)
+            if self._is_idle() and not played_first:
+                self._play_queue_item(item)
                 played_first = True
                 continue
-            if index is not None:
-                if (
-                    not self._stopped
-                    and index == self._playlist.index
-                    and self._external_path is None
-                ):
-                    continue
-                if self._play_queue.contains(index):
-                    continue
-                if self._play_queue.enqueue(index):
-                    queued += 1
-            else:
-                if self._is_external_now_playing(path) or self._is_path_in_path_queue(path):
-                    continue
-                if self._path_queue.enqueue(path):
-                    queued += 1
+            current = self._current_playing_queue_item()
+            if current is not None and current.key() == item.key():
+                continue
+            if self._mixed_queue.contains(item):
+                continue
+            if self._mixed_queue.enqueue(item):
+                queued += 1
         self._update_queue_display()
         if played_first and queued == 0:
             self._show_toast(f'Playing all under "{folder.name}"')
@@ -1168,7 +1107,6 @@ class MainWindow(QWidget):
         if self._browse_folder is None:
             return
         self._recursive_list_mode = False
-        self._play_queue.clear()
         self._apply_browse_contents(clear_search=True, keep_playback=True)
 
     def showEvent(self, event) -> None:
@@ -1198,33 +1136,36 @@ class MainWindow(QWidget):
         self._seek_bar.reset()
         self._clear_audio_title()
 
-    def _switch_to_local_mode(self, *, clear_youtube_queue: bool = False) -> None:
-        if self._youtube_player is not None:
+    def _enter_player_page(self, *, tab: str = "local") -> None:
+        self._stack.setCurrentWidget(self._player_page)
+        self.showFullScreen()
+        self._sync_fullscreen_control()
+        QApplication.processEvents()
+        self._library_panel.set_active_tab(tab)
+
+    def _prepare_local_playback(self, *, stop_youtube: bool) -> None:
+        if stop_youtube and self._youtube_player is not None:
             self._youtube_player.stop()
-        if clear_youtube_queue:
-            self._youtube_queue.clear()
-        self._current_youtube = None
-        self._youtube_stopped = True
+            self._current_youtube = None
+            self._youtube_stopped = True
         self._media_mode = MediaSourceMode.LOCAL
-        self._youtube_panel.clear_messages()
-        self._left_panel_stack.setCurrentIndex(0)
         self._canvas_stack.setCurrentWidget(self._video_widget)
         self._controls.set_media_mode(MediaSourceMode.LOCAL)
-        self._update_youtube_queue_display()
-        self._update_youtube_history_display()
         if self._vlc is not None:
             self._vlc.bind_output()
         self._reposition_video_ui()
 
-    def _enter_youtube_mode(self) -> None:
+    def _prepare_youtube_playback(self) -> None:
         self._freeze_local_playback()
         self._media_mode = MediaSourceMode.YOUTUBE
-        self._left_panel_stack.setCurrentIndex(1)
         self._canvas_stack.setCurrentWidget(self._youtube_widget)
         self._controls.set_media_mode(MediaSourceMode.YOUTUBE)
         self._stack.setCurrentWidget(self._player_page)
         self.showFullScreen()
         self._sync_fullscreen_control()
+
+    def _enter_youtube_mode(self) -> None:
+        self._prepare_youtube_playback()
         if not self._ensure_youtube():
             self._stack.setCurrentWidget(self._empty_state)
             self.showNormal()
@@ -1232,135 +1173,185 @@ class MainWindow(QWidget):
         self._show_side_panel()
         self._show_controls()
         self._apply_youtube_audio()
-        self._update_youtube_history_display()
+        self._update_history_display()
         self._reposition_video_ui()
-        self._youtube_panel.focus_search()
+        self._library_panel.focus_search(tab="youtube")
         self._show_status_message("Search for a karaoke song to play")
+
+    def _current_playing_queue_item(self) -> QueueItem | None:
+        if self._media_mode == MediaSourceMode.YOUTUBE:
+            if not self._youtube_stopped and self._current_youtube is not None:
+                return QueueItem(kind="youtube", video=self._current_youtube)
+            return None
+        if not self._stopped:
+            path = self._external_path or self._playlist.current()
+            if path is not None:
+                return QueueItem(kind="local", path=path)
+        return None
+
+    def _update_history_display(self) -> None:
+        current_local = None
+        current_video_id = None
+        if not self._stopped and self._media_mode == MediaSourceMode.LOCAL:
+            current_local = self._external_path or self._playlist.current()
+        elif not self._youtube_stopped and self._current_youtube is not None:
+            current_video_id = self._current_youtube.video_id
+        self._library_panel.set_history(
+            self._play_history.entries(),
+            current_local=current_local,
+            current_video_id=current_video_id,
+        )
+
+    def _is_idle(self) -> bool:
+        if self._media_mode == MediaSourceMode.YOUTUBE:
+            return self._youtube_stopped and self._current_youtube is None
+        return self._stopped and self._external_path is None
+
+    def _play_queue_item(self, item: QueueItem) -> None:
+        if item.kind == "youtube" and item.video is not None:
+            self._play_youtube(item.video)
+            return
+        if item.kind == "local" and item.path is not None:
+            self._play_local_path(item.path)
+
+    def _queue_item(self, item: QueueItem) -> None:
+        if self._mixed_queue.contains(item):
+            self._show_toast("That item is already queued.")
+            return
+        current = self._current_playing_queue_item()
+        if current is not None and current.key() == item.key():
+            self._show_toast("That item is already playing.")
+            return
+        if self._is_idle():
+            self._play_queue_item(item)
+            return
+        if self._mixed_queue.enqueue(item):
+            self._update_queue_display()
+            label = self._queue_item_label(item)
+            self._show_toast(f'Queued "{label}"')
+
+    def _queue_item_label(self, item: QueueItem) -> str:
+        if item.kind == "youtube" and item.video is not None:
+            return item.video.title
+        if item.kind == "local" and item.path is not None:
+            return display_name(item.path)
+        return "item"
+
+    def _on_queue_item_play_requested(self, item: QueueItem) -> None:
+        self._play_queue_item(item)
+
+    def _on_queue_item_queue_requested(self, item: QueueItem) -> None:
+        self._queue_item(item)
+
+    def _on_remove_queue_item(self, item: QueueItem) -> None:
+        current = self._current_playing_queue_item()
+        removing_now_playing = current is not None and current.key() == item.key()
+        self._mixed_queue.remove(item)
+        if removing_now_playing:
+            self._on_stop()
+            return
+        self._update_queue_display()
+
+    def _on_local_search_changed(self, query: str) -> None:
+        if self._folder is None:
+            return
+        text = query.strip()
+        if not text:
+            self._apply_browse_contents(clear_search=True, keep_playback=True)
+            return
+        filtered = [
+            path
+            for path in self._library_paths
+            if song_matches_query(
+                path,
+                text,
+                mode=self._settings.song_display_mode,
+                fmt=self._settings.song_display_format,
+            )
+        ]
+        sorted_paths = sort_paths(filtered, self._sort_strategy)
+        self._library_panel.set_songs(
+            sorted_paths,
+            current_index=self._playlist.index if self._external_path is None else None,
+            clear_search=False,
+            subfolders=[],
+            can_navigate_up=False,
+            recursive_list_mode=True,
+            label_root=self._folder,
+        )
 
     def _play_youtube(self, video: YouTubeVideo) -> None:
         if not self._ensure_youtube():
             return
-        if self._media_mode != MediaSourceMode.YOUTUBE:
-            self._freeze_local_playback()
-            self._media_mode = MediaSourceMode.YOUTUBE
-            self._left_panel_stack.setCurrentIndex(1)
-            self._canvas_stack.setCurrentWidget(self._youtube_widget)
-            self._controls.set_media_mode(MediaSourceMode.YOUTUBE)
-            self._stack.setCurrentWidget(self._player_page)
-            self.showFullScreen()
-            self._sync_fullscreen_control()
-            self._show_side_panel()
+        self._prepare_youtube_playback()
+        self._show_side_panel()
         self._current_youtube = video
+        self._current_queue_item = QueueItem(kind="youtube", video=video)
         self._youtube_stopped = False
-        self._canvas_stack.setCurrentWidget(self._youtube_widget)
         self._message_label.clear()
-        if self._youtube_queue.contains(video.video_id):
-            self._youtube_queue.remove(video.video_id)
+        if self._mixed_queue.contains(self._current_queue_item):
+            self._mixed_queue.remove(self._current_queue_item)
         self._youtube_player.play(
             video,
             volume=self._settings.volume,
             muted=self._settings.muted,
         )
-        self._youtube_history.add(video)
-        self._update_youtube_history_display()
+        self._play_history.add_youtube(video)
+        self._update_history_display()
         self._controls.set_playing(True)
         self._stop_seek_updates()
-        self._update_youtube_queue_display()
+        self._update_queue_display()
         self._show_youtube_overlay()
         self._show_controls()
         self._raise_ui_layers()
 
-    def _queue_youtube(self, video: YouTubeVideo) -> None:
-        if self._youtube_queue.contains(video.video_id):
-            self._show_toast("That video is already queued.")
-            return
-        if (
-            self._current_youtube is not None
-            and self._current_youtube.video_id == video.video_id
-        ):
-            self._show_toast("That video is already playing.")
-            return
-        if self._youtube_stopped and self._current_youtube is None:
-            self._play_youtube(video)
-            return
-        if self._youtube_queue.enqueue(video):
-            self._update_youtube_queue_display()
-            self._show_toast(f'Queued "{video.title}"')
+    def _on_youtube_play_requested(self, video: YouTubeVideo) -> None:
+        self._play_youtube(video)
 
-    def _update_youtube_queue_display(self) -> None:
-        queued = [
-            video
-            for video in self._youtube_queue.items()
-            if self._current_youtube is None
-            or video.video_id != self._current_youtube.video_id
-        ]
-        self._youtube_panel.set_queue_state(
-            current=None if self._youtube_stopped else self._current_youtube,
-            queued=queued,
-        )
+    def _on_youtube_queue_requested(self, video: YouTubeVideo) -> None:
+        self._queue_item(QueueItem(kind="youtube", video=video))
 
     def _show_youtube_overlay(self) -> None:
         if self._current_youtube is None:
             return
         text = self._current_youtube.title
-        if self._youtube_queue:
-            text += f"  ·  {len(self._youtube_queue)} queued"
+        if self._mixed_queue:
+            text += f"  ·  {len(self._mixed_queue)} queued"
         self._overlay.setText(text)
         self._overlay.show()
         self._overlay.raise_()
         self._reposition_overlay()
         self._overlay_timer.start(OVERLAY_HIDE_MS)
 
-    def _advance_youtube_queue(self) -> bool:
-        next_video = self._youtube_queue.dequeue()
-        if next_video is None:
-            return False
-        self._play_youtube(next_video)
-        return True
+    def _advance_playback(self) -> bool:
+        item = self._mixed_queue.dequeue()
+        if item is not None:
+            self._play_queue_item(item)
+            return True
+        if self._media_mode == MediaSourceMode.LOCAL and self._playlist.has_next():
+            self._playlist.next()
+            self._play_current()
+            return True
+        return False
 
-    def _on_youtube_play_requested(self, video: YouTubeVideo) -> None:
-        self._play_youtube(video)
-
-    def _on_youtube_queue_requested(self, video: YouTubeVideo) -> None:
-        self._queue_youtube(video)
-
-    def _on_youtube_remove_from_queue(self, video_id: str) -> None:
-        removing_now_playing = (
-            not self._youtube_stopped
-            and self._current_youtube is not None
-            and self._current_youtube.video_id == video_id
-        )
-        self._youtube_queue.remove(video_id)
-        if removing_now_playing:
-            self._on_stop()
-            return
-        self._update_youtube_queue_display()
-
-    def _on_youtube_clear_queue(self) -> None:
-        self._youtube_queue.clear()
-        if not self._youtube_stopped:
-            self._on_stop()
-        else:
-            self._update_youtube_queue_display()
+    def _finish_youtube_playback(self) -> None:
+        if not self._advance_playback():
+            self._youtube_stopped = True
+            self._current_youtube = None
+            self._current_queue_item = None
+            self._controls.set_playing(False)
+            self._update_queue_display()
+            self._update_history_display()
+            self._show_status_message("Search for another song")
 
     def _on_youtube_end_reached(self) -> None:
         QTimer.singleShot(50, self._finish_youtube_playback)
-
-    def _finish_youtube_playback(self) -> None:
-        if not self._advance_youtube_queue():
-            self._youtube_stopped = True
-            self._controls.set_playing(False)
-            self._update_youtube_queue_display()
-            self._update_youtube_history_display()
-            self._show_status_message("Search for another song")
 
     def _on_youtube_playback_error(self, message: str) -> None:
         logger.warning("YouTube playback error: %s", message)
         self._show_toast(message, duration_ms=5000)
 
     def _play_current(self) -> None:
-        if self._media_mode != MediaSourceMode.LOCAL:
-            return
         if self._vlc is None:
             return
         current = self._playlist.current()
@@ -1373,16 +1364,16 @@ class MainWindow(QWidget):
                 f'"{display_name(current)}" not found — try refreshing the song list',
                 duration_ms=5000,
             )
-            self._local_history.remove(current)
-            self._update_local_history_display()
+            self._play_history.remove_local(current)
+            self._update_history_display()
             QTimer.singleShot(0, self._advance_to_next_track)
             return
-        queue_changed = False
-        if self._play_queue.contains(self._playlist.index):
-            self._play_queue.remove(self._playlist.index)
-            queue_changed = True
+        self._prepare_local_playback(stop_youtube=True)
         self._stopped = False
         self._external_path = None
+        self._current_youtube = None
+        self._youtube_stopped = True
+        self._current_queue_item = QueueItem(kind="local", path=current)
         if is_audio_file(current):
             self._show_audio_title(current)
         else:
@@ -1391,24 +1382,22 @@ class MainWindow(QWidget):
         self._show_controls()
         self._vlc.play(current)
         self._controls.set_playing(True)
-        self._local_history.add(current)
-        self._update_local_history_display()
+        self._play_history.add_local(current)
+        self._update_history_display()
         self._apply_saved_audio()
-        self._song_list.set_current_index(self._playlist.index)
-        self._update_queue_display(include_now_playing=True)
-        if not queue_changed:
-            self._save_folder_state()
+        self._library_panel.set_current_index(self._playlist.index)
+        self._update_queue_display()
+        self._save_folder_state()
         self._start_seek_updates()
         self._raise_ui_layers()
 
     def _play_local_path(self, path: Path) -> None:
-        if self._media_mode != MediaSourceMode.LOCAL:
-            self._switch_to_local_mode(clear_youtube_queue=False)
         if not self._ensure_vlc():
             return
         if not _is_playable_file(path):
             self._handle_missing_local_path(path)
             return
+        self._prepare_local_playback(stop_youtube=True)
         index = self._playlist_index_for_path(path)
         if index is not None:
             self._playlist.go_to(index)
@@ -1416,6 +1405,9 @@ class MainWindow(QWidget):
             return
         self._stopped = False
         self._external_path = path
+        self._current_youtube = None
+        self._youtube_stopped = True
+        self._current_queue_item = QueueItem(kind="local", path=path)
         if is_audio_file(path):
             self._show_audio_title(path)
         else:
@@ -1424,11 +1416,11 @@ class MainWindow(QWidget):
         self._show_controls()
         self._vlc.play(path)
         self._controls.set_playing(True)
-        self._local_history.add(path)
-        self._update_local_history_display()
+        self._play_history.add_local(path)
+        self._update_history_display()
         self._apply_saved_audio()
-        self._song_list.clear_current_index()
-        self._update_queue_display(include_now_playing=True)
+        self._library_panel.clear_current_index()
+        self._update_queue_display()
         self._start_seek_updates()
         self._raise_ui_layers()
 
@@ -1437,9 +1429,9 @@ class MainWindow(QWidget):
             f'"{display_name(path)}" not found — removed from history',
             duration_ms=5000,
         )
-        self._path_queue.remove(path)
-        self._local_history.remove(path)
-        self._update_local_history_display()
+        self._mixed_queue.remove_local(path)
+        self._play_history.remove_local(path)
+        self._update_history_display()
         self._update_queue_display()
 
     def _playlist_index_for_path(self, path: Path) -> int | None:
@@ -1449,110 +1441,49 @@ class MainWindow(QWidget):
                 return index
         return None
 
-    def _is_external_now_playing(self, path: Path) -> bool:
-        if self._stopped or self._external_path is None:
-            return False
-        return _resolved_path(self._external_path) == _resolved_path(path)
-
-    def _is_path_in_path_queue(self, path: Path) -> bool:
-        resolved = _resolved_path(path)
-        return any(_resolved_path(queued) == resolved for queued in self._path_queue.paths())
-
-    def _is_local_idle(self) -> bool:
-        return self._stopped and self._external_path is None
-
     def _show_overlay_for_path(self, path: Path) -> None:
         text = display_name(path)
-        if self._play_queue or self._path_queue:
-            queued = len(self._play_queue) + len(self._path_queue)
-            text += f"  ·  {queued} queued"
+        if self._mixed_queue:
+            text += f"  ·  {len(self._mixed_queue)} queued"
         self._overlay.setText(text)
         self._overlay.show()
         self._overlay.raise_()
         self._reposition_overlay()
         self._overlay_timer.start(OVERLAY_HIDE_MS)
 
-    def _update_local_history_display(self) -> None:
-        current = None
-        if not self._stopped and self._media_mode == MediaSourceMode.LOCAL:
-            current = self._external_path or self._playlist.current()
-        self._song_list.set_history(self._local_history.paths(), current=current)
-
-    def _update_youtube_history_display(self) -> None:
-        current = None if self._youtube_stopped else self._current_youtube
-        self._youtube_panel.set_history(self._youtube_history.videos(), current=current)
-
-    def _on_history_play_requested(self, path: Path) -> None:
-        if not _is_playable_file(path):
-            self._handle_missing_local_path(path)
+    def _on_history_play_requested(self, entry: PlayHistoryEntry) -> None:
+        if entry.kind == "local" and entry.path is not None:
+            if not _is_playable_file(entry.path):
+                self._handle_missing_local_path(entry.path)
+                return
+            self._play_local_path(entry.path)
             return
-        self._play_local_path(path)
+        if entry.kind == "youtube" and entry.video is not None:
+            self._play_youtube(entry.video)
 
-    def _on_history_queue_requested(self, path: Path) -> None:
-        if not _is_playable_file(path):
-            self._handle_missing_local_path(path)
+    def _on_history_queue_requested(self, entry: PlayHistoryEntry) -> None:
+        if entry.kind == "local" and entry.path is not None:
+            if not _is_playable_file(entry.path):
+                self._handle_missing_local_path(entry.path)
+                return
+            self._queue_item(QueueItem(kind="local", path=entry.path))
             return
-        index = self._playlist_index_for_path(path)
-        if index is not None:
-            self._queue_local_path_by_index(index)
-            return
-        self._queue_external_path(path)
+        if entry.kind == "youtube" and entry.video is not None:
+            self._queue_item(QueueItem(kind="youtube", video=entry.video))
 
-    def _queue_local_path_by_index(self, index: int) -> None:
+    def _on_play_next_requested(self, index: int) -> None:
         if index < 0 or index >= self._playlist.count:
             return
         path = self._playlist.paths[index]
-        if not _is_playable_file(path):
-            self._handle_missing_local_path(path)
-            return
-        if not self._stopped and index == self._playlist.index and self._external_path is None:
-            self._show_toast("That song is already playing.")
-            return
-        if self._play_queue.contains(index):
-            self._show_toast("That song is already queued.")
-            return
-        if self._is_local_idle():
-            self._playlist.go_to(index)
-            self._play_current()
-            return
-        if self._play_queue.enqueue(index):
-            self._update_queue_display()
-            self._show_toast(
-                f'Queued "{display_name(self._playlist.paths[index])}"'
-            )
+        self._queue_item(QueueItem(kind="local", path=path))
 
-    def _queue_external_path(self, path: Path) -> None:
-        if not _is_playable_file(path):
-            self._handle_missing_local_path(path)
-            return
-        if self._is_external_now_playing(path):
-            self._show_toast("That song is already playing.")
-            return
-        if self._is_path_in_path_queue(path):
-            self._show_toast("That song is already queued.")
-            return
-        if self._is_local_idle():
-            self._play_local_path(path)
-            return
-        if self._path_queue.enqueue(path):
-            self._update_queue_display()
-            self._show_toast(f'Queued "{display_name(path)}"')
-
-    def _on_history_remove_requested(self, path: Path) -> None:
-        self._local_history.remove(path)
-        self._update_local_history_display()
+    def _on_history_remove_requested(self, entry: PlayHistoryEntry) -> None:
+        self._play_history.remove(entry)
+        self._update_history_display()
 
     def _on_history_clear_requested(self) -> None:
-        self._local_history.clear()
-        self._update_local_history_display()
-
-    def _on_youtube_history_remove(self, video_id: str) -> None:
-        self._youtube_history.remove(video_id)
-        self._update_youtube_history_display()
-
-    def _on_youtube_history_clear(self) -> None:
-        self._youtube_history.clear()
-        self._update_youtube_history_display()
+        self._play_history.clear()
+        self._update_history_display()
 
     def _on_youtube_download_requested(self, video: YouTubeVideo) -> None:
         if self._download_thread is not None and self._download_thread.isRunning():
@@ -1565,7 +1496,7 @@ class MainWindow(QWidget):
         output_dir.mkdir(parents=True, exist_ok=True)
         existing = downloaded_file_for(video.video_id, output_dir)
         if existing is not None:
-            self._youtube_panel.show_download_success(
+            self._library_panel.show_download_success(
                 video.title,
                 message=f"Already downloaded: {existing.name}",
             )
@@ -1574,7 +1505,7 @@ class MainWindow(QWidget):
 
         self._downloading_video_id = video.video_id
         self._downloading_video = video
-        self._youtube_panel.show_downloading(video.title)
+        self._library_panel.show_downloading(video.title)
         self._download_thread, _worker = start_download(
             video=video,
             output_dir=output_dir,
@@ -1586,12 +1517,12 @@ class MainWindow(QWidget):
         self._download_thread.finished.connect(self._on_youtube_download_thread_finished)
 
     def _on_youtube_download_progress(self, title: str, percent: float, status: str) -> None:
-        self._youtube_panel.update_download_progress(title, percent, status)
+        self._library_panel.update_download_progress(title, percent, status)
 
     def _on_youtube_download_finished(self, path: Path, video: YouTubeVideo) -> None:
         self._folder_history.add(self._youtube_downloads_path())
         self._refresh_recent_folders()
-        self._youtube_panel.show_download_success(
+        self._library_panel.show_download_success(
             video.title,
             message=f"Saved: {path.name}",
         )
@@ -1599,7 +1530,7 @@ class MainWindow(QWidget):
 
     def _on_youtube_download_failed(self, video_id: str, message: str) -> None:
         title = self._downloading_video.title if self._downloading_video else video_id
-        self._youtube_panel.show_download_error(title, message)
+        self._library_panel.show_download_error(title, message)
         self._show_toast(f"Download failed: {message}", duration_ms=6000)
 
     def _on_youtube_download_thread_finished(self) -> None:
@@ -1620,8 +1551,6 @@ class MainWindow(QWidget):
             self._load_folder(downloads_path, allow_empty=True)
 
     def _on_song_selected(self, index: int) -> None:
-        if self._media_mode != MediaSourceMode.LOCAL:
-            self._switch_to_local_mode(clear_youtube_queue=True)
         if self._vlc is None:
             return
         self._playlist.go_to(index)
@@ -1692,7 +1621,7 @@ class MainWindow(QWidget):
             return
         dialog = EditMetadataDialog(path, parent=self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self._song_list.refresh_display_labels()
+            self._library_panel.refresh_display_labels()
 
     def _on_file_renamed(self, old_path: Path, new_path: Path) -> None:
         try:
@@ -1723,10 +1652,10 @@ class MainWindow(QWidget):
                 current=updated_current,
             )
 
-        for history_path in list(self._local_history.paths()):
-            if history_path.resolve() == old_resolved:
-                self._local_history.remove(history_path)
-                self._local_history.add(new_path)
+        self._library_paths = [
+            new_path if path.resolve() == old_resolved else path for path in self._library_paths
+        ]
+        self._play_history.rename_local(old_path, new_path)
 
         if not any(path.resolve() == old_resolved for path in self._playlist.paths):
             return
@@ -1738,14 +1667,13 @@ class MainWindow(QWidget):
             new_path if path.resolve() == old_resolved else path for path in self._playlist.paths
         ]
         sorted_paths = sort_paths(updated_paths, self._sort_strategy)
-        self._remap_play_queue(old_paths, sorted_paths)
         self._playlist.reorder(sorted_paths, keep_path=keep_path)
         subfolders = (
             []
             if self._recursive_list_mode or self._browse_folder is None
             else child_folders_with_videos(self._browse_folder)
         )
-        self._song_list.set_songs(
+        self._library_panel.set_songs(
             self._playlist.paths,
             current_index=self._playlist.index,
             clear_search=False,
@@ -1755,21 +1683,19 @@ class MainWindow(QWidget):
             label_root=self._browse_folder if self._recursive_list_mode else None,
         )
         self._update_queue_display()
-        self._update_local_history_display()
+        self._update_history_display()
 
     def _on_sort_changed(self, strategy: SortStrategy) -> None:
         self._sort_strategy = strategy
         current = self._playlist.current()
-        old_paths = list(self._playlist.paths)
         sorted_paths = sort_paths(self._raw_paths, strategy)
-        self._remap_play_queue(old_paths, sorted_paths)
         self._playlist.reorder(sorted_paths, keep_path=current)
         subfolders = (
             []
             if self._recursive_list_mode or self._browse_folder is None
             else child_folders_with_videos(self._browse_folder)
         )
-        self._song_list.set_songs(
+        self._library_panel.set_songs(
             self._playlist.paths,
             current_index=self._playlist.index,
             clear_search=False,
@@ -1801,14 +1727,15 @@ class MainWindow(QWidget):
             )
             return
 
+        if self._folder is not None:
+            self._library_paths = scan_videos(self._folder, recursive=True)
         self._raw_paths = paths
         sorted_paths = sort_paths(self._raw_paths, self._sort_strategy)
-        self._remap_play_queue(old_paths, sorted_paths)
         self._playlist.reorder(sorted_paths, keep_path=current)
         if self._playlist.current() is None and sorted_paths:
             self._playlist.go_to(0)
 
-        self._song_list.set_songs(
+        self._library_panel.set_songs(
             self._playlist.paths,
             current_index=self._playlist.index,
             clear_search=False,
@@ -1822,7 +1749,7 @@ class MainWindow(QWidget):
         if self._vlc is None:
             return
         if current is not None and self._playlist.current() == current and not self._stopped:
-            self._song_list.set_current_index(self._playlist.index)
+            self._library_panel.set_current_index(self._playlist.index)
             return
         if self._playlist.current() is not None:
             self._play_current()
@@ -1834,8 +1761,8 @@ class MainWindow(QWidget):
         if current is None:
             return
         text = f"{self._playlist.position} / {self._playlist.count} — {display_name(current)}"
-        if self._play_queue:
-            text += f"  ·  {len(self._play_queue)} queued"
+        if self._mixed_queue:
+            text += f"  ·  {len(self._mixed_queue)} queued"
         self._overlay.setText(text)
         self._overlay.show()
         self._overlay.raise_()
@@ -1873,65 +1800,28 @@ class MainWindow(QWidget):
         )
 
     def _advance_to_next_track(self) -> bool:
-        """Play the next queued song or the next playlist track. Returns False if nothing to play."""
-        path = self._path_queue.dequeue()
-        if path is not None:
-            self._play_local_path(path)
-            return True
-        queued = self._play_queue.dequeue()
-        if queued is not None:
-            self._playlist.go_to(queued)
-            self._update_queue_display()
-            self._play_current()
-            return True
-        if self._playlist.has_next():
-            self._playlist.next()
-            self._play_current()
+        """Play the next queued item or the next playlist track."""
+        if self._advance_playback():
             return True
         self._show_end_of_playlist()
         return False
 
-    def _on_play_next_requested(self, index: int) -> None:
-        self._queue_local_path_by_index(index)
-
-    def _on_remove_from_queue(self, index: int) -> None:
-        removing_now_playing = not self._stopped and index == self._playlist.index
-        self._play_queue.remove(index)
-        if removing_now_playing:
-            self._on_stop()
-            self._update_queue_display(include_now_playing=False)
-            return
-        self._update_queue_display()
-
-    def _on_remove_path_from_queue(self, path: Path) -> None:
-        if self._is_external_now_playing(path):
-            self._on_stop()
-            self._update_queue_display(include_now_playing=False)
-            return
-        self._path_queue.remove(path)
-        self._update_queue_display()
-
     def _on_clear_queue(self) -> None:
-        self._play_queue.clear()
-        self._path_queue.clear()
-        if not self._stopped:
+        self._mixed_queue.clear()
+        if not self._stopped or not self._youtube_stopped:
             self._on_stop()
-        self._update_queue_display(include_now_playing=False)
+        else:
+            self._update_queue_display()
 
-    def _on_queue_reordered(self, indices: list[int]) -> None:
-        self._play_queue.set_order(indices)
+    def _on_queue_reordered(self, items: list[QueueItem]) -> None:
+        self._mixed_queue.set_order(items)
         self._update_queue_display()
 
     def _update_queue_display(self, *, include_now_playing: bool | None = None) -> None:
-        external_current = None
-        if include_now_playing is not False and not self._stopped:
-            external_current = self._external_path
-        self._song_list.set_queue_indices(
-            self._play_queue.indices(),
-            include_now_playing=include_now_playing,
-            external_current=external_current,
-            path_queue=self._path_queue.paths(),
-        )
+        del include_now_playing
+        current = self._current_playing_queue_item()
+        queued = list(self._mixed_queue.items())
+        self._library_panel.set_queue_state(current=current, queued=queued)
         self._save_folder_state()
 
     def _restore_folder_current(self, playlist_paths: list[Path]) -> int | None:
@@ -1966,21 +1856,17 @@ class MainWindow(QWidget):
         if self._folder is None:
             return
         saved_paths = self._folder_queues.get(self._folder)
-        by_path = {path.resolve(): index for index, path in enumerate(playlist_paths)}
-        self._play_queue.clear()
         valid_paths: list[Path] = []
         for saved_path in saved_paths:
             try:
                 resolved = saved_path.resolve()
             except OSError:
                 continue
-            if not resolved.is_file():
-                continue
-            index = by_path.get(resolved)
-            if index is None:
-                continue
-            self._play_queue.enqueue(index)
-            valid_paths.append(resolved)
+            if resolved.is_file():
+                valid_paths.append(resolved)
+        self._mixed_queue.clear()
+        for path in valid_paths:
+            self._mixed_queue.enqueue_local(path)
         if not _same_paths(valid_paths, saved_paths):
             self._folder_queues.set(
                 self._folder,
@@ -1992,24 +1878,17 @@ class MainWindow(QWidget):
         if self._folder is None:
             return
         queue = [
-            self._playlist.paths[index]
-            for index in self._play_queue.indices()
-            if 0 <= index < len(self._playlist.paths)
+            item.path
+            for item in self._mixed_queue.items()
+            if item.kind == "local" and item.path is not None
         ]
         current: Path | None = None
-        playing_index = self._song_list.playing_index()
+        playing_index = self._library_panel.playing_index()
         if playing_index is not None and 0 <= playing_index < len(self._playlist.paths):
             current = self._playlist.paths[playing_index]
+        elif self._external_path is not None:
+            current = self._external_path
         self._folder_queues.set(self._folder, queue=queue, current=current)
-
-    def _remap_play_queue(self, old_paths: list[Path], new_paths: list[Path]) -> None:
-        queued_paths = [
-            old_paths[i] for i in self._play_queue.indices() if 0 <= i < len(old_paths)
-        ]
-        self._play_queue.clear()
-        for path in queued_paths:
-            if path in new_paths:
-                self._play_queue.enqueue(new_paths.index(path))
 
     def _on_play(self) -> None:
         if self._media_mode == MediaSourceMode.YOUTUBE:
@@ -2017,7 +1896,7 @@ class MainWindow(QWidget):
         if self._vlc is None:
             return
         if self._stopped or self._playlist.current() is None:
-            if self._stopped and (self._play_queue or self._path_queue):
+            if self._stopped and self._mixed_queue:
                 self._advance_to_next_track()
             else:
                 self._play_current()
@@ -2060,23 +1939,25 @@ class MainWindow(QWidget):
             if self._youtube_player is not None:
                 self._youtube_player.stop()
             self._current_youtube = None
+            self._current_queue_item = None
             self._youtube_stopped = True
             self._controls.set_playing(False)
-            self._update_youtube_queue_display()
-            self._update_youtube_history_display()
-            self._show_status_message("Search for a karaoke song to play")
+            self._update_queue_display()
+            self._update_history_display()
+            self._show_status_message("Search for another song")
             self._show_controls()
             return
         if self._vlc is not None:
             self._vlc.stop()
         self._stopped = True
         self._external_path = None
+        self._current_queue_item = None
         self._controls.set_playing(False)
         self._stop_seek_updates()
         self._seek_bar.reset()
         self._clear_audio_title()
         self._save_folder_state()
-        self._update_local_history_display()
+        self._update_history_display()
         self._show_controls()
 
     def _on_rewind(self) -> None:
@@ -2122,7 +2003,8 @@ class MainWindow(QWidget):
 
     def _next_track(self) -> None:
         if self._media_mode == MediaSourceMode.YOUTUBE:
-            self._advance_youtube_queue()
+            if not self._advance_playback():
+                self._finish_youtube_playback()
             return
         self._advance_to_next_track()
 
@@ -2176,10 +2058,7 @@ class MainWindow(QWidget):
 
         if key == Qt.Key.Key_Y:
             if self._stack.currentWidget() == self._player_page:
-                if self._media_mode == MediaSourceMode.YOUTUBE:
-                    self._youtube_panel.focus_search()
-                else:
-                    self._enter_youtube_mode()
+                self._library_panel.focus_search(tab="youtube")
             else:
                 self._enter_youtube_mode()
             return

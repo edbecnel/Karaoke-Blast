@@ -93,11 +93,14 @@ class YouTubeSearchPanel(QWidget):
     resize_dragged = pyqtSignal(int)
     search_backend_fallback = pyqtSignal(str)
     append_karaoke_changed = pyqtSignal(bool)
+    search_more_enabled_changed = pyqtSignal(bool)
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, *, embedded: bool = False) -> None:
         super().__init__(parent)
-        self.setMinimumWidth(PANEL_MIN_WIDTH)
-        self.setMaximumWidth(PANEL_MAX_WIDTH)
+        self._embedded = embedded
+        if not embedded:
+            self.setMinimumWidth(PANEL_MIN_WIDTH)
+            self.setMaximumWidth(PANEL_MAX_WIDTH)
         self.setStyleSheet("background-color: rgba(15, 15, 25, 230);")
 
         self._backend_name = "yt-dlp"
@@ -110,57 +113,65 @@ class YouTubeSearchPanel(QWidget):
         self._append_next = False
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, EDGE_GRIP_WIDTH + 8, 12)
+        margins = (0, 0, 0, 0) if embedded else (12, 12, EDGE_GRIP_WIDTH + 8, 12)
+        layout.setContentsMargins(*margins)
         layout.setSpacing(8)
 
-        header_row = QHBoxLayout()
-        header = QLabel("YouTube")
-        header.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
-        header_row.addWidget(header)
-        header_row.addStretch()
+        if not embedded:
+            header_row = QHBoxLayout()
+            header = QLabel("YouTube")
+            header.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
+            header_row.addWidget(header)
+            header_row.addStretch()
 
-        close_btn = QPushButton("×")
-        close_btn.setToolTip("Hide YouTube panel (L)")
-        close_btn.setFixedSize(28, 28)
-        close_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #aaa; border: none;"
-            " font-size: 20px; border-radius: 4px; }"
-            "QPushButton:hover { background: rgba(255,255,255,30); color: white; }"
-        )
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.clicked.connect(self.close_requested.emit)
-        header_row.addWidget(close_btn)
-        layout.addLayout(header_row)
+            close_btn = QPushButton("×")
+            close_btn.setToolTip("Hide YouTube panel (L)")
+            close_btn.setFixedSize(28, 28)
+            close_btn.setStyleSheet(
+                "QPushButton { background: transparent; color: #aaa; border: none;"
+                " font-size: 20px; border-radius: 4px; }"
+                "QPushButton:hover { background: rgba(255,255,255,30); color: white; }"
+            )
+            close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            close_btn.clicked.connect(self.close_requested.emit)
+            header_row.addWidget(close_btn)
+            layout.addLayout(header_row)
 
-        self._song_input = self._make_input("Song")
-        layout.addWidget(self._song_input)
+            self._song_input = self._make_input("Song")
+            layout.addWidget(self._song_input)
 
-        self._artist_input = self._make_input("Artist / band (optional)")
-        layout.addWidget(self._artist_input)
+            self._artist_input = self._make_input("Artist / band (optional)")
+            layout.addWidget(self._artist_input)
 
-        self._append_karaoke_checkbox = QCheckBox('Append "karaoke" to search')
-        self._append_karaoke_checkbox.setChecked(True)
-        self._append_karaoke_checkbox.setToolTip(
-            "Uncheck to search for any YouTube video, not just karaoke versions"
-        )
-        self._append_karaoke_checkbox.setStyleSheet(CHECKBOX_STYLE)
-        self._append_karaoke_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._append_karaoke_checkbox.toggled.connect(self.append_karaoke_changed.emit)
-        layout.addWidget(self._append_karaoke_checkbox)
+            self._append_karaoke_checkbox = QCheckBox('Append "karaoke" to search')
+            self._append_karaoke_checkbox.setChecked(True)
+            self._append_karaoke_checkbox.setToolTip(
+                "Uncheck to search for any YouTube video, not just karaoke versions"
+            )
+            self._append_karaoke_checkbox.setStyleSheet(CHECKBOX_STYLE)
+            self._append_karaoke_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._append_karaoke_checkbox.toggled.connect(self.append_karaoke_changed.emit)
+            layout.addWidget(self._append_karaoke_checkbox)
 
-        search_row = QHBoxLayout()
-        search_row.setSpacing(8)
-        self._search_btn = QPushButton("Search")
-        self._search_btn.setStyleSheet(SEARCH_BTN_STYLE)
-        self._search_btn.clicked.connect(self._start_search)
-        search_row.addWidget(self._search_btn)
+            search_row = QHBoxLayout()
+            search_row.setSpacing(8)
+            self._search_btn = QPushButton("Search")
+            self._search_btn.setStyleSheet(SEARCH_BTN_STYLE)
+            self._search_btn.clicked.connect(self._start_search)
+            search_row.addWidget(self._search_btn)
 
-        self._search_more_btn = QPushButton("Search more")
-        self._search_more_btn.setStyleSheet(SEARCH_MORE_BTN_STYLE)
-        self._search_more_btn.setEnabled(False)
-        self._search_more_btn.clicked.connect(self._start_search_more)
-        search_row.addWidget(self._search_more_btn)
-        layout.addLayout(search_row)
+            self._search_more_btn = QPushButton("Search more")
+            self._search_more_btn.setStyleSheet(SEARCH_MORE_BTN_STYLE)
+            self._search_more_btn.setEnabled(False)
+            self._search_more_btn.clicked.connect(self.start_search_more)
+            search_row.addWidget(self._search_more_btn)
+            layout.addLayout(search_row)
+        else:
+            self._song_input = None
+            self._artist_input = None
+            self._append_karaoke_checkbox = None
+            self._search_btn = None
+            self._search_more_btn = None
 
         status_row = QHBoxLayout()
         status_row.setSpacing(4)
@@ -187,12 +198,15 @@ class YouTubeSearchPanel(QWidget):
         self._results_list.customContextMenuRequested.connect(self._show_results_context_menu)
         layout.addWidget(self._results_list, 1)
 
-        self._song_input.returnPressed.connect(self._start_search)
-        self._artist_input.returnPressed.connect(self._start_search)
+        if not embedded and self._song_input is not None:
+            self._song_input.returnPressed.connect(self._start_search)
+            if self._artist_input is not None:
+                self._artist_input.returnPressed.connect(self._start_search)
 
-        self._edge_grip = PanelEdgeGrip(self)
-        self._edge_grip.dragged.connect(self.resize_dragged.emit)
-        self._edge_grip.raise_()
+        if not embedded:
+            self._edge_grip = PanelEdgeGrip(self)
+            self._edge_grip.dragged.connect(self.resize_dragged.emit)
+            self._edge_grip.raise_()
 
     def _make_input(self, placeholder: str) -> VisibleSpaceLineEdit:
         field = VisibleSpaceLineEdit()
@@ -210,13 +224,26 @@ class YouTubeSearchPanel(QWidget):
         self._api_key = api_key
 
     def set_append_karaoke(self, checked: bool) -> None:
+        if self._append_karaoke_checkbox is None:
+            return
         self._append_karaoke_checkbox.blockSignals(True)
         self._append_karaoke_checkbox.setChecked(checked)
         self._append_karaoke_checkbox.blockSignals(False)
 
     def focus_search(self) -> None:
-        self._song_input.setFocus()
-        self._song_input.selectAll()
+        if self._song_input is not None:
+            self._song_input.setFocus()
+            self._song_input.selectAll()
+
+    def search_with_query(self, query: str, *, append_karaoke: bool = True) -> None:
+        built = build_karaoke_query(query, None, append_karaoke=append_karaoke)
+        if not built:
+            self._show_input_error("Enter a song name to search.")
+            return
+        self._begin_search(built)
+
+    def start_search_more(self) -> None:
+        self._start_search_more()
 
     def _existing_video_ids(self) -> set[str]:
         ids: set[str] = set()
@@ -273,7 +300,9 @@ class YouTubeSearchPanel(QWidget):
             and self._has_more
             and self._results_list.count() < MAX_TOTAL_RESULTS
         )
-        self._search_more_btn.setEnabled(enabled)
+        if self._search_more_btn is not None:
+            self._search_more_btn.setEnabled(enabled)
+        self.search_more_enabled_changed.emit(enabled)
 
     def clear_status(self) -> None:
         self._status_label.clear()
@@ -301,14 +330,23 @@ class YouTubeSearchPanel(QWidget):
         return backend_name, api_key
 
     def _start_search(self) -> None:
+        if self._song_input is None:
+            return
         query = build_karaoke_query(
             self._song_input.text(),
-            self._artist_input.text(),
-            append_karaoke=self._append_karaoke_checkbox.isChecked(),
+            self._artist_input.text() if self._artist_input is not None else None,
+            append_karaoke=(
+                self._append_karaoke_checkbox.isChecked()
+                if self._append_karaoke_checkbox is not None
+                else True
+            ),
         )
         if not query:
             self._show_input_error("Enter a song name to search.")
             return
+        self._begin_search(query)
+
+    def _begin_search(self, query: str) -> None:
         if self._search_thread is not None and self._search_thread.isRunning():
             return
 
@@ -357,9 +395,12 @@ class YouTubeSearchPanel(QWidget):
         )
 
     def _set_search_in_progress(self, in_progress: bool) -> None:
-        self._search_btn.setEnabled(not in_progress)
+        if self._search_btn is not None:
+            self._search_btn.setEnabled(not in_progress)
         if in_progress:
-            self._search_more_btn.setEnabled(False)
+            if self._search_more_btn is not None:
+                self._search_more_btn.setEnabled(False)
+            self.search_more_enabled_changed.emit(False)
         else:
             self._update_search_more_button()
 
@@ -422,14 +463,19 @@ class YouTubeSearchPanel(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._position_edge_grip()
+        if not self._embedded:
+            self._position_edge_grip()
 
     def raise_edge_grip(self) -> None:
+        if self._embedded:
+            return
         self._position_edge_grip()
         self._edge_grip.raise_()
         self._edge_grip.setCursor(Qt.CursorShape.SizeHorCursor)
 
     def _position_edge_grip(self) -> None:
+        if self._embedded:
+            return
         self._edge_grip.setGeometry(
             self.width() - EDGE_GRIP_WIDTH,
             0,

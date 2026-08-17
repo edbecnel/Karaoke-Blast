@@ -179,122 +179,126 @@ class SongListPanel(QWidget):
     display_mode_changed = pyqtSignal(str)
     display_format_changed = pyqtSignal(object)
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, *, embedded: bool = False) -> None:
         super().__init__(parent)
-        self.setMinimumWidth(PANEL_MIN_WIDTH)
-        self.setMaximumWidth(PANEL_MAX_WIDTH)
-        # Resize grip is a real child widget (not CSS border) so hover works
-        # even when VLC covers the QSplitter handle in macOS fullscreen.
-        self.setStyleSheet("background-color: rgba(15, 15, 25, 230);")
+        self._embedded = embedded
+        if not embedded:
+            self.setMinimumWidth(PANEL_MIN_WIDTH)
+            self.setMaximumWidth(PANEL_MAX_WIDTH)
+            self.setStyleSheet("background-color: rgba(15, 15, 25, 230);")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, EDGE_GRIP_WIDTH + 8, 12)
+        if embedded:
+            layout.setContentsMargins(0, 0, 0, 0)
+        else:
+            layout.setContentsMargins(12, 12, EDGE_GRIP_WIDTH + 8, 12)
         layout.setSpacing(8)
 
-        header_row = QHBoxLayout()
-        self._folder_btn = QPushButton("Songs")
-        self._folder_btn.setStyleSheet(FOLDER_BTN_STYLE)
-        self._folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._folder_btn.setToolTip("Switch folder")
-        self._folder_btn.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
-        self._folder_btn.clicked.connect(self._show_folder_menu)
-        header_row.addWidget(self._folder_btn, 1)
+        if not embedded:
+            header_row = QHBoxLayout()
+            self._folder_btn = QPushButton("Songs")
+            self._folder_btn.setStyleSheet(FOLDER_BTN_STYLE)
+            self._folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._folder_btn.setToolTip("Switch folder")
+            self._folder_btn.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )
+            self._folder_btn.clicked.connect(self._show_folder_menu)
+            header_row.addWidget(self._folder_btn, 1)
 
-        self._back_folders_btn = QPushButton("←")
-        self._back_folders_btn.setToolTip("Back to folders")
-        self._back_folders_btn.setFixedSize(28, 28)
-        self._back_folders_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #aaa; border: none;"
-            " font-size: 16px; border-radius: 4px; }"
-            "QPushButton:hover { background: rgba(255,255,255,30); color: white; }"
-        )
-        self._back_folders_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._back_folders_btn.clicked.connect(self.back_to_folders_requested.emit)
-        self._back_folders_btn.hide()
-        header_row.addWidget(self._back_folders_btn)
+            self._back_folders_btn = QPushButton("←")
+            self._back_folders_btn.setToolTip("Back to folders")
+            self._back_folders_btn.setFixedSize(28, 28)
+            self._back_folders_btn.setStyleSheet(
+                "QPushButton { background: transparent; color: #aaa; border: none;"
+                " font-size: 16px; border-radius: 4px; }"
+                "QPushButton:hover { background: rgba(255,255,255,30); color: white; }"
+            )
+            self._back_folders_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._back_folders_btn.clicked.connect(self.back_to_folders_requested.emit)
+            self._back_folders_btn.hide()
+            header_row.addWidget(self._back_folders_btn)
 
-        self._folder_actions_btn = QPushButton("⋯")
-        self._folder_actions_btn.setToolTip("Folder actions")
-        self._folder_actions_btn.setFixedSize(28, 28)
-        self._folder_actions_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #aaa; border: none;"
-            " font-size: 18px; border-radius: 4px; }"
-            "QPushButton:hover { background: rgba(255,255,255,30); color: white; }"
-        )
-        self._folder_actions_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._folder_actions_btn.clicked.connect(self._show_folder_actions_menu)
-        header_row.addWidget(self._folder_actions_btn)
+            self._folder_actions_btn = QPushButton("⋯")
+            self._folder_actions_btn.setToolTip("Folder actions")
+            self._folder_actions_btn.setFixedSize(28, 28)
+            self._folder_actions_btn.setStyleSheet(
+                "QPushButton { background: transparent; color: #aaa; border: none;"
+                " font-size: 18px; border-radius: 4px; }"
+                "QPushButton:hover { background: rgba(255,255,255,30); color: white; }"
+            )
+            self._folder_actions_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._folder_actions_btn.clicked.connect(self._show_folder_actions_menu)
+            header_row.addWidget(self._folder_actions_btn)
 
-        refresh_btn = QPushButton("↻")
-        refresh_btn.setToolTip("Refresh song list")
-        refresh_btn.setFixedSize(28, 28)
-        refresh_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #aaa; border: none;"
-            " font-size: 18px; border-radius: 4px; }"
-            "QPushButton:hover { background: rgba(255,255,255,30); color: white; }"
-        )
-        refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        refresh_btn.clicked.connect(self._on_refresh_clicked)
-        header_row.addWidget(refresh_btn)
+            refresh_btn = QPushButton("↻")
+            refresh_btn.setToolTip("Refresh song list")
+            refresh_btn.setFixedSize(28, 28)
+            refresh_btn.setStyleSheet(
+                "QPushButton { background: transparent; color: #aaa; border: none;"
+                " font-size: 18px; border-radius: 4px; }"
+                "QPushButton:hover { background: rgba(255,255,255,30); color: white; }"
+            )
+            refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            refresh_btn.clicked.connect(self._on_refresh_clicked)
+            header_row.addWidget(refresh_btn)
 
-        close_btn = QPushButton("×")
-        close_btn.setToolTip("Hide song list (L)")
-        close_btn.setFixedSize(28, 28)
-        close_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #aaa; border: none;"
-            " font-size: 20px; border-radius: 4px; }"
-            "QPushButton:hover { background: rgba(255,255,255,30); color: white; }"
-        )
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.clicked.connect(self._on_close_clicked)
-        header_row.addWidget(close_btn)
-        layout.addLayout(header_row)
+            close_btn = QPushButton("×")
+            close_btn.setToolTip("Hide song list (L)")
+            close_btn.setFixedSize(28, 28)
+            close_btn.setStyleSheet(
+                "QPushButton { background: transparent; color: #aaa; border: none;"
+                " font-size: 20px; border-radius: 4px; }"
+                "QPushButton:hover { background: rgba(255,255,255,30); color: white; }"
+            )
+            close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            close_btn.clicked.connect(self._on_close_clicked)
+            header_row.addWidget(close_btn)
+            layout.addLayout(header_row)
 
-        self._queue_section = QWidget()
-        self._queue_section.hide()
-        queue_outer = QVBoxLayout(self._queue_section)
-        queue_outer.setContentsMargins(0, 0, 0, 0)
-        queue_outer.setSpacing(4)
+            self._queue_section = QWidget()
+            self._queue_section.hide()
+            queue_outer = QVBoxLayout(self._queue_section)
+            queue_outer.setContentsMargins(0, 0, 0, 0)
+            queue_outer.setSpacing(4)
 
-        queue_header = QHBoxLayout()
-        self._queue_title = QLabel("Queue")
-        self._queue_title.setStyleSheet("color: #e94560; font-size: 12px; font-weight: bold;")
-        queue_header.addWidget(self._queue_title)
-        queue_header.addStretch()
-        clear_queue_btn = QPushButton("Clear")
-        clear_queue_btn.setToolTip("Clear now playing and all queued songs")
-        clear_queue_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #aaa; border: none;"
-            " font-size: 11px; padding: 2px 6px; }"
-            "QPushButton:hover { color: white; background: rgba(255,255,255,25);"
-            " border-radius: 3px; }"
-        )
-        clear_queue_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        clear_queue_btn.clicked.connect(self._on_clear_queue_clicked)
-        queue_header.addWidget(clear_queue_btn)
-        queue_outer.addLayout(queue_header)
+            queue_header = QHBoxLayout()
+            self._queue_title = QLabel("Queue")
+            self._queue_title.setStyleSheet("color: #e94560; font-size: 12px; font-weight: bold;")
+            queue_header.addWidget(self._queue_title)
+            queue_header.addStretch()
+            clear_queue_btn = QPushButton("Clear")
+            clear_queue_btn.setToolTip("Clear now playing and all queued songs")
+            clear_queue_btn.setStyleSheet(
+                "QPushButton { background: transparent; color: #aaa; border: none;"
+                " font-size: 11px; padding: 2px 6px; }"
+                "QPushButton:hover { color: white; background: rgba(255,255,255,25);"
+                " border-radius: 3px; }"
+            )
+            clear_queue_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            clear_queue_btn.clicked.connect(self._on_clear_queue_clicked)
+            queue_header.addWidget(clear_queue_btn)
+            queue_outer.addLayout(queue_header)
 
-        self._queue_list = PlayOrderListWidget()
-        self._queue_list.setStyleSheet(QUEUE_LIST_STYLE)
-        self._queue_list.itemClicked.connect(self._on_item_clicked)
-        self._queue_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._queue_list.customContextMenuRequested.connect(self._show_queue_context_menu)
-        self._queue_list.queue_reordered.connect(self.queue_reordered.emit)
-        queue_outer.addWidget(self._queue_list, 1)
-        self._queue_section.setMinimumHeight(QUEUE_SECTION_MIN_HEIGHT)
-        layout.addWidget(self._queue_section)
+            self._queue_list = PlayOrderListWidget()
+            self._queue_list.setStyleSheet(QUEUE_LIST_STYLE)
+            self._queue_list.itemClicked.connect(self._on_item_clicked)
+            self._queue_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            self._queue_list.customContextMenuRequested.connect(self._show_queue_context_menu)
+            self._queue_list.queue_reordered.connect(self.queue_reordered.emit)
+            queue_outer.addWidget(self._queue_list, 1)
+            self._queue_section.setMinimumHeight(QUEUE_SECTION_MIN_HEIGHT)
+            layout.addWidget(self._queue_section)
 
-        self._tabs = QTabWidget()
-        self._tabs.setStyleSheet(
-            "QTabWidget::pane { border: none; background: transparent; }"
-            "QTabBar::tab {"
-            " background: #2d2d42; color: #b8b8c8; padding: 8px 14px;"
-            " border-top-left-radius: 4px; border-top-right-radius: 4px; margin-right: 2px;"
-            "}"
-            "QTabBar::tab:selected { background: #e94560; color: white; }"
-        )
+            self._tabs = QTabWidget()
+            self._tabs.setStyleSheet(
+                "QTabWidget::pane { border: none; background: transparent; }"
+                "QTabBar::tab {"
+                " background: #2d2d42; color: #b8b8c8; padding: 8px 14px;"
+                " border-top-left-radius: 4px; border-top-right-radius: 4px; margin-right: 2px;"
+                "}"
+                "QTabBar::tab:selected { background: #e94560; color: white; }"
+            )
 
         songs_tab = QWidget()
         songs_layout = QVBoxLayout(songs_tab)
@@ -311,16 +315,29 @@ class SongListPanel(QWidget):
         self._sort_combo.currentIndexChanged.connect(self._on_sort_changed)
         songs_layout.addWidget(self._sort_combo)
 
-        self._search = VisibleSpaceLineEdit()
-        self._search.setPlaceholderText("Search songs…")
-        self._search.setClearButtonEnabled(True)
-        self._search.setStyleSheet(SEARCH_STYLE)
-        search_palette = self._search.palette()
-        search_palette.setColor(QPalette.ColorRole.Text, QColor("#ffffff"))
-        search_palette.setColor(QPalette.ColorRole.PlaceholderText, QColor("#b8b8c8"))
-        self._search.setPalette(search_palette)
-        self._search.textChanged.connect(self._apply_filter)
-        songs_layout.addWidget(self._search)
+        if not embedded:
+            self._search = VisibleSpaceLineEdit()
+            self._search.setPlaceholderText("Search songs…")
+            self._search.setClearButtonEnabled(True)
+            self._search.setStyleSheet(SEARCH_STYLE)
+            search_palette = self._search.palette()
+            search_palette.setColor(QPalette.ColorRole.Text, QColor("#ffffff"))
+            search_palette.setColor(QPalette.ColorRole.PlaceholderText, QColor("#b8b8c8"))
+            self._search.setPalette(search_palette)
+            self._search.textChanged.connect(self._apply_filter)
+            songs_layout.addWidget(self._search)
+        else:
+            self._search = None
+            self._back_folders_btn = QPushButton("← Back to folders")
+            self._back_folders_btn.setStyleSheet(
+                "QPushButton { background-color: #2d2d42; color: #b8b8c8; border: 1px solid #5a5a72;"
+                " border-radius: 4px; padding: 6px 10px; font-size: 12px; text-align: left; }"
+                "QPushButton:hover { border-color: #7a7a92; color: white; }"
+            )
+            self._back_folders_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._back_folders_btn.clicked.connect(self.back_to_folders_requested.emit)
+            self._back_folders_btn.hide()
+            songs_layout.addWidget(self._back_folders_btn)
 
         display_row = QHBoxLayout()
         display_row.setSpacing(6)
@@ -352,22 +369,25 @@ class SongListPanel(QWidget):
         display_row.addWidget(self._display_format_btn)
         songs_layout.addLayout(display_row)
 
-        self._now_playing_btn = QPushButton("Current + queue")
-        self._now_playing_btn.setCheckable(True)
-        self._now_playing_btn.setToolTip(
-            "Show only the song playing now and songs waiting in the queue"
-        )
-        self._now_playing_btn.setEnabled(False)
-        self._now_playing_btn.setStyleSheet(
-            "QPushButton { background-color: #2d2d42; color: #b8b8c8; border: 1px solid #5a5a72;"
-            " border-radius: 4px; padding: 6px 10px; font-size: 12px; }"
-            "QPushButton:hover:enabled { border-color: #7a7a92; color: white; }"
-            "QPushButton:checked { background-color: #e94560; color: white; border-color: #e94560; }"
-            "QPushButton:disabled { color: #555; border-color: #3a3a4a; }"
-        )
-        self._now_playing_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._now_playing_btn.toggled.connect(self._on_now_playing_filter_toggled)
-        songs_layout.addWidget(self._now_playing_btn)
+        if not embedded:
+            self._now_playing_btn = QPushButton("Current + queue")
+            self._now_playing_btn.setCheckable(True)
+            self._now_playing_btn.setToolTip(
+                "Show only the song playing now and songs waiting in the queue"
+            )
+            self._now_playing_btn.setEnabled(False)
+            self._now_playing_btn.setStyleSheet(
+                "QPushButton { background-color: #2d2d42; color: #b8b8c8; border: 1px solid #5a5a72;"
+                " border-radius: 4px; padding: 6px 10px; font-size: 12px; }"
+                "QPushButton:hover:enabled { border-color: #7a7a92; color: white; }"
+                "QPushButton:checked { background-color: #e94560; color: white; border-color: #e94560; }"
+                "QPushButton:disabled { color: #555; border-color: #3a3a4a; }"
+            )
+            self._now_playing_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._now_playing_btn.toggled.connect(self._on_now_playing_filter_toggled)
+            songs_layout.addWidget(self._now_playing_btn)
+        else:
+            self._now_playing_btn = None
 
         self._count_label = QLabel()
         self._count_label.setStyleSheet("color: #888; font-size: 11px;")
@@ -391,49 +411,54 @@ class SongListPanel(QWidget):
         self._list_splitter.setStretchFactor(0, 1)
         songs_layout.addWidget(self._list_splitter, 1)
 
-        history_tab = QWidget()
-        history_layout = QVBoxLayout(history_tab)
-        history_layout.setContentsMargins(0, 0, 0, 0)
-        history_layout.setSpacing(8)
+        if embedded:
+            layout.addWidget(songs_tab, 1)
+        else:
+            history_tab = QWidget()
+            history_layout = QVBoxLayout(history_tab)
+            history_layout.setContentsMargins(0, 0, 0, 0)
+            history_layout.setSpacing(8)
 
-        history_header = QHBoxLayout()
-        history_title = QLabel("History")
-        history_title.setStyleSheet("color: #e94560; font-size: 12px; font-weight: bold;")
-        history_header.addWidget(history_title)
-        history_header.addStretch()
-        clear_history_btn = QPushButton("Clear")
-        clear_history_btn.setToolTip("Remove all history entries")
-        clear_history_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #aaa; border: none;"
-            " font-size: 11px; padding: 2px 6px; }"
-            "QPushButton:hover { color: white; background: rgba(255,255,255,25);"
-            " border-radius: 3px; }"
-        )
-        clear_history_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        clear_history_btn.clicked.connect(self.history_clear_requested.emit)
-        history_header.addWidget(clear_history_btn)
-        history_layout.addLayout(history_header)
+            history_header = QHBoxLayout()
+            history_title = QLabel("History")
+            history_title.setStyleSheet("color: #e94560; font-size: 12px; font-weight: bold;")
+            history_header.addWidget(history_title)
+            history_header.addStretch()
+            clear_history_btn = QPushButton("Clear")
+            clear_history_btn.setToolTip("Remove all history entries")
+            clear_history_btn.setStyleSheet(
+                "QPushButton { background: transparent; color: #aaa; border: none;"
+                " font-size: 11px; padding: 2px 6px; }"
+                "QPushButton:hover { color: white; background: rgba(255,255,255,25);"
+                " border-radius: 3px; }"
+            )
+            clear_history_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            clear_history_btn.clicked.connect(self.history_clear_requested.emit)
+            history_header.addWidget(clear_history_btn)
+            history_layout.addLayout(history_header)
 
-        self._history_list = LocalHistoryPanel()
-        self._history_list.setStyleSheet(SIDEBAR_LIST_STYLE)
-        self._history_list.setMinimumHeight(LIST_MIN_HEIGHT)
-        self._history_list.play_requested.connect(self.history_play_requested.emit)
-        self._history_list.queue_requested.connect(self.history_queue_requested.emit)
-        self._history_list.remove_requested.connect(self.history_remove_requested.emit)
-        self._history_list.edit_metadata_requested.connect(
-            self.edit_metadata_requested.emit
-        )
-        history_layout.addWidget(self._history_list, 1)
+            self._history_list = LocalHistoryPanel()
+            self._history_list.setStyleSheet(SIDEBAR_LIST_STYLE)
+            self._history_list.setMinimumHeight(LIST_MIN_HEIGHT)
+            self._history_list.play_requested.connect(self.history_play_requested.emit)
+            self._history_list.queue_requested.connect(self.history_queue_requested.emit)
+            self._history_list.remove_requested.connect(self.history_remove_requested.emit)
+            self._history_list.edit_metadata_requested.connect(
+                self.edit_metadata_requested.emit
+            )
+            history_layout.addWidget(self._history_list, 1)
 
-        self._tabs.addTab(songs_tab, "Songs")
-        self._tabs.addTab(history_tab, "History")
-        layout.addWidget(self._tabs, 1)
+            self._tabs.addTab(songs_tab, "Songs")
+            self._tabs.addTab(history_tab, "History")
+            layout.addWidget(self._tabs, 1)
 
         self._paths: list[Path] = []
         self._subfolders: list[Path] = []
         self._can_navigate_up = False
         self._recursive_list_mode = False
         self._label_root: Path | None = None
+        self._library_root: Path | None = None
+        self._search_query = ""
         self._current_folder: Path | None = None
         self._recent_folders: list[Path] = []
         self._pinned_folders: list[Path] = []
@@ -449,12 +474,12 @@ class SongListPanel(QWidget):
         self._display_format = DEFAULT_DISPLAY_FORMAT.copy()
         self._tag_cache = TagCache()
         self._list.set_display_resolver(self._leaf_label)
-        self._queue_list.set_display_resolver(self._leaf_label)
-        self._history_list.set_display_resolver(self._leaf_label)
-
-        self._edge_grip = PanelEdgeGrip(self)
-        self._edge_grip.dragged.connect(self.resize_dragged.emit)
-        self._edge_grip.raise_()
+        if not embedded:
+            self._queue_list.set_display_resolver(self._leaf_label)
+            self._history_list.set_display_resolver(self._leaf_label)
+            self._edge_grip = PanelEdgeGrip(self)
+            self._edge_grip.dragged.connect(self.resize_dragged.emit)
+            self._edge_grip.raise_()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -462,10 +487,13 @@ class SongListPanel(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._position_edge_grip()
+        if not self._embedded:
+            self._position_edge_grip()
 
     def raise_edge_grip(self) -> None:
         """Keep the grip above siblings after fullscreen / layout changes."""
+        if self._embedded:
+            return
         self._position_edge_grip()
         self._edge_grip.raise_()
         self._edge_grip.setCursor(Qt.CursorShape.SizeHorCursor)
@@ -480,6 +508,16 @@ class SongListPanel(QWidget):
 
     def set_queue_section_ratio(self, ratio: float | None) -> None:
         self._queue_section_ratio = ratio
+
+    def set_search_query(self, query: str) -> None:
+        self._search_query = query.strip()
+        self._apply_filter()
+
+    def set_library_root(self, root: Path | None) -> None:
+        self._library_root = root.resolve() if root is not None else None
+
+    def display_resolver(self):
+        return self._leaf_label
 
     def set_display_mode(self, mode: str) -> None:
         normalized = (
@@ -539,20 +577,24 @@ class SongListPanel(QWidget):
     def _refresh_display_labels(self) -> None:
         self._tag_cache.clear()
         self._list.set_display_resolver(self._leaf_label)
-        self._queue_list.set_display_resolver(self._leaf_label)
-        self._history_list.set_display_resolver(self._leaf_label)
-        if not self._now_playing_only:
-            self._rebuild_queue_ui()
+        if not self._embedded:
+            self._queue_list.set_display_resolver(self._leaf_label)
+            self._history_list.set_display_resolver(self._leaf_label)
+            if not self._now_playing_only:
+                self._rebuild_queue_ui()
         self._apply_filter()
 
     def _apply_queue_split_sizes(self) -> None:
         return
 
     def set_history(self, paths: list[Path], *, current: Path | None = None) -> None:
-        self._history_list.set_history(paths, current=current)
+        if not self._embedded:
+            self._history_list.set_history(paths, current=current)
 
     def set_folder(self, folder: Path | None) -> None:
         self._current_folder = folder.resolve() if folder is not None else None
+        if self._embedded:
+            return
         if folder is None:
             self._folder_btn.setText("Songs")
             self._folder_btn.setToolTip("Switch folder")
@@ -687,6 +729,8 @@ class SongListPanel(QWidget):
         self.clear_queue_requested.emit()
 
     def _on_now_playing_filter_toggled(self, checked: bool) -> None:
+        if self._embedded or self._search is None:
+            return
         self._now_playing_only = checked
         self._search.setEnabled(not checked)
         if checked:
@@ -700,7 +744,7 @@ class SongListPanel(QWidget):
         self._apply_filter()
 
     def _clear_now_playing_filter(self) -> None:
-        if not self._now_playing_only:
+        if self._embedded or not self._now_playing_only:
             return
         self._now_playing_only = False
         self._search.setEnabled(True)
@@ -711,6 +755,8 @@ class SongListPanel(QWidget):
         self._apply_filter()
 
     def _update_now_playing_filter_state(self) -> None:
+        if self._embedded or self._now_playing_btn is None:
+            return
         has_queue = self._queue_row_count() > 0
         self._now_playing_btn.setEnabled(has_queue)
         if not has_queue:
@@ -934,6 +980,8 @@ class SongListPanel(QWidget):
         external_current: Path | None = None,
         path_queue: list[Path] | None = None,
     ) -> None:
+        if self._embedded:
+            return
         self._queue_indices = indices
         self._external_current = external_current
         self._path_queue_paths = list(path_queue or [])
@@ -955,6 +1003,8 @@ class SongListPanel(QWidget):
         ]
 
     def _rebuild_queue_ui(self) -> None:
+        if self._embedded:
+            return
         order_count = self._queue_row_count()
         if order_count == 0:
             self._queue_section.hide()
@@ -1013,24 +1063,29 @@ class SongListPanel(QWidget):
         self._selected_index = None
         if self._recursive_list_mode:
             self._back_folders_btn.show()
+        elif self._embedded and self._search_query:
+            self._back_folders_btn.show()
         else:
             self._back_folders_btn.hide()
         if clear_search:
-            self._search.blockSignals(True)
-            self._search.clear()
-            self._search.blockSignals(False)
-        if self._now_playing_only:
-            self._queue_section.hide()
-            self._apply_queue_split_sizes()
-        else:
-            self._rebuild_queue_ui()
+            self._search_query = ""
+            if self._search is not None:
+                self._search.blockSignals(True)
+                self._search.clear()
+                self._search.blockSignals(False)
+        if not self._embedded:
+            if self._now_playing_only:
+                self._queue_section.hide()
+                self._apply_queue_split_sizes()
+            else:
+                self._rebuild_queue_ui()
         self._apply_filter()
 
     def set_current_index(self, index: int | None) -> None:
         self._current_index = index
         self._list.blockSignals(True)
         self._update_now_playing_filter_state()
-        if not self._now_playing_only:
+        if not self._embedded and not self._now_playing_only:
             self._rebuild_queue_ui()
         self._apply_filter()
         self._list.blockSignals(False)
@@ -1070,9 +1125,10 @@ class SongListPanel(QWidget):
 
     def _song_label(self, path: Path) -> str:
         leaf = self._leaf_label(path)
-        if self._recursive_list_mode and self._label_root is not None:
+        root = self._label_root or self._library_root
+        if root is not None and (self._recursive_list_mode or bool(self._search_query)):
             try:
-                relative = path.resolve().relative_to(self._label_root)
+                relative = path.resolve().relative_to(root)
             except (OSError, ValueError):
                 return leaf
             parts = list(relative.parts[:-1]) + [leaf]
@@ -1080,7 +1136,11 @@ class SongListPanel(QWidget):
         return leaf
 
     def _apply_filter(self) -> None:
-        query = self._search.text().strip().lower()
+        query = (
+            self._search_query.lower()
+            if self._embedded
+            else (self._search.text().strip().lower() if self._search is not None else "")
+        )
         now_playing_only = self._now_playing_only
         total = len(self._paths)
         display_queue = self._display_queue_indices()
