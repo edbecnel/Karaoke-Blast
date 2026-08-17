@@ -6,10 +6,9 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QColor
 from PyQt6.QtWidgets import QListWidget, QListWidgetItem, QMenu
 
-from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
-from karaoke_blast.ui.list_style import QUEUE_LIST_STYLE
-
 from karaoke_blast.models.youtube_video import YouTubeVideo
+from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE, copy_text_to_clipboard
+from karaoke_blast.ui.list_style import QUEUE_LIST_STYLE
 
 _ROLE_VIDEO = Qt.ItemDataRole.UserRole
 
@@ -115,12 +114,16 @@ class YouTubeQueueWidget(QListWidget):
             remove.triggered.connect(lambda: self.remove_requested.emit(video.video_id))
             menu.addAction(remove)
         else:
-            remove = QAction("Remove", self)
+            remove = QAction("Remove from Queue", self)
             remove.triggered.connect(lambda: self.remove_requested.emit(video.video_id))
             menu.addAction(remove)
 
         download = QAction("Download", self)
         download.triggered.connect(lambda: self.download_requested.emit(video))
         menu.addAction(download)
+
+        copy_url = QAction("Copy URL", self)
+        copy_url.triggered.connect(lambda: copy_text_to_clipboard(video.watch_url))
+        menu.addAction(copy_url)
 
         menu.exec(self.mapToGlobal(pos))

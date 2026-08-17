@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QSizePolicy,
     QSplitter,
@@ -22,6 +23,7 @@ from karaoke_blast.models.play_history_entry import PlayHistoryEntry
 from karaoke_blast.models.queue_item import QueueItem
 from karaoke_blast.models.youtube_video import YouTubeVideo
 from karaoke_blast.ui.checkbox_style import CHECKBOX_STYLE
+from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
 from karaoke_blast.ui.list_style import SIDEBAR_LIST_STYLE
 from karaoke_blast.ui.mixed_queue_list_widget import (
     QUEUE_PANEL_LIST_STYLE,
@@ -100,7 +102,7 @@ QPushButton {
     font-size: 16px;
     font-weight: bold;
     text-align: left;
-    padding: 2px 4px;
+    padding: 2px 22px 2px 4px;
     border-radius: 4px;
 }
 QPushButton:hover {
@@ -192,7 +194,12 @@ class LibraryPanel(QWidget):
         self._folder_btn.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        self._folder_btn.clicked.connect(self._song_list._show_folder_menu)
+        self._folder_menu = QMenu(self)
+        self._folder_menu.setStyleSheet(CONTEXT_MENU_STYLE)
+        self._folder_menu.aboutToShow.connect(
+            lambda: self._song_list.populate_folder_menu(self._folder_menu)
+        )
+        self._folder_btn.setMenu(self._folder_menu)
         header_row.addWidget(self._folder_btn, 1)
 
         refresh_btn = QPushButton("↻")
@@ -478,8 +485,13 @@ class LibraryPanel(QWidget):
         self._song_list.set_folder(folder)
         if folder is None:
             self._folder_btn.setText("Library")
+            self._folder_btn.setToolTip("Switch folder")
         else:
             self._folder_btn.setText(folder.name)
+            try:
+                self._folder_btn.setToolTip(str(folder.resolve()))
+            except OSError:
+                self._folder_btn.setToolTip(str(folder))
 
     def set_recent_folders(self, folders: list[Path], *, pinned: list[Path] | None = None) -> None:
         self._song_list.set_recent_folders(folders, pinned=pinned)
@@ -516,6 +528,12 @@ class LibraryPanel(QWidget):
 
     def set_display_mode(self, mode: str) -> None:
         self._song_list.set_display_mode(mode)
+
+    def display_sort_key(self, path: Path) -> str:
+        return self._song_list.display_sort_key(path)
+
+    def local_search_text(self) -> str:
+        return self._search.text().strip()
 
     def set_sort_strategy(self, strategy) -> None:
         self._song_list.set_sort_strategy(strategy)

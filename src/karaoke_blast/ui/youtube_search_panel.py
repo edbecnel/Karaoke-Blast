@@ -23,7 +23,7 @@ from karaoke_blast.services.youtube_search import (
     start_search,
 )
 from karaoke_blast.ui.checkbox_style import CHECKBOX_STYLE
-from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
+from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE, copy_text_to_clipboard
 from karaoke_blast.ui.list_style import SIDEBAR_LIST_STYLE
 from karaoke_blast.ui.panel_splitter import EDGE_GRIP_WIDTH, PanelEdgeGrip
 from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
@@ -456,6 +456,9 @@ class YouTubeSearchPanel(QWidget):
         download_action = QAction("Download", self)
         download_action.triggered.connect(lambda: self.download_requested.emit(video))
         menu.addAction(download_action)
+        copy_url = QAction("Copy URL", self)
+        copy_url.triggered.connect(lambda: copy_text_to_clipboard(video.watch_url))
+        menu.addAction(copy_url)
         menu.exec(self._results_list.mapToGlobal(pos))
 
     def showEvent(self, event) -> None:

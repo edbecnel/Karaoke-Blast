@@ -15,8 +15,7 @@ from PyQt6.QtWidgets import (
 )
 
 from karaoke_blast.models.queue_item import QueueItem
-from karaoke_blast.models.youtube_video import YouTubeVideo
-from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
+from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE, copy_text_to_clipboard
 from karaoke_blast.ui.list_style import QUEUE_LIST_STYLE
 from karaoke_blast.ui.youtube_queue_widget import format_duration
 from karaoke_blast.utils.display import display_name
@@ -139,14 +138,18 @@ class MixedQueueListWidget(QListWidget):
             play_next.triggered.connect(lambda: self.queue_requested.emit(item))
             menu.addAction(play_next)
 
-            remove = QAction("Remove from Queue", self)
-            remove.triggered.connect(lambda: self.remove_requested.emit(item))
-            menu.addAction(remove)
+        remove = QAction("Remove from Queue", self)
+        remove.triggered.connect(lambda: self.remove_requested.emit(item))
+        menu.addAction(remove)
 
         if item.kind == "youtube" and item.video is not None:
+            video = item.video
             download = QAction("Download", self)
-            download.triggered.connect(lambda: self.download_requested.emit(item.video))
+            download.triggered.connect(lambda: self.download_requested.emit(video))
             menu.addAction(download)
+            copy_url = QAction("Copy URL", self)
+            copy_url.triggered.connect(lambda: copy_text_to_clipboard(video.watch_url))
+            menu.addAction(copy_url)
 
         menu.exec(self.mapToGlobal(pos))
 

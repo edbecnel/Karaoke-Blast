@@ -204,6 +204,65 @@ def is_ffmpeg_available() -> bool:
     return resolve_ffmpeg_location() is not None
 
 
+def _js_runtime_binary_names(runtime: str) -> tuple[str, ...]:
+    return (f"{runtime}.exe", runtime) if sys.platform == "win32" else (runtime,)
+
+
+def _js_runtime_search_dirs() -> list[str]:
+    dirs: list[str] = []
+    if sys.platform == "darwin":
+        dirs.extend(_MAC_FFMPEG_SEARCH_DIRS)
+
+    deno_home = Path.home() / ".deno" / "bin"
+    if deno_home.is_dir():
+        dirs.append(str(deno_home))
+
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA", "")
+        if local:
+            winget_links = Path(local) / "Microsoft" / "WinGet" / "Links"
+            if winget_links.is_dir():
+                dirs.append(str(winget_links))
+        program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+        node_dir = Path(program_files) / "nodejs"
+        if node_dir.is_dir():
+            dirs.append(str(node_dir))
+
+    return [d for d in dirs if os.path.isdir(d)]
+
+
+def resolve_js_runtime(name: str) -> str | None:
+    """Return a JavaScript runtime executable path (deno or node)."""
+    for binary in _js_runtime_binary_names(name):
+        found = shutil.which(binary)
+        if found:
+            return found
+
+    extra_dirs = _js_runtime_search_dirs()
+    if extra_dirs:
+        search_path = os.pathsep.join(extra_dirs)
+        for binary in _js_runtime_binary_names(name):
+            found = shutil.which(binary, path=search_path)
+            if found:
+                return found
+        for directory in extra_dirs:
+            for binary in _js_runtime_binary_names(name):
+                candidate = Path(directory) / binary
+                if candidate.is_file():
+                    return str(candidate)
+    return None
+
+
+def resolve_js_runtimes() -> dict[str, dict[str, str]]:
+    """Return yt-dlp js_runtimes config for Deno (preferred) and Node if found."""
+    runtimes: dict[str, dict[str, str]] = {}
+    for name in ("deno", "node"):
+        path = resolve_js_runtime(name)
+        if path:
+            runtimes[name] = {"path": path}
+    return runtimes
+
+
 def _mac_vlc_plugin_dir(lib_path: Path) -> Path | None:
     """Return VLC's plugin directory next to *lib_path*, if it exists."""
     app_plugins = lib_path.parent.parent / "plugins"
@@ -265,16 +324,22 @@ def configure_vlc_environment() -> bool:
 
 
 def configure_runtime_dependencies() -> None:
-    """Configure VLC and ffmpeg paths before the app loads media backends."""
+    """Configure VLC, ffmpeg, and JS runtime paths before the app loads media backends."""
     configure_vlc_environment()
 
     ffmpeg = resolve_ffmpeg_location()
     if ffmpeg is None:
         logger.debug("ffmpeg not found on PATH or in bundled locations")
-        return
+    else:
+        ffmpeg_dir = str(Path(ffmpeg).parent)
+        os.environ.setdefault("PATH", "")
+        if ffmpeg_dir not in os.environ["PATH"]:
+            os.environ["PATH"] = f"{ffmpeg_dir}{os.pathsep}{os.environ['PATH']}"
+        logger.debug("Configured ffmpeg path: %s", ffmpeg)
 
-    ffmpeg_dir = str(Path(ffmpeg).parent)
     os.environ.setdefault("PATH", "")
-    if ffmpeg_dir not in os.environ["PATH"]:
-        os.environ["PATH"] = f"{ffmpeg_dir}{os.pathsep}{os.environ['PATH']}"
-    logger.debug("Configured ffmpeg path: %s", ffmpeg)
+    for runtime in resolve_js_runtimes().values():
+        runtime_dir = str(Path(runtime["path"]).parent)
+        if runtime_dir not in os.environ["PATH"]:
+            os.environ["PATH"] = f"{runtime_dir}{os.pathsep}{os.environ['PATH']}"
+        logger.debug("Configured JavaScript runtime path: %s", runtime["path"])

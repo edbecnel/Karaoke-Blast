@@ -3,24 +3,25 @@
 from __future__ import annotations
 
 import logging
-import os
-import sys
+from importlib.util import find_spec
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
 
 from karaoke_blast.models.youtube_video import YouTubeVideo
 from karaoke_blast.storage.paths import default_downloads_dir
+from karaoke_blast.utils.runtime_deps import resolve_ffmpeg_location, resolve_js_runtimes
 
 logger = logging.getLogger(__name__)
 
 VLC_FORMAT = (
     "bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/"
     "bestvideo[ext=mp4]+bestaudio[ext=m4a]/"
-    "best[ext=mp4]/best"
+    "best[ext=mp4]/"
+    "bestvideo[vcodec^=avc1]+bestaudio/"
+    "bestvideo+bestaudio/"
+    "best"
 )
-
-from karaoke_blast.utils.runtime_deps import resolve_ffmpeg_location
 
 
 def downloaded_file_for(video_id: str, folder: Path | None = None) -> Path | None:
@@ -33,6 +34,10 @@ def downloaded_file_for(video_id: str, folder: Path | None = None) -> Path | Non
         if path.is_file() and path.suffix.lower() == ".mp4" and suffix in path.name:
             return path
     return None
+
+
+def _yt_dlp_ejs_available() -> bool:
+    return find_spec("yt_dlp_ejs") is not None
 
 
 def _build_ydl_opts(
@@ -49,11 +54,32 @@ def _build_ydl_opts(
         "merge_output_format": "mp4",
         "outtmpl": str(output_dir / "%(title).200B [%(id)s].%(ext)s"),
         "progress_hooks": [progress_callback],
+        # Skip selected formats that 403 so later entries in VLC_FORMAT can be used.
+        "check_formats": "selected",
     }
     ffmpeg = resolve_ffmpeg_location()
     if ffmpeg is not None:
         opts["ffmpeg_location"] = ffmpeg
+    js_runtimes = resolve_js_runtimes()
+    if js_runtimes:
+        opts["js_runtimes"] = js_runtimes
+    # Homebrew yt-dlp bundles challenge-solver scripts; the pip package does
+    # not unless installed as yt-dlp[default]. Fetch them if they are missing.
+    if not _yt_dlp_ejs_available():
+        opts["remote_components"] = ["ejs:github"]
     return opts
+
+
+def _friendly_download_error(exc: BaseException) -> str:
+    text = str(exc).strip() or exc.__class__.__name__
+    if "403" not in text and "forbidden" not in text.lower():
+        return text
+    if resolve_js_runtimes():
+        return text
+    return (
+        "YouTube returned 403 Forbidden. yt-dlp needs Deno (recommended) or Node "
+        "to download videos. Install Deno from https://deno.com and try again."
+    )
 
 
 class YouTubeDownloadWorker(QObject):
@@ -134,7 +160,7 @@ class YouTubeDownloadWorker(QObject):
             self.download_finished.emit(path, video)
         except (OSError, RuntimeError, TypeError, ValueError, DownloadError) as exc:
             logger.warning("YouTube download failed for %s: %s", video.video_id, exc)
-            self.download_failed.emit(video.video_id, str(exc))
+            self.download_failed.emit(video.video_id, _friendly_download_error(exc))
 
 
 def start_download(

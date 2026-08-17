@@ -6,9 +6,8 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QColor
 from PyQt6.QtWidgets import QListWidget, QListWidgetItem, QMenu
 
-from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
-
 from karaoke_blast.models.youtube_video import YouTubeVideo
+from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE, copy_text_to_clipboard
 from karaoke_blast.ui.youtube_queue_widget import format_duration
 
 _ROLE_VIDEO = Qt.ItemDataRole.UserRole
@@ -86,5 +85,9 @@ class YouTubeHistoryPanel(QListWidget):
         download = QAction("Download", self)
         download.triggered.connect(lambda: self.download_requested.emit(video))
         menu.addAction(download)
+
+        copy_url = QAction("Copy URL", self)
+        copy_url.triggered.connect(lambda: copy_text_to_clipboard(video.watch_url))
+        menu.addAction(copy_url)
 
         menu.exec(self.mapToGlobal(pos))

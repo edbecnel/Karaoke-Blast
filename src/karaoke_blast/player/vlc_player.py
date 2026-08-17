@@ -153,6 +153,8 @@ class VlcPlayer(QObject):
         return state == self._vlc.State.Paused
 
     def stop(self) -> None:
+        self._play_generation += 1
+        self._suppress_end_reached = True
         self._player.stop()
 
     def seek_relative(self, delta_ms: int) -> None:

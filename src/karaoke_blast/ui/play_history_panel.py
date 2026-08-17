@@ -10,11 +10,9 @@ from PyQt6.QtGui import QAction, QColor
 from PyQt6.QtWidgets import QListWidget, QListWidgetItem, QMenu
 
 from karaoke_blast.models.play_history_entry import PlayHistoryEntry
-from karaoke_blast.models.youtube_video import YouTubeVideo
-from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
+from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE, copy_text_to_clipboard
 from karaoke_blast.ui.youtube_queue_widget import format_duration
 from karaoke_blast.utils.display import display_name
-
 
 _ROLE_ENTRY = Qt.ItemDataRole.UserRole
 
@@ -141,11 +139,15 @@ class PlayHistoryPanel(QListWidget):
             menu.addAction(edit_meta)
 
         if entry.kind == "youtube" and entry.video is not None:
+            video = entry.video
             download = QAction("Download", self)
             download.triggered.connect(
-                lambda: self._defer(self.download_requested, entry.video)
+                lambda: self._defer(self.download_requested, video)
             )
             menu.addAction(download)
+            copy_url = QAction("Copy URL", self)
+            copy_url.triggered.connect(lambda: copy_text_to_clipboard(video.watch_url))
+            menu.addAction(copy_url)
 
         remove = QAction("Remove from History", self)
         remove.triggered.connect(lambda: self._defer(self.remove_requested, entry))

@@ -128,7 +128,7 @@ QPushButton {
     font-size: 16px;
     font-weight: bold;
     text-align: left;
-    padding: 2px 4px;
+    padding: 2px 22px 2px 4px;
     border-radius: 4px;
 }
 QPushButton:hover {
@@ -144,6 +144,13 @@ QPushButton::menu-indicator {
     margin-right: 4px;
 }
 """
+
+
+def _safe_resolve(path: Path) -> Path:
+    try:
+        return path.resolve()
+    except OSError:
+        return path
 
 
 class SongListPanel(QWidget):
@@ -203,7 +210,12 @@ class SongListPanel(QWidget):
             self._folder_btn.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
             )
-            self._folder_btn.clicked.connect(self._show_folder_menu)
+            self._folder_menu = QMenu(self)
+            self._folder_menu.setStyleSheet(CONTEXT_MENU_STYLE)
+            self._folder_menu.aboutToShow.connect(
+                lambda: self.populate_folder_menu(self._folder_menu)
+            )
+            self._folder_btn.setMenu(self._folder_menu)
             header_row.addWidget(self._folder_btn, 1)
 
             self._back_folders_btn = QPushButton("←")
@@ -519,6 +531,9 @@ class SongListPanel(QWidget):
     def display_resolver(self):
         return self._leaf_label
 
+    def display_sort_key(self, path: Path) -> str:
+        return self._leaf_label(path)
+
     def set_display_mode(self, mode: str) -> None:
         normalized = (
             DISPLAY_MODE_METADATA
@@ -662,62 +677,52 @@ class SongListPanel(QWidget):
             )
         )
 
-    def _show_folder_menu(self) -> None:
-        menu = QMenu(self)
-        menu.setStyleSheet(CONTEXT_MENU_STYLE)
+    def populate_folder_menu(self, menu: QMenu) -> None:
+        """Fill *menu* with pinned and recent folders from the start-screen list."""
+        menu.clear()
         current = self._current_folder
-        pinned_resolved = {path.resolve() for path in self._pinned_folders}
+        pinned_resolved = {_safe_resolve(path) for path in self._pinned_folders}
 
         for folder in self._pinned_folders:
-            action = QAction(PINNED_LABEL, self)
-            action.setToolTip(str(folder))
-            resolved = folder.resolve()
-            if current == resolved:
-                action.setCheckable(True)
-                action.setChecked(True)
-                action.setEnabled(False)
-            else:
-                action.triggered.connect(
-                    lambda _checked=False, selected=folder: self.folder_selected.emit(
-                        selected
-                    )
-                )
-            menu.addAction(action)
+            self._add_folder_menu_action(menu, folder, PINNED_LABEL, current)
 
         recent = [
             folder
             for folder in self._recent_folders
-            if folder.resolve() not in pinned_resolved
+            if _safe_resolve(folder) not in pinned_resolved
         ]
         if recent and self._pinned_folders:
             menu.addSeparator()
 
         for folder in recent:
-            action = QAction(folder.name, self)
-            action.setToolTip(str(folder))
-            resolved = folder.resolve()
-            if current == resolved:
-                action.setCheckable(True)
-                action.setChecked(True)
-                action.setEnabled(False)
-            else:
-                action.triggered.connect(
-                    lambda _checked=False, selected=folder: self.folder_selected.emit(
-                        selected
-                    )
-                )
-            menu.addAction(action)
+            self._add_folder_menu_action(menu, folder, folder.name, current)
 
         if self._pinned_folders or recent:
             menu.addSeparator()
 
-        browse = QAction("Browse…", self)
+        browse = QAction("Browse…", menu)
         browse.triggered.connect(self.browse_folder_requested.emit)
         menu.addAction(browse)
 
-        menu.exec(
-            self._folder_btn.mapToGlobal(self._folder_btn.rect().bottomLeft())
-        )
+    def _add_folder_menu_action(
+        self,
+        menu: QMenu,
+        folder: Path,
+        label: str,
+        current: Path | None,
+    ) -> None:
+        action = QAction(label, menu)
+        action.setToolTip(str(folder))
+        resolved = _safe_resolve(folder)
+        if current is not None and current == resolved:
+            action.setCheckable(True)
+            action.setChecked(True)
+            action.setEnabled(False)
+        else:
+            action.triggered.connect(
+                lambda _checked=False, selected=folder: self.folder_selected.emit(selected)
+            )
+        menu.addAction(action)
 
     def _on_refresh_clicked(self, _checked: bool = False) -> None:
         self.refresh_requested.emit()
