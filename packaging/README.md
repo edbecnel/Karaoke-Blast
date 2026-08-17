@@ -11,7 +11,7 @@ Installer files are large and change often. They are **not** stored in the repos
 | Commit to git | Do not commit |
 |---|---|
 | Source code, `packaging/` scripts, workflow files | `KaraokeBlast-Setup.exe`, `Karaoke Blast.dmg` |
-| Version bumps in `pyproject.toml` | `packaging/**/staging/`, `packaging/**/dist/` (gitignored) |
+| Version bumps in `pyproject.toml` (single source of truth for app version) | `packaging/**/staging/`, `packaging/**/dist/` (gitignored) |
 
 Publish installers as **GitHub Release assets** (download links on the Releases page). That is how end users get them.
 
@@ -27,25 +27,25 @@ Commit packaging scripts and app code only:
 
 ```bash
 git add .
-git commit -m "Prepare release 0.1.0"
+git commit -m "Prepare release 0.3.0"
 git push origin main
 ```
 
-**After a packaging fix:** the release tag must point at the commit that contains the fix. CI builds the **tag**, not “latest main”. If you already published `v0.1.0` on an older commit, move the tag before republishing:
+**After a packaging fix:** the release tag must point at the commit that contains the fix. CI builds the **tag**, not “latest main”. If you already published a release on an older commit, move the tag before republishing:
 
 ```bash
-git tag -f v0.1.0
-git push origin v0.1.0 --force
+git tag -f v0.3.0
+git push origin v0.3.0 --force
 ```
 
-Then delete and republish the GitHub release (or publish a new tag such as `v0.1.1`). Do **not** use “Re-run failed jobs” on an old workflow run — that rebuilds the old commit.
+Then delete and republish the GitHub release (or publish a new tag such as `v0.3.1`). Do **not** use “Re-run failed jobs” on an old workflow run — that rebuilds the old commit.
 
 ### 2. Create a GitHub Release
 
 1. Open [Karaoke Blast Releases](https://github.com/edbecnel/Karaoke-Blast/releases).
 2. Click **Draft a new release**.
-3. Choose a tag (for example `v0.1.0`) — create the tag if it does not exist.
-4. Set the release title (for example `v0.1.0`) and add release notes.
+3. Choose a tag (for example `v0.3.0`) — create the tag if it does not exist.
+4. Set the release title (for example `v0.3.0`) and add release notes.
 5. Click **Publish release**.
 
 Publishing triggers [`.github/workflows/release.yml`](../../.github/workflows/release.yml), which:

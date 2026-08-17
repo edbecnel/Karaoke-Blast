@@ -13,7 +13,7 @@ $DistDir = Join-Path $PSScriptRoot "dist"
 
 $version = (Select-String -Path (Join-Path $Root "pyproject.toml") -Pattern '^version = "(.*)"' | ForEach-Object { $_.Matches[0].Groups[1].Value })
 if (-not $version) {
-    $version = "0.1.0"
+    $version = "0.3.0"
 }
 
 $iscc = Get-Command iscc -ErrorAction SilentlyContinue

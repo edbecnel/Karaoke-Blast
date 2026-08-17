@@ -32,6 +32,8 @@ resolve_python() {
 PYTHON="$(resolve_python)"
 echo "Using Python: $PYTHON"
 
+APP_VERSION="$("$PYTHON" -c "import tomllib; print(tomllib.load(open('$ROOT/pyproject.toml', 'rb'))['project']['version'])")"
+
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
@@ -64,7 +66,7 @@ cat >"$CONTENTS/Info.plist" <<EOF
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.0</string>
+  <string>$APP_VERSION</string>
   <key>LSMinimumSystemVersion</key>
   <string>11.0</string>
   <key>NSHighResolutionCapable</key>

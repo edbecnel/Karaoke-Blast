@@ -4,7 +4,7 @@
 
 # Karaoke Blast
 
-Full-screen karaoke video player and manager. Open a local folder of videos and play them in alphabetical order, or search YouTube for karaoke tracks and play them in an embedded player.
+Full-screen karaoke video player and manager. Open a local folder of videos and audio files, browse subfolders, queue songs, and search YouTube for karaoke tracks — all in one session.
 
 ## Install (Windows and macOS)
 
@@ -121,7 +121,7 @@ pip install -e .
 python -m karaoke_blast
 ```
 
-Open a folder containing video or audio files (`.mp4`, `.mkv`, `.avi`, `.mov`, `.webm`, `.m4v`, `.mp3`, `.m4a`, `.aac`, `.flac`, `.wav`, `.ogg`, `.opus`, `.wma`) — including folders that only have media in subfolders — and the player opens in full screen. Recently opened folders appear on the startup screen for quick access. Right-click a recent folder and choose **Remove from List** to hide it from the list.
+Open a folder containing video or audio files (`.mp4`, `.mkv`, `.avi`, `.mov`, `.webm`, `.m4v`, `.mp3`, `.m4a`, `.aac`, `.flac`, `.wav`, `.ogg`, `.opus`, `.wma`) — including folders that only have media in subfolders — and the player opens in full screen. Recently opened folders appear on the startup screen for quick access. Right-click a recent folder for **Browse folder** (open in Finder or Explorer) or **Remove from List**.
 
 You can also click **Search YouTube** on the startup screen to find and play karaoke videos online without downloading them first.
 
@@ -165,14 +165,14 @@ The panel has three tabs:
 
 ### Local
 
-When a folder is loaded, subfolders that contain videos are listed with a trailing `/` — click one to drill down, or use **‥ Up** to go back (within the folder you opened). Click a song once to select it, then click it again to start playback. Use the folder header menu for **Browse folder**, **Play all under this folder**, or **Queue all under this folder** (includes nested subfolders). After Play all, use **← Back to folders** to return to hierarchical browsing. Use the sort dropdown to reorder by:
+When a folder is loaded, subfolders that contain videos are listed with a trailing `/` — click one to drill down, or use **‥ Up** to go back (within the folder you opened). Click a song once to select it, then click it again to start playback. Use the folder header menu for **Browse folder** (open the current folder in Finder or Explorer), **Play all under this folder**, or **Queue all under this folder** (includes nested subfolders). After Play all, use **← Back to folders** to return to hierarchical browsing. Use the sort dropdown to reorder by:
 
 - Name (A → Z / Z → A)
 - Date modified (oldest / newest first)
 
 Toggle **Metadata** to show embedded title, artist, and comments instead of file names (songs without a title still show the file name). Use **⚙** next to it to set the field order and separators. Search matches metadata first, then the file name.
 
-Right-click any song and choose **Play Next** to queue it. You can also right-click and choose **Edit Metadata…** to change Song Title, Artist Name, and Comments (supported formats only).
+Right-click any song and choose **Play Next** to queue it, **Reveal in Finder** / **Show in Explorer** to locate the file, or **Edit Metadata…** to change Song Title, Artist Name, and Comments (supported formats only).
 
 ### YouTube
 
@@ -223,8 +223,6 @@ Supported containers: MP3, MP4/M4A/M4V, FLAC, OGG/Opus, and WAV. Unsupported typ
 ## YouTube Streaming
 
 Click **Search YouTube** on the startup screen, or press `Y`, to open the player with the YouTube tab focused.
-
-Downloads and API configuration are unchanged — see below.
 
 Download YouTube videos for offline playback in the local VLC player:
 
@@ -302,6 +300,8 @@ Set `youtube_search_backend` to `"yt-dlp"` to switch back. If the API key is mis
 - [ ] **Change…** on startup screen and library panel opens a folder picker
 - [ ] Custom download folder persists after restart and is used for new downloads
 - [ ] Right-click **Remove from List** on a recent folder removes it from the startup list after restart
+- [ ] Right-click **Browse folder** on a recent folder opens it in Finder or Explorer
+- [ ] Right-click a local song shows **Reveal in Finder** / **Show in Explorer**
 
 ## Roadmap
 
