@@ -12,7 +12,7 @@ dependencies = [
     "PyQt6>=6.6",
     "PyQt6-WebEngine>=6.6",
     "python-vlc>=3.0",
-    "yt-dlp[default]>=2024.1",
+    "yt-dlp[default]>=2026.8.19",
     "mutagen>=1.47",
 ]
 

@@ -56,6 +56,10 @@ def _build_ydl_opts(
         "progress_hooks": [progress_callback],
         # Skip selected formats that 403 so later entries in VLC_FORMAT can be used.
         "check_formats": "selected",
+        # android_vr and web_safari clients often 403 on videoplayback URLs (yt-dlp #17261).
+        "extractor_args": {
+            "youtube": {"player_client": ["default", "-android_vr", "-web_safari"]},
+        },
     }
     ffmpeg = resolve_ffmpeg_location()
     if ffmpeg is not None:

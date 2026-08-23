@@ -5,6 +5,7 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -15,10 +16,15 @@ from PyQt6.QtWidgets import (
 from karaoke_blast.ui.checkbox_style import CHECKBOX_STYLE_WHITE_LABEL
 from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
 from karaoke_blast.utils.filename_rename import (
+    CASING_MODES,
+    CASING_NONE,
+    CASING_TITLE,
+    CASING_UPPER,
     DEFAULT_KARAOKE_FORMAT,
     SLOT_KIND_ADDITIONAL,
     SLOT_KIND_ARTIST,
     SLOT_KIND_SONG,
+    SLOT_KINDS,
     SONG_ARTIST_FORMAT,
     FilenameFormat,
     format_preview,
@@ -58,6 +64,46 @@ _BADGE_STYLE = "color: #aaa; font-size: 11px; background: transparent;"
 _LABEL_STYLE = "color: white; font-size: 12px; font-weight: 600; background: transparent;"
 _PREVIEW_STYLE = "color: #7ee787; font-size: 12px; background: transparent;"
 _SEP_LABEL_STYLE = "color: #888; font-size: 11px; background: transparent;"
+_CASING_LABEL_STYLE = "color: #888; font-size: 11px; background: transparent;"
+
+_COMBO_STYLE = """
+QComboBox {
+    background-color: #2d2d42;
+    color: #ffffff;
+    border: 1px solid #5a5a72;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+QComboBox:hover {
+    border-color: #7a7a92;
+}
+QComboBox::drop-down {
+    border: none;
+    width: 20px;
+}
+QComboBox::down-arrow {
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #ffffff;
+    margin-right: 6px;
+}
+QComboBox QAbstractItemView {
+    background-color: #1e1e2e;
+    color: #ffffff;
+    border: 1px solid #5a5a72;
+    selection-background-color: #e94560;
+    selection-color: #ffffff;
+    outline: none;
+}
+"""
+
+_CASING_OPTIONS: tuple[tuple[str, str], ...] = (
+    (CASING_NONE, "None"),
+    (CASING_TITLE, "Title Case"),
+    (CASING_UPPER, "ALL CAPS"),
+)
 
 
 def _kind_label(kind: str) -> str:
@@ -83,6 +129,7 @@ class FormatConfigWidget(QWidget):
         self._label_fields: dict[int, VisibleSpaceLineEdit] = {}
         self._hint_fields: dict[int, VisibleSpaceLineEdit] = {}
         self._hint_fixed_boxes: dict[int, QCheckBox] = {}
+        self._casing_combos: dict[str, QComboBox] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -93,6 +140,30 @@ class FormatConfigWidget(QWidget):
         layout.addWidget(title)
 
         layout.addLayout(self._slot_rows_layout)
+
+        casing_title = QLabel("Casing")
+        casing_title.setStyleSheet("color: white; font-size: 13px; font-weight: bold;")
+        layout.addWidget(casing_title)
+
+        casing_row = QHBoxLayout()
+        casing_row.setSpacing(12)
+        for kind in SLOT_KINDS:
+            kind_col = QHBoxLayout()
+            kind_col.setSpacing(6)
+            kind_label = QLabel(_kind_label(kind))
+            kind_label.setStyleSheet(_CASING_LABEL_STYLE)
+            kind_col.addWidget(kind_label)
+            combo = QComboBox()
+            combo.setStyleSheet(_COMBO_STYLE)
+            combo.setFixedWidth(120)
+            for mode, label in _CASING_OPTIONS:
+                combo.addItem(label, mode)
+            combo.currentIndexChanged.connect(self._on_field_changed)
+            self._casing_combos[kind] = combo
+            kind_col.addWidget(combo)
+            casing_row.addLayout(kind_col)
+        casing_row.addStretch()
+        layout.addLayout(casing_row)
 
         preset_row = QHBoxLayout()
         preset_row.setSpacing(8)
@@ -122,9 +193,16 @@ class FormatConfigWidget(QWidget):
     def set_format(self, fmt: FilenameFormat) -> None:
         self._building = True
         self._format = fmt.copy()
+        self._sync_casing_combos()
         self._rebuild_rows()
         self._update_preview()
         self._building = False
+
+    def _sync_casing_combos(self) -> None:
+        for kind, combo in self._casing_combos.items():
+            mode = self._format.casing.get(kind, CASING_NONE)
+            index = combo.findData(mode)
+            combo.setCurrentIndex(index if index >= 0 else 0)
 
     def _clear_layout(self, box_layout: QVBoxLayout) -> None:
         while box_layout.count():
@@ -254,11 +332,15 @@ class FormatConfigWidget(QWidget):
         self._schedule_rebuild()
 
     def _apply_karaoke_preset(self) -> None:
-        self.set_format(DEFAULT_KARAOKE_FORMAT.copy())
+        preset = DEFAULT_KARAOKE_FORMAT.copy()
+        preset.casing = dict(self._format.casing)
+        self.set_format(preset)
         self.format_changed.emit(self.format())
 
     def _apply_song_artist_preset(self) -> None:
-        self.set_format(SONG_ARTIST_FORMAT.copy())
+        preset = SONG_ARTIST_FORMAT.copy()
+        preset.casing = dict(self._format.casing)
+        self.set_format(preset)
         self.format_changed.emit(self.format())
 
     def _on_field_changed(self, *_args) -> None:
@@ -281,6 +363,11 @@ class FormatConfigWidget(QWidget):
 
         for index, fixed_box in self._hint_fixed_boxes.items():
             self._format.slots[index].hint_fixed = fixed_box.isChecked()
+
+        for kind, combo in self._casing_combos.items():
+            mode = combo.currentData()
+            if mode in CASING_MODES:
+                self._format.casing[kind] = mode
 
     def _update_preview(self) -> None:
         self._preview_label.setText(f"Pattern: {format_preview(self._format)}")

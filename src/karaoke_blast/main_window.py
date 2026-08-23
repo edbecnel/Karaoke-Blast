@@ -458,6 +458,7 @@ class MainWindow(QWidget):
             " padding: 8px 16px; border-radius: 4px; font-size: 14px;"
         )
         self._overlay.hide()
+        self._overlay_corner = "bottom-center"
 
         self._splitter.addWidget(self._library_panel)
         self._splitter.addWidget(self._video_container)
@@ -706,8 +707,12 @@ class MainWindow(QWidget):
         margin = 16
         w = self._video_container.width()
         h = self._video_container.height()
-        x = (w - self._overlay.width()) // 2
-        y = h - self._overlay.height() - margin
+        if self._overlay_corner == "top-right":
+            x = w - self._overlay.width() - margin
+            y = margin
+        else:
+            x = (w - self._overlay.width()) // 2
+            y = h - self._overlay.height() - margin
         self._overlay.move(max(margin, x), max(margin, y))
 
     def _reposition_controls(self) -> None:
@@ -1122,8 +1127,15 @@ class MainWindow(QWidget):
         self._save_folder_state()
         super().closeEvent(event)
 
-    def _show_toast(self, message: str, duration_ms: int = 4000) -> None:
+    def _show_toast(
+        self,
+        message: str,
+        duration_ms: int = 4000,
+        *,
+        corner: str = "bottom-center",
+    ) -> None:
         """Show a temporary overlay message."""
+        self._overlay_corner = corner
         self._overlay.setText(message)
         self._overlay.show()
         self._overlay.raise_()
@@ -1323,6 +1335,7 @@ class MainWindow(QWidget):
         text = self._current_youtube.title
         if self._mixed_queue:
             text += f"  ·  {len(self._mixed_queue)} queued"
+        self._overlay_corner = "bottom-center"
         self._overlay.setText(text)
         self._overlay.show()
         self._overlay.raise_()
@@ -1453,6 +1466,7 @@ class MainWindow(QWidget):
         text = display_name(path)
         if self._mixed_queue:
             text += f"  ·  {len(self._mixed_queue)} queued"
+        self._overlay_corner = "bottom-center"
         self._overlay.setText(text)
         self._overlay.show()
         self._overlay.raise_()
@@ -1508,7 +1522,11 @@ class MainWindow(QWidget):
                 video.title,
                 message=f"Already downloaded: {existing.name}",
             )
-            self._offer_open_downloads()
+            self._show_toast(
+                f"Downloaded: {existing.name}",
+                duration_ms=5000,
+                corner="top-right",
+            )
             return
 
         self._downloading_video_id = video.video_id
@@ -1534,7 +1552,11 @@ class MainWindow(QWidget):
             video.title,
             message=f"Saved: {path.name}",
         )
-        self._offer_open_downloads()
+        self._show_toast(
+            f"Downloaded: {path.name}",
+            duration_ms=5000,
+            corner="top-right",
+        )
 
     def _on_youtube_download_failed(self, video_id: str, message: str) -> None:
         title = self._downloading_video.title if self._downloading_video else video_id
@@ -1545,18 +1567,6 @@ class MainWindow(QWidget):
         self._download_thread = None
         self._downloading_video_id = None
         self._downloading_video = None
-
-    def _offer_open_downloads(self) -> None:
-        downloads_path = self._youtube_downloads_path()
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Information)
-        box.setWindowTitle("Download Complete")
-        box.setText(f"Video saved to:\n{downloads_path}")
-        open_btn = box.addButton("Open Downloads", QMessageBox.ButtonRole.AcceptRole)
-        box.addButton("Dismiss", QMessageBox.ButtonRole.RejectRole)
-        box.exec()
-        if box.clickedButton() == open_btn:
-            self._load_folder(downloads_path, allow_empty=True)
 
     def _on_song_selected(self, index: int) -> None:
         if self._vlc is None:
@@ -1790,6 +1800,7 @@ class MainWindow(QWidget):
         text = f"{self._playlist.position} / {self._playlist.count} — {display_name(current)}"
         if self._mixed_queue:
             text += f"  ·  {len(self._mixed_queue)} queued"
+        self._overlay_corner = "bottom-center"
         self._overlay.setText(text)
         self._overlay.show()
         self._overlay.raise_()

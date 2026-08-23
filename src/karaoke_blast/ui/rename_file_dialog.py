@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 )
 
 from karaoke_blast.ui.format_config_widget import FormatConfigWidget
+from karaoke_blast.ui.slot_field_casing import apply_casing_to_field, cased_slot_text
 from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
 from karaoke_blast.utils.filename_rename import (
     FilenameFormat,
@@ -344,8 +345,7 @@ class RenameFileDialog(QDialog):
         if field.isReadOnly():
             return
         field.setText(hint)
-        self._update_hint_button(slot_index)
-        self._update_preview()
+        self._on_slot_text_changed(slot_index)
 
     def _try_accept_hint_via_right_arrow(self, slot_index: int, field: QLineEdit) -> bool:
         hint = self._slot_hint(slot_index)
@@ -436,7 +436,9 @@ class RenameFileDialog(QDialog):
                 on_accept_hint=self._try_accept_hint_via_right_arrow,
             )
             field.setStyleSheet(_FIELD_STYLE)
-            field.textChanged.connect(self._update_preview)
+            field.textChanged.connect(
+                lambda _text, index=slot_index: self._on_slot_text_changed(index)
+            )
             field.installEventFilter(self)
             field.setProperty("slot_index", slot_index)
             is_fixed = self._is_fixed_slot(slot)
@@ -455,6 +457,7 @@ class RenameFileDialog(QDialog):
             elif slot_index in fixed:
                 initial = fixed[slot_index]
             if initial:
+                initial = cased_slot_text(initial, slot.kind, fmt)
                 field.blockSignals(True)
                 field.setText(initial)
                 field.blockSignals(False)
@@ -539,6 +542,16 @@ class RenameFileDialog(QDialog):
             return
         current = field.text().strip()
         field.setText(f"{current} {part}".strip() if current else part)
+
+    def _on_slot_text_changed(self, slot_index: int) -> None:
+        field = self._slot_fields.get(slot_index)
+        if field is None:
+            return
+        fmt = self.format()
+        slot = fmt.slots[slot_index]
+        if not field.isReadOnly():
+            apply_casing_to_field(field, slot.kind, fmt)
+        self._update_hint_button(slot_index)
         self._update_preview()
 
     def _slot_values(self) -> dict[int, str]:

@@ -20,12 +20,14 @@ from PyQt6.QtWidgets import (
 )
 
 from karaoke_blast.ui.rename_file_dialog import HintableSlotField
+from karaoke_blast.ui.slot_field_casing import apply_casing_to_field, cased_slot_text
 from karaoke_blast.utils.filename_rename import (
     FilenameFormat,
     FormatSlot,
     SLOT_KIND_ADDITIONAL,
     SLOT_KIND_ARTIST,
     SLOT_KIND_SONG,
+    apply_slot_casing,
     default_slot_values,
     fixed_slot_values,
     split_title,
@@ -279,8 +281,7 @@ class MetadataFileDialog(QDialog):
         if field.isReadOnly():
             return
         field.setText(hint)
-        self._update_hint_button(slot_index)
-        self._update_preview()
+        self._on_slot_text_changed(slot_index)
 
     def _try_accept_hint_via_right_arrow(self, slot_index: int, field: QLineEdit) -> bool:
         hint = self._slot_hint(slot_index)
@@ -370,7 +371,9 @@ class MetadataFileDialog(QDialog):
                 on_accept_hint=self._try_accept_hint_via_right_arrow,
             )
             field.setStyleSheet(_FIELD_STYLE)
-            field.textChanged.connect(self._update_preview)
+            field.textChanged.connect(
+                lambda _text, index=slot_index: self._on_slot_text_changed(index)
+            )
             field.installEventFilter(self)
             field.setProperty("slot_index", slot_index)
             is_fixed = self._is_fixed_slot(slot)
@@ -389,6 +392,7 @@ class MetadataFileDialog(QDialog):
             elif slot_index in fixed:
                 initial = fixed[slot_index]
             if initial:
+                initial = cased_slot_text(initial, slot.kind, self._fmt)
                 field.blockSignals(True)
                 field.setText(initial)
                 field.blockSignals(False)
@@ -464,6 +468,15 @@ class MetadataFileDialog(QDialog):
             return
         current = field.text().strip()
         field.setText(f"{current} {part}".strip() if current else part)
+
+    def _on_slot_text_changed(self, slot_index: int) -> None:
+        field = self._slot_fields.get(slot_index)
+        if field is None:
+            return
+        slot = self._fmt.slots[slot_index]
+        if not field.isReadOnly():
+            apply_casing_to_field(field, slot.kind, self._fmt)
+        self._update_hint_button(slot_index)
         self._update_preview()
 
     def _slot_values(self) -> dict[int, str]:
@@ -476,7 +489,7 @@ class MetadataFileDialog(QDialog):
         for index, slot in enumerate(self._fmt.slots):
             if not slot.enabled:
                 continue
-            text = values.get(index, "").strip()
+            text = apply_slot_casing(values.get(index, "").strip(), slot.kind, self._fmt)
             if slot.kind == SLOT_KIND_SONG:
                 title = text
             elif slot.kind == SLOT_KIND_ARTIST:
@@ -486,7 +499,8 @@ class MetadataFileDialog(QDialog):
         for index in self._comment_slot_indices:
             if index not in self._slot_fields:
                 continue
-            text = values.get(index, "").strip()
+            slot = self._fmt.slots[index]
+            text = apply_slot_casing(values.get(index, "").strip(), slot.kind, self._fmt)
             if text and text not in comment_parts:
                 comment_parts.append(text)
         comment = _COMMENT_JOIN.join(comment_parts)

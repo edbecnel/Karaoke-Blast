@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -13,6 +15,18 @@ _SPLIT_DELIMITERS = re.compile(r"\s*[-–—|｜]\s*|\s*\|\s*|_+|\s*\(\s*|\s*\)\
 SLOT_KIND_SONG = "song"
 SLOT_KIND_ARTIST = "artist"
 SLOT_KIND_ADDITIONAL = "additional"
+
+CASING_NONE = "none"
+CASING_TITLE = "title"
+CASING_UPPER = "upper"
+
+CASING_MODES = (CASING_NONE, CASING_TITLE, CASING_UPPER)
+SLOT_KINDS = (SLOT_KIND_SONG, SLOT_KIND_ARTIST, SLOT_KIND_ADDITIONAL)
+DEFAULT_CASING: dict[str, str] = {
+    SLOT_KIND_SONG: CASING_NONE,
+    SLOT_KIND_ARTIST: CASING_NONE,
+    SLOT_KIND_ADDITIONAL: CASING_NONE,
+}
 
 DEFAULT_SEPARATORS = (" - ", " - ", " - ")
 SLOT_COUNT = 4
@@ -63,9 +77,18 @@ class FilenameFormat:
 
     slots: list[FormatSlot] = field(default_factory=list)
     separators: list[str] = field(default_factory=lambda: list(DEFAULT_SEPARATORS))
+    casing: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_CASING))
 
     def __post_init__(self) -> None:
         self._normalize_shape()
+
+    def _normalize_casing(self) -> None:
+        normalized = dict(DEFAULT_CASING)
+        for kind in SLOT_KINDS:
+            mode = self.casing.get(kind, CASING_NONE)
+            if mode in CASING_MODES:
+                normalized[kind] = mode
+        self.casing = normalized
 
     def _normalize_shape(self) -> None:
         while len(self.slots) < SLOT_COUNT:
@@ -76,6 +99,7 @@ class FilenameFormat:
         while len(self.separators) < SEPARATOR_COUNT:
             self.separators.append(" - ")
         self.separators = self.separators[:SEPARATOR_COUNT]
+        self._normalize_casing()
 
     def enabled_slot_indices(self) -> list[int]:
         return [index for index, slot in enumerate(self.slots) if slot.enabled]
@@ -94,6 +118,7 @@ class FilenameFormat:
         return {
             "slots": [slot.to_dict() for slot in self.slots],
             "separators": list(self.separators),
+            "casing": dict(self.casing),
         }
 
     @classmethod
@@ -108,16 +133,24 @@ class FilenameFormat:
     def _from_new_dict(cls, data: dict[str, object]) -> FilenameFormat:
         raw_slots = data.get("slots", [])
         separators = data.get("separators", DEFAULT_SEPARATORS)
+        raw_casing = data.get("casing", {})
         slots: list[FormatSlot] = []
         if isinstance(raw_slots, list):
             for entry in raw_slots:
                 if isinstance(entry, dict):
                     slots.append(FormatSlot.from_dict(entry))
+        casing = dict(DEFAULT_CASING)
+        if isinstance(raw_casing, dict):
+            for kind in SLOT_KINDS:
+                mode = raw_casing.get(kind, CASING_NONE)
+                if mode in CASING_MODES:
+                    casing[kind] = str(mode)
         fmt = cls(
             slots=slots,
             separators=[str(sep) for sep in separators]
             if isinstance(separators, list)
             else list(DEFAULT_SEPARATORS),
+            casing=casing,
         )
         fmt._normalize_shape()
         return fmt
@@ -261,6 +294,30 @@ def finalize_filename(stem: str) -> str:
     return stem.strip().rstrip(". ")
 
 
+_TITLE_CASE_WORD = re.compile(r"([^\s-]+)")
+
+
+def apply_casing(value: str, mode: str) -> str:
+    """Apply a casing mode to *value*."""
+    if not value or mode == CASING_NONE:
+        return value
+    if mode == CASING_UPPER:
+        return value.upper()
+    if mode == CASING_TITLE:
+        return _TITLE_CASE_WORD.sub(
+            lambda match: match.group(1)[:1].upper() + match.group(1)[1:].lower(),
+            value,
+        )
+    return value
+
+
+def apply_slot_casing(value: str, kind: str, fmt: FilenameFormat) -> str:
+    """Apply the configured casing for *kind* to *value*."""
+    fmt._normalize_shape()
+    mode = fmt.casing.get(kind, CASING_NONE)
+    return apply_casing(value, mode)
+
+
 def compose_filename(slot_values: dict[int, str], fmt: FilenameFormat) -> str:
     """Build a filename stem from per-slot values and format configuration."""
     fmt._normalize_shape()
@@ -280,11 +337,19 @@ def compose_filename(slot_values: dict[int, str], fmt: FilenameFormat) -> str:
     if not included:
         return ""
 
-    result = sanitize_slot_value(included[0][1])
+    first_index, first_value = included[0]
+    first_slot = fmt.slots[first_index]
+    result = apply_slot_casing(
+        sanitize_slot_value(first_value),
+        first_slot.kind,
+        fmt,
+    )
     for position in range(1, len(included)):
         index = included[position][0]
+        slot = fmt.slots[index]
         separator = fmt.separators[index - 1] if index > 0 else " - "
-        result += separator + sanitize_slot_value(included[position][1])
+        value = apply_slot_casing(sanitize_slot_value(included[position][1]), slot.kind, fmt)
+        result += separator + value
 
     return finalize_filename(result)
 
@@ -381,9 +446,21 @@ def safe_rename(path: Path, new_stem: str) -> Path:
         raise RenameError("Filename cannot be empty.")
 
     target = path.with_name(cleaned + path.suffix)
-    if target.resolve() == path.resolve():
+    if target.name == path.name:
         return path
+
     if target.exists():
+        try:
+            same_file = os.path.samefile(target, path)
+        except OSError:
+            same_file = False
+        if same_file:
+            interim = path.with_name(f".karaoke-blast-rename-{uuid.uuid4().hex}{path.suffix}")
+            while interim.exists():
+                interim = path.with_name(f".karaoke-blast-rename-{uuid.uuid4().hex}{path.suffix}")
+            path.rename(interim)
+            interim.rename(target)
+            return target
         raise RenameError(f"A file named '{target.name}' already exists.")
 
     path.rename(target)
