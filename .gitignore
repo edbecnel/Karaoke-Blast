@@ -42,3 +42,6 @@ Thumbs.db
 
 #Obsidian
 .obsidian/*
+
+#Cursor
+.cursor/*
