@@ -212,6 +212,7 @@ class LibraryPanel(QWidget):
         header_row.addWidget(refresh_btn)
 
         video_types_btn = QPushButton("⚙")
+        self._video_types_btn = video_types_btn
         video_types_btn.setToolTip("Video types")
         video_types_btn.setFixedSize(28, 28)
         video_types_btn.setStyleSheet(_DISMISS_BTN_STYLE)
@@ -227,6 +228,12 @@ class LibraryPanel(QWidget):
         close_btn.clicked.connect(self.close_requested.emit)
         header_row.addWidget(close_btn)
         layout.addLayout(header_row)
+
+        self._video_type_label = QLabel("")
+        self._video_type_label.setStyleSheet(
+            "color: #ffb3c1; font-size: 12px; font-weight: bold; padding-left: 4px;"
+        )
+        layout.addWidget(self._video_type_label)
 
         self._search = VisibleSpaceLineEdit()
         self._search.setPlaceholderText("Search songs or YouTube…")
@@ -502,6 +509,18 @@ class LibraryPanel(QWidget):
             except OSError:
                 self._folder_btn.setToolTip(str(folder))
 
+    def set_active_video_type(self, name: str) -> None:
+        cleaned = name.strip()
+        if cleaned:
+            self._video_type_label.setText(cleaned)
+            self._video_types_btn.setToolTip(f"Video types ({cleaned})")
+        else:
+            self._video_type_label.clear()
+            self._video_types_btn.setToolTip("Video types")
+
+    def set_use_song_count_label(self, use_song_terminology: bool) -> None:
+        self._song_list.set_use_song_count_label(use_song_terminology)
+
     def set_recent_folders(self, folders: list[Path], *, pinned: list[Path] | None = None) -> None:
         self._song_list.set_recent_folders(folders, pinned=pinned)
 
@@ -532,6 +551,21 @@ class LibraryPanel(QWidget):
 
     def set_display_format(self, fmt: DisplayFormat) -> None:
         self._song_list.set_display_format(fmt)
+        self._queue_list.set_display_resolver(self._song_list.display_resolver())
+        self._history_list.set_display_resolver(self._song_list.display_resolver())
+
+    def set_media_display_context(
+        self,
+        *,
+        media_type_name: str,
+        field_labels: dict[str, str],
+        fmt: DisplayFormat | None = None,
+    ) -> None:
+        self._song_list.set_media_display_context(
+            media_type_name=media_type_name,
+            field_labels=field_labels,
+            fmt=fmt,
+        )
         self._queue_list.set_display_resolver(self._song_list.display_resolver())
         self._history_list.set_display_resolver(self._song_list.display_resolver())
 

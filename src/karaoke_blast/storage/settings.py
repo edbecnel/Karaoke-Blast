@@ -136,6 +136,7 @@ class Settings:
                 self.active_video_type_id = active_id.strip()
             if find_video_type(self.video_types, self.active_video_type_id) is None:
                 self.active_video_type_id = BUILTIN_SONGS_ID
+            self._migrate_legacy_display_formats()
             self._sync_legacy_fields_from_active_type()
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning("Could not load settings: %s", exc)
@@ -234,12 +235,20 @@ class Settings:
             self.active_video_type_id = BUILTIN_SONGS_ID
             self._sync_legacy_fields_from_active_type()
 
+    def _migrate_legacy_display_formats(self) -> None:
+        """Move the legacy global display format onto the Songs profile once."""
+        songs = find_video_type(self.video_types, BUILTIN_SONGS_ID)
+        if songs is None or songs.display_format is not None:
+            return
+        updated = songs.copy()
+        updated.display_format = self.song_display_format.copy()
+        self.update_video_type(updated)
+
     def _sync_legacy_fields_from_active_type(self) -> None:
         """Keep legacy single-format fields aligned with the active video type."""
         profile = self.get_active_video_type()
         self.filename_rename_format = profile.rename_format.copy()
-        self.metadata_comment_slot_indices = (
-            None
-            if profile.metadata_comment_slot_indices is None
-            else list(profile.metadata_comment_slot_indices)
-        )
+        mapping = profile.resolved_metadata_mapping()
+        description_slots = list(mapping.description_slots)
+        self.metadata_comment_slot_indices = description_slots or None
+        self.song_display_format = profile.resolved_display_format().copy()

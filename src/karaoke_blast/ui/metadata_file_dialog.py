@@ -25,14 +25,22 @@ from karaoke_blast.utils.filename_rename import (
     FilenameFormat,
     FormatSlot,
     SLOT_KIND_ADDITIONAL,
-    SLOT_KIND_ARTIST,
     SLOT_KIND_SONG,
-    apply_slot_casing,
     default_slot_values,
     fixed_slot_values,
     split_title,
 )
 from karaoke_blast.utils.media_metadata import MetadataError, write_tags
+from karaoke_blast.utils.metadata_field_mapping import (
+    MetadataFieldMapping,
+    VLC_FIELD_ALBUM,
+    VLC_FIELD_ARTIST,
+    VLC_FIELD_DESCRIPTION,
+    VLC_FIELD_TITLE,
+    default_metadata_mapping,
+    metadata_field_display_labels,
+    resolve_vlc_metadata,
+)
 
 _DIALOG_STYLE = """
 QDialog {
@@ -112,8 +120,6 @@ QLineEdit {
 }
 """
 
-_COMMENT_JOIN = "; "
-
 
 class MetadataResult(Enum):
     APPLIED = "applied"
@@ -129,6 +135,7 @@ class MetadataFileDialog(QDialog):
         path: Path,
         *,
         fmt: FilenameFormat,
+        metadata_field_mapping: MetadataFieldMapping | None = None,
         comment_slot_indices: list[int] | None = None,
         progress_label: str | None = None,
         auto_fill_slots: bool = False,
@@ -138,7 +145,13 @@ class MetadataFileDialog(QDialog):
         super().__init__(parent)
         self._path = path
         self._fmt = fmt.copy()
-        self._comment_slot_indices = list(comment_slot_indices or [])
+        if metadata_field_mapping is not None:
+            self._mapping = metadata_field_mapping.copy().normalize_for_format(self._fmt)
+        else:
+            self._mapping = default_metadata_mapping(
+                self._fmt,
+                legacy_comment_slot_indices=comment_slot_indices,
+            )
         self._auto_fill_slots = auto_fill_slots
         self._auto_filled_values = (
             default_slot_values(path.stem, self._fmt) if auto_fill_slots else {}
@@ -207,6 +220,11 @@ class MetadataFileDialog(QDialog):
         self._comment_preview.setWordWrap(True)
         layout.addWidget(self._comment_preview)
 
+        self._album_preview = QLabel()
+        self._album_preview.setStyleSheet(_PREVIEW_STYLE)
+        self._album_preview.setWordWrap(True)
+        layout.addWidget(self._album_preview)
+
         self._status_label = QLabel()
         self._status_label.setStyleSheet(_ERROR_STYLE)
         self._status_label.setWordWrap(True)
@@ -235,6 +253,9 @@ class MetadataFileDialog(QDialog):
 
     def format(self) -> FilenameFormat:
         return self._fmt
+
+    def _metadata_labels(self) -> dict[str, str]:
+        return metadata_field_display_labels(self._fmt, self._mapping)
 
     def _appendable_slot_indices(self) -> list[int]:
         return [
@@ -482,43 +503,42 @@ class MetadataFileDialog(QDialog):
     def _slot_values(self) -> dict[int, str]:
         return {index: field.text().strip() for index, field in self._slot_fields.items()}
 
-    def _resolved_title_artist_comment(self) -> tuple[str, str, str]:
-        values = self._slot_values()
-        title = ""
-        artist = ""
-        for index, slot in enumerate(self._fmt.slots):
-            if not slot.enabled:
-                continue
-            text = apply_slot_casing(values.get(index, "").strip(), slot.kind, self._fmt)
-            if slot.kind == SLOT_KIND_SONG:
-                title = text
-            elif slot.kind == SLOT_KIND_ARTIST:
-                artist = text
-
-        comment_parts: list[str] = []
-        for index in self._comment_slot_indices:
-            if index not in self._slot_fields:
-                continue
-            slot = self._fmt.slots[index]
-            text = apply_slot_casing(values.get(index, "").strip(), slot.kind, self._fmt)
-            if text and text not in comment_parts:
-                comment_parts.append(text)
-        comment = _COMMENT_JOIN.join(comment_parts)
-        return title, artist, comment
+    def _resolved_vlc_metadata(self) -> dict[str, str]:
+        return resolve_vlc_metadata(self._fmt, self._mapping, self._slot_values())
 
     def _update_preview(self, *_args) -> None:
-        title, artist, comment = self._resolved_title_artist_comment()
+        metadata = self._resolved_vlc_metadata()
+        title = metadata[VLC_FIELD_TITLE]
+        artist = metadata[VLC_FIELD_ARTIST]
+        description = metadata[VLC_FIELD_DESCRIPTION]
+        album = metadata[VLC_FIELD_ALBUM]
+        labels = self._metadata_labels()
+        normalized = self._mapping.normalize_for_format(self._fmt)
+
         self._title_preview.setStyleSheet(_PREVIEW_STYLE)
         self._artist_preview.setStyleSheet(_PREVIEW_STYLE)
         self._comment_preview.setStyleSheet(_PREVIEW_STYLE)
-        self._title_preview.setText(f"Title: {title or '(required)'}")
-        self._artist_preview.setText(f"Artist: {artist or '(none)'}")
-        if self._comment_slot_indices:
-            self._comment_preview.setText(f"Comment: {comment or '(empty)'}")
+        self._album_preview.setStyleSheet(_PREVIEW_STYLE)
+        self._title_preview.setText(
+            f"{labels[VLC_FIELD_TITLE]}: {title or '(required)'}"
+        )
+        self._artist_preview.setText(
+            f"{labels[VLC_FIELD_ARTIST]}: {artist or '(none)'}"
+        )
+        if normalized.description_slots:
+            self._comment_preview.setText(
+                f"{labels[VLC_FIELD_DESCRIPTION]}: {description or '(empty)'}"
+            )
             self._comment_preview.show()
         else:
-            self._comment_preview.setText("Comment: (no slots selected)")
-            self._comment_preview.show()
+            self._comment_preview.hide()
+        if normalized.album_slot is not None:
+            self._album_preview.setText(
+                f"{labels[VLC_FIELD_ALBUM]}: {album or '(empty)'}"
+            )
+            self._album_preview.show()
+        else:
+            self._album_preview.hide()
         self._status_label.hide()
         self._apply_button.setEnabled(bool(title))
 
@@ -527,15 +547,26 @@ class MetadataFileDialog(QDialog):
         self.accept()
 
     def _apply(self) -> None:
-        title, artist, comment = self._resolved_title_artist_comment()
+        metadata = self._resolved_vlc_metadata()
+        title = metadata[VLC_FIELD_TITLE]
         if not title:
             return
+        normalized = self._mapping.normalize_for_format(self._fmt)
         try:
             write_tags(
                 self._path,
                 title=title,
-                artist=artist,
-                comment=comment if self._comment_slot_indices else None,
+                artist=metadata[VLC_FIELD_ARTIST],
+                description=(
+                    metadata[VLC_FIELD_DESCRIPTION]
+                    if normalized.description_slots
+                    else None
+                ),
+                album=(
+                    metadata[VLC_FIELD_ALBUM]
+                    if normalized.album_slot is not None
+                    else None
+                ),
             )
         except MetadataError as exc:
             self._status_label.setText(str(exc))

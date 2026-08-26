@@ -1,4 +1,4 @@
-"""Dialog to configure metadata display format for song lists."""
+"""Dialog to configure metadata display format for library lists."""
 
 from __future__ import annotations
 
@@ -65,20 +65,24 @@ _HINT_STYLE = "color: #888; font-size: 11px; background: transparent;"
 
 
 class DisplayFormatDialog(QDialog):
-    """Edit order, enablement, and separators for title / artist / comments."""
+    """Edit order, enablement, and separators for VLC metadata display fields."""
 
     def __init__(
         self,
         fmt: DisplayFormat | None = None,
+        *,
+        media_type_name: str = "Media",
+        field_labels: dict[str, str] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Song display format")
+        self.setWindowTitle(f"{media_type_name} display format")
         self.setModal(True)
         self.setMinimumWidth(420)
         self.setStyleSheet(_DIALOG_STYLE)
 
         self._format = (fmt or DisplayFormat()).copy()
+        self._field_labels = dict(field_labels or {})
         self._building = False
         self._slot_rows_layout = QVBoxLayout()
         self._slot_rows_layout.setSpacing(4)
@@ -93,8 +97,9 @@ class DisplayFormatDialog(QDialog):
         layout.addWidget(title)
 
         hint = QLabel(
-            "Choose the order of song title, artist, and comments, and the "
-            "separators between them. Songs without a title still show the file name."
+            "Choose which embedded metadata fields appear in the list, their order, "
+            "and the separators between them. Items without a title still show the "
+            "file name."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet(_HINT_STYLE)
@@ -177,7 +182,7 @@ class DisplayFormatDialog(QDialog):
             )
             row.addWidget(enabled_box)
 
-            badge = QLabel(slot_kind_label(slot.kind))
+            badge = QLabel(slot_kind_label(slot.kind, self._field_labels))
             badge.setStyleSheet(_LABEL_STYLE)
             row.addWidget(badge, 1)
 
@@ -235,5 +240,5 @@ class DisplayFormatDialog(QDialog):
                 self._format.separators[index] = sep_field.text()
 
     def _update_preview(self) -> None:
-        preview = format_display_preview(self._format)
+        preview = format_display_preview(self._format, field_labels=self._field_labels)
         self._preview_label.setText(f"Preview: {preview}" if preview else "Preview: (none)")

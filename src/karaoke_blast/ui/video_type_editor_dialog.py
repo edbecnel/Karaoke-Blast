@@ -1,4 +1,4 @@
-"""Dialog for creating or editing a video type."""
+"""Dialog for creating or editing a media type."""
 
 from __future__ import annotations
 
@@ -14,7 +14,10 @@ from PyQt6.QtWidgets import (
 )
 
 from karaoke_blast.ui.format_config_widget import FormatConfigWidget
+from karaoke_blast.ui.metadata_mapping_widget import MetadataMappingWidget
 from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
+from karaoke_blast.utils.filename_rename import FilenameFormat
+from karaoke_blast.utils.metadata_field_mapping import default_metadata_mapping
 from karaoke_blast.utils.video_types import (
     VideoTypeProfile,
     create_custom_video_type,
@@ -66,7 +69,7 @@ QPushButton:hover {
 
 
 class VideoTypeEditorDialog(QDialog):
-    """Create or edit a video type name and rename format."""
+    """Create or edit a media type name, rename format, and metadata mapping."""
 
     def __init__(
         self,
@@ -79,7 +82,7 @@ class VideoTypeEditorDialog(QDialog):
         self._result_profile: VideoTypeProfile | None = None
         is_edit = profile is not None
 
-        self.setWindowTitle("Edit Video Type" if is_edit else "Add Video Type")
+        self.setWindowTitle("Edit Media Type" if is_edit else "Add Media Type")
         self.setModal(True)
         self.setMinimumWidth(560)
         self.setStyleSheet(_DIALOG_STYLE)
@@ -89,14 +92,14 @@ class VideoTypeEditorDialog(QDialog):
         layout.setSpacing(12)
 
         hint = QLabel(
-            "Configure slot labels, separators, and casing."
+            "Configure slot labels, separators, casing, and VLC metadata mapping."
             if is_edit
             else "Choose a name and configure the filename slots for this type."
         )
         if is_edit and profile is not None and profile.builtin:
             hint.setText(
                 "Built-in type names are read-only. "
-                "Slot labels, separators, and casing can be edited."
+                "Slot labels, separators, casing, and metadata mapping can be edited."
             )
         hint.setWordWrap(True)
         hint.setStyleSheet(_HINT_STYLE)
@@ -127,7 +130,17 @@ class VideoTypeEditorDialog(QDialog):
             else default_custom_format()
         )
         self._format_widget.set_format(initial_format)
+        self._format_widget.format_changed.connect(self._on_format_changed)
         layout.addWidget(self._format_widget)
+
+        self._mapping_widget = MetadataMappingWidget()
+        initial_mapping = (
+            profile.resolved_metadata_mapping()
+            if profile is not None
+            else default_metadata_mapping(initial_format)
+        )
+        self._mapping_widget.set_format_and_mapping(initial_format, initial_mapping)
+        layout.addWidget(self._mapping_widget)
 
         if profile is not None and profile.builtin:
             reset_row = QVBoxLayout()
@@ -154,12 +167,18 @@ class VideoTypeEditorDialog(QDialog):
     def profile(self) -> VideoTypeProfile | None:
         return self._result_profile.copy() if self._result_profile is not None else None
 
+    def _on_format_changed(self, fmt: FilenameFormat) -> None:
+        self._mapping_widget.set_format_and_mapping(
+            fmt,
+            self._mapping_widget.mapping().normalize_for_format(fmt),
+        )
+
     def _reset_builtin(self) -> None:
         if self._source is None or not self._source.builtin:
             return
         confirm = QMessageBox.question(
             self,
-            "Reset Video Type",
+            "Reset Media Type",
             f"Reset \"{self._source.name}\" to its factory default?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
@@ -168,6 +187,10 @@ class VideoTypeEditorDialog(QDialog):
             return
         restored = reset_builtin_video_type(self._source)
         self._format_widget.set_format(restored.rename_format.copy())
+        self._mapping_widget.set_format_and_mapping(
+            restored.rename_format,
+            restored.resolved_metadata_mapping(),
+        )
 
     def _accept(self) -> None:
         name = self._name_field.text().strip()
@@ -186,16 +209,24 @@ class VideoTypeEditorDialog(QDialog):
                 return
 
         self._error_label.hide()
+        mapping = self._mapping_widget.mapping()
+        description_slots = list(mapping.description_slots)
 
         if self._source is None:
             self._result_profile = create_custom_video_type(
                 name,
                 rename_format=rename_format,
             )
+            self._result_profile.metadata_field_mapping = mapping
+            self._result_profile.metadata_comment_slot_indices = (
+                description_slots or None
+            )
         else:
             updated = self._source.copy()
             if not updated.builtin:
                 updated.name = name
             updated.rename_format = rename_format
+            updated.metadata_field_mapping = mapping
+            updated.metadata_comment_slot_indices = description_slots or None
             self._result_profile = updated
         self.accept()

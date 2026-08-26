@@ -120,6 +120,40 @@ class FilenameFormat:
             return self.slots[index].label
         return "Song Name"
 
+    def metadata_field_labels(
+        self, comment_slot_indices: list[int] | None = None
+    ) -> tuple[str, str, str]:
+        """Return display labels for embedded title, artist, and comment fields."""
+        title_label = self.required_slot_label()
+        artist_label = "Artist Name"
+        for slot in self.slots:
+            if slot.kind == SLOT_KIND_ARTIST:
+                artist_label = slot.label
+                break
+
+        if comment_slot_indices:
+            comment_labels = [
+                self.slots[index].label
+                for index in comment_slot_indices
+                if 0 <= index < len(self.slots)
+            ]
+        else:
+            comment_labels = [
+                slot.label
+                for slot in self.slots
+                if slot.enabled and slot.kind == SLOT_KIND_ADDITIONAL
+            ]
+
+        if not comment_labels:
+            enabled = [slot for slot in self.slots if slot.enabled]
+            comment_label = enabled[2].label if len(enabled) >= 3 else "Comments"
+        elif len(comment_labels) == 1:
+            comment_label = comment_labels[0]
+        else:
+            comment_label = " / ".join(comment_labels)
+
+        return title_label, artist_label, comment_label
+
     def casing_label_for_kind(self, kind: str) -> str:
         """Return a display label for casing controls using configured slot labels."""
         enabled_labels = [

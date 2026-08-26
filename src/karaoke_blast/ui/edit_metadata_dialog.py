@@ -1,4 +1,4 @@
-"""Dialog to edit Title, Artist, and Comment tags on a single media file."""
+"""Dialog to edit Title, Artist, Description, and Album tags on a single media file."""
 
 from __future__ import annotations
 
@@ -11,17 +11,28 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QLabel,
     QMessageBox,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
 from karaoke_blast.utils.display import display_name
+from karaoke_blast.utils.filename_rename import DEFAULT_KARAOKE_FORMAT, FilenameFormat
 from karaoke_blast.utils.media_metadata import (
     MetadataError,
     read_tags,
     supports_metadata,
     write_tags,
+)
+from karaoke_blast.utils.metadata_field_mapping import (
+    MetadataFieldMapping,
+    VLC_FIELD_ALBUM,
+    VLC_FIELD_ARTIST,
+    VLC_FIELD_DESCRIPTION,
+    VLC_FIELD_TITLE,
+    default_metadata_mapping,
+    metadata_field_display_labels,
 )
 
 _DIALOG_STYLE = """
@@ -48,6 +59,7 @@ _LABEL_STYLE = "color: #ccc; font-size: 12px; background: transparent;"
 _FILE_STYLE = "color: white; font-size: 13px; background: transparent;"
 _HINT_STYLE = "color: #888; font-size: 11px; background: transparent;"
 _STATUS_STYLE = "color: #ff6b81; font-size: 12px; background: transparent;"
+_FIELD_MIN_WIDTH = 420
 
 _BUTTON_STYLE = """
 QPushButton {
@@ -88,14 +100,35 @@ QPushButton:disabled {
 
 
 class EditMetadataDialog(QDialog):
-    """Edit embedded Title, Artist, and Comments for one file."""
+    """Edit embedded Title, Artist, Description, and Album for one file."""
 
-    def __init__(self, path: Path, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        fmt: FilenameFormat | None = None,
+        metadata_field_mapping: MetadataFieldMapping | None = None,
+        comment_slot_indices: list[int] | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self._path = path
+        self._fmt = (fmt if fmt is not None else DEFAULT_KARAOKE_FORMAT).copy()
+        if metadata_field_mapping is not None:
+            self._mapping = metadata_field_mapping.copy().normalize_for_format(self._fmt)
+        else:
+            self._mapping = default_metadata_mapping(
+                self._fmt,
+                legacy_comment_slot_indices=comment_slot_indices,
+            )
+        labels = metadata_field_display_labels(self._fmt, self._mapping)
+        self._title_label_text = labels[VLC_FIELD_TITLE]
+        self._artist_label_text = labels[VLC_FIELD_ARTIST]
+        self._description_label_text = labels[VLC_FIELD_DESCRIPTION]
+        self._album_label_text = labels[VLC_FIELD_ALBUM]
         self.setWindowTitle("Edit Metadata")
         self.setModal(True)
-        self.setMinimumWidth(440)
+        self.setMinimumWidth(640)
         self.setStyleSheet(_DIALOG_STYLE)
 
         layout = QVBoxLayout(self)
@@ -115,27 +148,33 @@ class EditMetadataDialog(QDialog):
         form = QFormLayout()
         form.setSpacing(8)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        form.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow
+        )
 
-        self._title_field = VisibleSpaceLineEdit()
-        self._title_field.setStyleSheet(_FIELD_STYLE)
-        self._title_field.setPlaceholderText("Song title (required)")
-        title_label = QLabel("Song Title")
+        self._title_field = self._make_field()
+        self._title_field.setPlaceholderText(self._title_label_text)
+        title_label = QLabel(self._title_label_text)
         title_label.setStyleSheet(_LABEL_STYLE)
         form.addRow(title_label, self._title_field)
 
-        self._artist_field = VisibleSpaceLineEdit()
-        self._artist_field.setStyleSheet(_FIELD_STYLE)
-        self._artist_field.setPlaceholderText("Artist name")
-        artist_label = QLabel("Artist Name")
+        self._artist_field = self._make_field()
+        self._artist_field.setPlaceholderText(self._artist_label_text)
+        artist_label = QLabel(self._artist_label_text)
         artist_label.setStyleSheet(_LABEL_STYLE)
         form.addRow(artist_label, self._artist_field)
 
-        self._comment_field = VisibleSpaceLineEdit()
-        self._comment_field.setStyleSheet(_FIELD_STYLE)
-        self._comment_field.setPlaceholderText("Comments")
-        comment_label = QLabel("Comments")
-        comment_label.setStyleSheet(_LABEL_STYLE)
-        form.addRow(comment_label, self._comment_field)
+        self._description_field = self._make_field()
+        self._description_field.setPlaceholderText(self._description_label_text)
+        description_label = QLabel(self._description_label_text)
+        description_label.setStyleSheet(_LABEL_STYLE)
+        form.addRow(description_label, self._description_field)
+
+        self._album_field = self._make_field()
+        self._album_field.setPlaceholderText(self._album_label_text)
+        self._album_label = QLabel(self._album_label_text)
+        self._album_label.setStyleSheet(_LABEL_STYLE)
+        form.addRow(self._album_label, self._album_field)
 
         layout.addLayout(form)
 
@@ -165,6 +204,16 @@ class EditMetadataDialog(QDialog):
 
         self._load_tags()
 
+    def _make_field(self) -> VisibleSpaceLineEdit:
+        field = VisibleSpaceLineEdit()
+        field.setStyleSheet(_FIELD_STYLE)
+        field.setMinimumWidth(_FIELD_MIN_WIDTH)
+        field.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        return field
+
     def _load_tags(self) -> None:
         if not supports_metadata(self._path):
             suffix = self._path.suffix or "(no extension)"
@@ -174,7 +223,8 @@ class EditMetadataDialog(QDialog):
             self._status.show()
             self._title_field.setEnabled(False)
             self._artist_field.setEnabled(False)
-            self._comment_field.setEnabled(False)
+            self._description_field.setEnabled(False)
+            self._album_field.setEnabled(False)
             if self._save_btn is not None:
                 self._save_btn.setEnabled(False)
             return
@@ -188,12 +238,13 @@ class EditMetadataDialog(QDialog):
             return
         self._title_field.setText(tags.title)
         self._artist_field.setText(tags.artist)
-        self._comment_field.setText(tags.comment)
+        self._description_field.setText(tags.comment)
+        self._album_field.setText(tags.album)
 
     def _on_save(self) -> None:
         title = self._title_field.text().strip()
         if not title:
-            self._status.setText("Song Title cannot be empty.")
+            self._status.setText(f"{self._title_label_text} cannot be empty.")
             self._status.show()
             self._title_field.setFocus()
             return
@@ -202,7 +253,8 @@ class EditMetadataDialog(QDialog):
                 self._path,
                 title=title,
                 artist=self._artist_field.text().strip(),
-                comment=self._comment_field.text().strip(),
+                description=self._description_field.text().strip(),
+                album=self._album_field.text().strip(),
             )
         except MetadataError as exc:
             QMessageBox.warning(self, "Could not save metadata", str(exc))

@@ -356,7 +356,7 @@ class SongListPanel(QWidget):
         self._metadata_btn = QPushButton("Metadata")
         self._metadata_btn.setCheckable(True)
         self._metadata_btn.setToolTip(
-            "Show song title, artist, and comments from file metadata instead of the file name"
+            "Show embedded metadata fields instead of the file name"
         )
         self._metadata_btn.setStyleSheet(
             "QPushButton { background-color: #2d2d42; color: #b8b8c8; border: 1px solid #5a5a72;"
@@ -484,6 +484,9 @@ class SongListPanel(QWidget):
         self._queue_section_ratio: float | None = None
         self._display_mode = DISPLAY_MODE_FILENAME
         self._display_format = DEFAULT_DISPLAY_FORMAT.copy()
+        self._media_type_name = "Songs"
+        self._display_field_labels: dict[str, str] = {}
+        self._use_song_count_label = True
         self._tag_cache = TagCache()
         self._list.set_display_resolver(self._leaf_label)
         if not embedded:
@@ -555,11 +558,43 @@ class SongListPanel(QWidget):
         self._display_format = fmt.copy()
         self._refresh_display_labels()
 
+    def set_media_display_context(
+        self,
+        *,
+        media_type_name: str,
+        field_labels: dict[str, str],
+        fmt: DisplayFormat | None = None,
+    ) -> None:
+        self._media_type_name = media_type_name.strip() or "Media"
+        self._display_field_labels = dict(field_labels)
+        if fmt is not None:
+            self._display_format = fmt.copy()
+        self._refresh_display_labels()
+
     def display_mode(self) -> str:
         return self._display_mode
 
     def display_format(self) -> DisplayFormat:
         return self._display_format.copy()
+
+    def set_use_song_count_label(self, use_song_terminology: bool) -> None:
+        if self._use_song_count_label == use_song_terminology:
+            return
+        self._use_song_count_label = use_song_terminology
+        if self._paths:
+            self._apply_filter()
+
+    def _format_item_count(self, count: int) -> str:
+        if self._use_song_count_label:
+            return f"{count} song{'s' if count != 1 else ''}"
+        return f"{count} entr{'y' if count == 1 else 'ies'}"
+
+    def _format_item_count_range(self, visible: int, total: int) -> str:
+        if self._use_song_count_label:
+            noun = "song" if total == 1 else "songs"
+            return f"{visible} of {total} {noun}"
+        noun = "entry" if total == 1 else "entries"
+        return f"{visible} of {total} {noun}"
 
     def _leaf_label(self, path: Path) -> str:
         return song_display_label(
@@ -578,7 +613,12 @@ class SongListPanel(QWidget):
         self.display_mode_changed.emit(mode)
 
     def _open_display_format_dialog(self) -> None:
-        dialog = DisplayFormatDialog(self._display_format, parent=self)
+        dialog = DisplayFormatDialog(
+            self._display_format,
+            media_type_name=self._media_type_name,
+            field_labels=self._display_field_labels,
+            parent=self,
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         self._display_format = dialog.format()
@@ -935,7 +975,11 @@ class SongListPanel(QWidget):
         menu.setStyleSheet(CONTEXT_MENU_STYLE)
 
         play_now = QAction("Play Now", self)
-        play_now.triggered.connect(lambda: self.song_selected.emit(index))
+        if 0 <= index < len(self._paths):
+            path = self._paths[index]
+            play_now.triggered.connect(lambda _checked=False, p=path: self.play_path_requested.emit(p))
+        else:
+            play_now.triggered.connect(lambda: self.song_selected.emit(index))
         menu.addAction(play_now)
 
         play_next = QAction("Play Next", self)
@@ -1270,9 +1314,9 @@ class SongListPanel(QWidget):
                 )
 
         if query:
-            song_part = f"{visible} of {total} song{'s' if total != 1 else ''}"
+            song_part = self._format_item_count_range(visible, total)
         else:
-            song_part = f"{total} song{'s' if total != 1 else ''}"
+            song_part = self._format_item_count(total)
 
         if folder_part:
             self._count_label.setText(f"{folder_part} · {song_part}")

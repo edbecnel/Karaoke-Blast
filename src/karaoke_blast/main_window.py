@@ -45,7 +45,7 @@ from karaoke_blast.ui.recent_folders_panel import RecentFoldersPanel
 from karaoke_blast.ui.video_type_selector import VideoTypeSelectorWidget
 from karaoke_blast.ui.video_types_manager_dialog import VideoTypesManagerDialog
 from karaoke_blast.ui.youtube_downloads_folder_row import YouTubeDownloadsFolderRow
-from karaoke_blast.utils.video_types import VideoTypeProfile
+from karaoke_blast.utils.video_types import BUILTIN_SONGS_ID, VideoTypeProfile
 from karaoke_blast.ui.library_panel import (
     PANEL_DEFAULT_WIDTH,
     PANEL_MAX_WIDTH,
@@ -54,7 +54,11 @@ from karaoke_blast.ui.library_panel import (
 )
 from karaoke_blast.utils.display import display_name
 from karaoke_blast.utils.resources import logo_default_window_size
-from karaoke_blast.utils.song_display import DisplayFormat, song_matches_query
+from karaoke_blast.utils.song_display import (
+    DisplayFormat,
+    display_field_labels_from_mapping,
+    song_matches_query,
+)
 from karaoke_blast.utils.video_scanner import (
     MEDIA_EXTENSIONS,
     child_folders_with_videos,
@@ -446,8 +450,10 @@ class MainWindow(QWidget):
             self._open_video_types_manager
         )
         self._library_panel.set_downloads_folder(self._youtube_downloads_path())
-        self._library_panel.set_display_format(self._settings.song_display_format)
         self._library_panel.set_display_mode(self._settings.song_display_mode)
+        self._sync_library_display_format()
+        self._sync_library_video_type_label()
+        self._sync_library_list_count_labels()
 
         self._video_container = QWidget()
         self._video_container.setStyleSheet("background-color: black;")
@@ -640,7 +646,11 @@ class MainWindow(QWidget):
         self._resort_by_display_name()
 
     def _on_song_display_format_changed(self, fmt: DisplayFormat) -> None:
-        self._settings.song_display_format = fmt
+        profile = self._settings.get_active_video_type()
+        updated = profile.copy()
+        updated.display_format = fmt.copy()
+        self._settings.update_video_type(updated)
+        self._settings.song_display_format = fmt.copy()
         self._settings.save()
         self._resort_by_display_name()
 
@@ -1091,7 +1101,7 @@ class MainWindow(QWidget):
         self._update_queue_display(include_now_playing=False)
         if not self._ensure_vlc():
             return
-        self._play_current()
+        self._play_current(interrupt=True)
 
     def _on_queue_all_requested(self) -> None:
         if self._browse_folder is None:
@@ -1189,6 +1199,9 @@ class MainWindow(QWidget):
         self._media_mode = MediaSourceMode.LOCAL
         self._canvas_stack.setCurrentWidget(self._video_widget)
         self._controls.set_media_mode(MediaSourceMode.LOCAL)
+        self._stack.setCurrentWidget(self._player_page)
+        self.showFullScreen()
+        self._sync_fullscreen_control()
         if self._vlc is not None:
             self._vlc.bind_output()
         self._reposition_video_ui()
@@ -1245,12 +1258,21 @@ class MainWindow(QWidget):
             return self._youtube_stopped and self._current_youtube is None
         return self._stopped and self._external_path is None
 
-    def _play_queue_item(self, item: QueueItem) -> None:
+    def _enqueue_interrupted_playback(self, incoming: QueueItem) -> None:
+        current = self._current_playing_queue_item()
+        if current is not None and current.key() != incoming.key():
+            if not self._mixed_queue.contains(current):
+                self._mixed_queue.prepend(current)
+        self._mixed_queue.remove(incoming)
+
+    def _play_queue_item(self, item: QueueItem, *, interrupt: bool = False) -> None:
+        if interrupt:
+            self._enqueue_interrupted_playback(item)
         if item.kind == "youtube" and item.video is not None:
-            self._play_youtube(item.video)
+            self._play_youtube(item.video, interrupt=False)
             return
         if item.kind == "local" and item.path is not None:
-            self._play_local_path(item.path)
+            self._play_local_path(item.path, interrupt=False)
 
     def _queue_item(self, item: QueueItem) -> None:
         if self._mixed_queue.contains(item):
@@ -1276,7 +1298,7 @@ class MainWindow(QWidget):
         return "item"
 
     def _on_queue_item_play_requested(self, item: QueueItem) -> None:
-        self._play_queue_item(item)
+        self._play_queue_item(item, interrupt=True)
 
     def _on_queue_item_queue_requested(self, item: QueueItem) -> None:
         self._queue_item(item)
@@ -1321,9 +1343,12 @@ class MainWindow(QWidget):
             label_root=self._folder,
         )
 
-    def _play_youtube(self, video: YouTubeVideo) -> None:
+    def _play_youtube(self, video: YouTubeVideo, *, interrupt: bool = True) -> None:
         if not self._ensure_youtube():
             return
+        incoming = QueueItem(kind="youtube", video=video)
+        if interrupt:
+            self._enqueue_interrupted_playback(incoming)
         self._prepare_youtube_playback()
         self._show_side_panel()
         self._current_youtube = video
@@ -1395,13 +1420,15 @@ class MainWindow(QWidget):
         logger.warning("YouTube playback error: %s", message)
         self._show_toast(message, duration_ms=5000)
 
-    def _play_current(self) -> None:
+    def _play_current(self, *, interrupt: bool = False) -> None:
         if self._vlc is None:
             return
         current = self._playlist.current()
         if current is None:
             self._show_end_of_playlist()
             return
+        if interrupt:
+            self._enqueue_interrupted_playback(QueueItem(kind="local", path=current))
         if not _is_playable_file(current):
             logger.warning("File not found, skipping: %s", current)
             self._show_toast(
@@ -1435,17 +1462,20 @@ class MainWindow(QWidget):
         self._start_seek_updates()
         self._raise_ui_layers()
 
-    def _play_local_path(self, path: Path) -> None:
+    def _play_local_path(self, path: Path, *, interrupt: bool = True) -> None:
         if not self._ensure_vlc():
             return
         if not _is_playable_file(path):
             self._handle_missing_local_path(path)
             return
+        incoming = QueueItem(kind="local", path=path)
+        if interrupt:
+            self._enqueue_interrupted_playback(incoming)
         self._prepare_local_playback(stop_youtube=True)
         index = self._playlist_index_for_path(path)
         if index is not None:
             self._playlist.go_to(index)
-            self._play_current()
+            self._play_current(interrupt=False)
             return
         self._stopped = False
         self._external_path = path
@@ -1592,16 +1622,20 @@ class MainWindow(QWidget):
         self._downloading_video = None
 
     def _on_song_selected(self, index: int) -> None:
-        if self._vlc is None:
+        if not self._ensure_vlc():
             return
         self._playlist.go_to(index)
-        self._play_current()
+        self._play_current(interrupt=True)
 
     def _on_startup_video_type_changed(self, profile: object) -> None:
         if not isinstance(profile, VideoTypeProfile):
             return
         self._settings.set_active_video_type_id(profile.id)
         self._settings.save()
+        self._sync_library_video_type_label()
+        self._sync_library_list_count_labels()
+        self._sync_library_display_format()
+        self._sync_ready_to_play_prompt()
 
     def _on_startup_video_types_changed(self, profiles: object) -> None:
         if not isinstance(profiles, list):
@@ -1614,6 +1648,37 @@ class MainWindow(QWidget):
             self._startup_video_type_selector.active_id()
         )
         self._settings.save()
+        self._sync_library_video_type_label()
+        self._sync_library_list_count_labels()
+        self._sync_library_display_format()
+        self._sync_ready_to_play_prompt()
+
+    def _sync_library_video_type_label(self) -> None:
+        if not hasattr(self, "_library_panel"):
+            return
+        self._library_panel.set_active_video_type(
+            self._settings.get_active_video_type().name
+        )
+
+    def _sync_library_display_format(self) -> None:
+        if not hasattr(self, "_library_panel"):
+            return
+        profile = self._settings.get_active_video_type()
+        self._library_panel.set_media_display_context(
+            media_type_name=profile.name,
+            field_labels=display_field_labels_from_mapping(
+                profile.resolved_metadata_mapping(),
+                rename_format=profile.rename_format,
+            ),
+            fmt=profile.resolved_display_format(),
+        )
+
+    def _sync_library_list_count_labels(self) -> None:
+        if not hasattr(self, "_library_panel"):
+            return
+        self._library_panel.set_use_song_count_label(
+            self._settings.active_video_type_id == BUILTIN_SONGS_ID
+        )
 
     def _sync_startup_video_type_selector(self) -> None:
         if not hasattr(self, "_startup_video_type_selector"):
@@ -1642,6 +1707,10 @@ class MainWindow(QWidget):
             profile.metadata_comment_slot_indices = list(comment_slot_indices)
         self._settings.update_video_type(profile)
         self._sync_startup_video_type_selector()
+        self._sync_library_video_type_label()
+        self._sync_library_list_count_labels()
+        self._sync_library_display_format()
+        self._sync_ready_to_play_prompt()
         self._settings.save()
 
     def _open_video_types_manager(self) -> None:
@@ -1699,7 +1768,6 @@ class MainWindow(QWidget):
                 video_types=dialog.video_types(),
                 active_video_type_id=dialog.active_video_type_id(),
                 rename_format=dialog.format(),
-                comment_slot_indices=dialog.comment_slot_indices(),
             )
             self._settings.metadata_skip_tagged = dialog.skip_tagged()
             self._settings.metadata_auto_fill_slots = dialog.auto_fill_slots()
@@ -1740,31 +1808,35 @@ class MainWindow(QWidget):
     def _on_edit_metadata_requested(self, path: object) -> None:
         if not isinstance(path, Path):
             return
-        dialog = EditMetadataDialog(path, parent=self)
+        profile = self._settings.get_active_video_type()
+        dialog = EditMetadataDialog(
+            path,
+            fmt=profile.rename_format,
+            metadata_field_mapping=profile.resolved_metadata_mapping(),
+            parent=self,
+        )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._library_panel.refresh_display_labels()
 
     def _on_file_renamed(self, old_path: Path, new_path: Path) -> None:
-        try:
-            old_resolved = old_path.resolve()
-            new_resolved = new_path.resolve()
-        except OSError:
-            old_resolved = old_path
-            new_resolved = new_path
+        old_resolved = _resolved_path(old_path)
 
-        self._raw_paths = [
-            new_path if path.resolve() == old_resolved else path for path in self._raw_paths
-        ]
+        def matches_old(path: Path) -> bool:
+            return _resolved_path(path) == old_resolved
+
+        def remap(path: Path) -> Path:
+            return new_path if matches_old(path) else path
+
+        self._raw_paths = [remap(path) for path in self._raw_paths]
+        self._library_paths = [remap(path) for path in self._library_paths]
 
         if self._folder is not None:
             queue = self._folder_queues.get_queue(self._folder)
             current = self._folder_queues.get_current(self._folder)
-            updated_queue = [
-                new_path if path.resolve() == old_resolved else path for path in queue
-            ]
+            updated_queue = [remap(path) for path in queue]
             updated_current = (
                 new_path
-                if current is not None and current.resolve() == old_resolved
+                if current is not None and matches_old(current)
                 else current
             )
             self._folder_queues.set(
@@ -1773,38 +1845,77 @@ class MainWindow(QWidget):
                 current=updated_current,
             )
 
-        self._library_paths = [
-            new_path if path.resolve() == old_resolved else path for path in self._library_paths
-        ]
+        self._mixed_queue.rename_local(old_path, new_path)
+
+        if self._external_path is not None and matches_old(self._external_path):
+            self._external_path = new_path
+
+        if (
+            self._current_queue_item is not None
+            and self._current_queue_item.kind == "local"
+            and self._current_queue_item.path is not None
+            and matches_old(self._current_queue_item.path)
+        ):
+            self._current_queue_item = QueueItem(kind="local", path=new_path)
+
         self._play_history.rename_local(old_path, new_path)
 
-        if not any(path.resolve() == old_resolved for path in self._playlist.paths):
-            return
+        playlist_updated = any(matches_old(path) for path in self._playlist.paths)
+        if playlist_updated:
+            current = self._playlist.current()
+            keep_path = (
+                new_path
+                if current is not None and matches_old(current)
+                else current
+            )
+            updated_paths = [remap(path) for path in self._playlist.paths]
+            sorted_paths = self._sort_paths(updated_paths)
+            self._playlist.reorder(sorted_paths, keep_path=keep_path)
+            subfolders = (
+                []
+                if self._recursive_list_mode or self._browse_folder is None
+                else child_folders_with_videos(self._browse_folder)
+            )
+            self._library_panel.set_songs(
+                self._playlist.paths,
+                current_index=self._playlist.index,
+                clear_search=False,
+                subfolders=subfolders,
+                can_navigate_up=self._can_navigate_up(),
+                recursive_list_mode=self._recursive_list_mode,
+                label_root=self._browse_folder if self._recursive_list_mode else None,
+            )
 
-        current = self._playlist.current()
-        keep_path = new_path if current is not None and current.resolve() == old_resolved else current
-        old_paths = list(self._playlist.paths)
-        updated_paths = [
-            new_path if path.resolve() == old_resolved else path for path in self._playlist.paths
-        ]
-        sorted_paths = self._sort_paths(updated_paths)
-        self._playlist.reorder(sorted_paths, keep_path=keep_path)
-        subfolders = (
-            []
-            if self._recursive_list_mode or self._browse_folder is None
-            else child_folders_with_videos(self._browse_folder)
-        )
-        self._library_panel.set_songs(
-            self._playlist.paths,
-            current_index=self._playlist.index,
-            clear_search=False,
-            subfolders=subfolders,
-            can_navigate_up=self._can_navigate_up(),
-            recursive_list_mode=self._recursive_list_mode,
-            label_root=self._browse_folder if self._recursive_list_mode else None,
-        )
+        search_text = self._library_panel.local_search_text().strip()
+        if search_text:
+            self._on_local_search_changed(search_text)
+        elif (
+            not playlist_updated
+            and self._recursive_list_mode
+            and self._browse_folder is not None
+            and any(matches_old(path) for path in self._raw_paths)
+        ):
+            sorted_paths = self._sort_paths(self._raw_paths)
+            self._library_panel.set_songs(
+                sorted_paths,
+                current_index=self._playlist.index if self._external_path is None else None,
+                clear_search=False,
+                subfolders=[],
+                can_navigate_up=False,
+                recursive_list_mode=True,
+                label_root=self._browse_folder,
+            )
+
         self._update_queue_display()
         self._update_history_display()
+
+        if not self._stopped and self._media_mode == MediaSourceMode.LOCAL:
+            playing = self._external_path or self._playlist.current()
+            if playing is not None and _resolved_path(playing) == _resolved_path(new_path):
+                if self._external_path is not None:
+                    self._show_overlay_for_path(new_path)
+                else:
+                    self._show_overlay()
 
     def _sort_paths(
         self,
@@ -1914,7 +2025,28 @@ class MainWindow(QWidget):
         self._overlay.hide()
 
     def _show_ready_to_play(self) -> None:
-        self._show_status_message("Select a song to play")
+        if self._settings.active_video_type_id == BUILTIN_SONGS_ID:
+            message = "Select a song to play"
+        else:
+            message = "Select a video or audio to play"
+        self._show_status_message(message)
+
+    def _sync_ready_to_play_prompt(self) -> None:
+        """Refresh the idle prompt when the active media type changes."""
+        if not self._is_idle():
+            return
+        if self._media_mode != MediaSourceMode.LOCAL:
+            return
+        if self._canvas_stack.currentWidget() != self._message_page:
+            return
+        current = self._message_label.text().strip()
+        ready_messages = {
+            "Select a song to play",
+            "Select a video or audio to play",
+        }
+        if current not in ready_messages:
+            return
+        self._show_ready_to_play()
 
     def _show_end_of_playlist(self) -> None:
         if self._vlc is not None:

@@ -108,7 +108,7 @@ class VideoTypesManagerDialog(QDialog):
         self._video_types = [profile.copy() for profile in video_types]
         self._active_id = active_id
 
-        self.setWindowTitle("Video Types")
+        self.setWindowTitle("Media Types")
         self.setModal(True)
         self.setMinimumSize(480, 420)
         self.setStyleSheet(_DIALOG_STYLE)
@@ -320,7 +320,7 @@ class VideoTypesManagerDialog(QDialog):
             return
         confirm = QMessageBox.question(
             self,
-            "Delete Video Type",
+            "Delete Media Type",
             f"Delete the custom type \"{profile.name}\"?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
@@ -339,7 +339,7 @@ class VideoTypesManagerDialog(QDialog):
             return
         confirm = QMessageBox.question(
             self,
-            "Reset Video Type",
+            "Reset Media Type",
             f"Reset \"{profile.name}\" to its factory default?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,

@@ -128,6 +128,40 @@ def resolve_ffmpeg_location() -> str | None:
     return None
 
 
+def _ffprobe_binary_names() -> tuple[str, ...]:
+    return ("ffprobe.exe", "ffprobe") if sys.platform == "win32" else ("ffprobe",)
+
+
+def resolve_ffprobe_location() -> str | None:
+    """Return an ffprobe binary path, usually alongside ffmpeg."""
+    for name in _ffprobe_binary_names():
+        found = shutil.which(name)
+        if found:
+            return found
+
+    ffmpeg = resolve_ffmpeg_location()
+    if ffmpeg is not None:
+        for name in _ffprobe_binary_names():
+            candidate = Path(ffmpeg).with_name(name)
+            if candidate.is_file():
+                return str(candidate)
+
+    extra_dirs = _ffmpeg_search_dirs()
+    if extra_dirs:
+        for name in _ffprobe_binary_names():
+            found = shutil.which(name, path=os.pathsep.join(extra_dirs))
+            if found:
+                return found
+
+    for directory in extra_dirs:
+        for name in _ffprobe_binary_names():
+            candidate = Path(directory) / name
+            if candidate.is_file():
+                return str(candidate)
+
+    return None
+
+
 def _win_vlc_dir_from_registry() -> Path | None:
     if sys.platform != "win32":
         return None

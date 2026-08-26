@@ -1,4 +1,4 @@
-"""Song list display labels from filename or embedded metadata."""
+"""Library list display labels from filename or embedded metadata."""
 
 from __future__ import annotations
 
@@ -7,24 +7,49 @@ from pathlib import Path
 
 from karaoke_blast.utils.display import display_name
 from karaoke_blast.utils.media_metadata import MediaTags, MetadataError, read_tags
+from karaoke_blast.utils.metadata_field_mapping import (
+    MetadataFieldMapping,
+    VLC_FIELD_ALBUM,
+    VLC_FIELD_ARTIST,
+    VLC_FIELD_DESCRIPTION,
+    VLC_FIELD_TITLE,
+    metadata_field_display_labels,
+)
 
 DISPLAY_MODE_FILENAME = "filename"
 DISPLAY_MODE_METADATA = "metadata"
 
 SLOT_KIND_TITLE = "title"
 SLOT_KIND_ARTIST = "artist"
+SLOT_KIND_DESCRIPTION = "description"
+SLOT_KIND_ALBUM = "album"
+# Legacy persisted value for the description slot.
 SLOT_KIND_COMMENT = "comment"
 
-SLOT_KINDS = (SLOT_KIND_TITLE, SLOT_KIND_ARTIST, SLOT_KIND_COMMENT)
-SLOT_COUNT = 3
-SEPARATOR_COUNT = 2
-DEFAULT_SEPARATORS = (" - ", " - ")
+SLOT_KINDS = (
+    SLOT_KIND_TITLE,
+    SLOT_KIND_ARTIST,
+    SLOT_KIND_DESCRIPTION,
+    SLOT_KIND_ALBUM,
+)
+SLOT_COUNT = 4
+SEPARATOR_COUNT = 3
+DEFAULT_SEPARATORS = (" - ", " - ", " - ")
 
-_KIND_LABELS = {
-    SLOT_KIND_TITLE: "Song title",
+_DEFAULT_FIELD_LABELS = {
+    SLOT_KIND_TITLE: "Title",
     SLOT_KIND_ARTIST: "Artist",
-    SLOT_KIND_COMMENT: "Comments",
+    SLOT_KIND_DESCRIPTION: "Description",
+    SLOT_KIND_ALBUM: "Album",
 }
+
+
+def _normalize_slot_kind(kind: str) -> str:
+    if kind == SLOT_KIND_COMMENT:
+        return SLOT_KIND_DESCRIPTION
+    if kind in SLOT_KINDS:
+        return kind
+    return SLOT_KIND_TITLE
 
 
 @dataclass
@@ -39,15 +64,13 @@ class DisplaySlot:
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> DisplaySlot:
-        kind = str(data.get("kind", SLOT_KIND_TITLE))
-        if kind not in SLOT_KINDS:
-            kind = SLOT_KIND_TITLE
+        kind = _normalize_slot_kind(str(data.get("kind", SLOT_KIND_TITLE)))
         return cls(kind=kind, enabled=bool(data.get("enabled", True)))
 
 
 @dataclass
 class DisplayFormat:
-    """Reorderable title / artist / comment slots with separators."""
+    """Reorderable VLC metadata slots with separators."""
 
     slots: list[DisplaySlot] = field(default_factory=list)
     separators: list[str] = field(default_factory=lambda: list(DEFAULT_SEPARATORS))
@@ -56,13 +79,18 @@ class DisplayFormat:
         self._normalize_shape()
 
     def _normalize_shape(self) -> None:
-        by_kind = {slot.kind: slot for slot in self.slots if slot.kind in SLOT_KINDS}
+        by_kind = {
+            _normalize_slot_kind(slot.kind): slot
+            for slot in self.slots
+            if _normalize_slot_kind(slot.kind) in SLOT_KINDS
+        }
         ordered: list[DisplaySlot] = []
         seen: set[str] = set()
         for slot in self.slots:
-            if slot.kind in SLOT_KINDS and slot.kind not in seen:
-                ordered.append(DisplaySlot(slot.kind, enabled=slot.enabled))
-                seen.add(slot.kind)
+            kind = _normalize_slot_kind(slot.kind)
+            if kind in SLOT_KINDS and kind not in seen:
+                ordered.append(DisplaySlot(kind, enabled=slot.enabled))
+                seen.add(kind)
         for kind in SLOT_KINDS:
             if kind not in seen:
                 existing = by_kind.get(kind)
@@ -110,23 +138,65 @@ DEFAULT_DISPLAY_FORMAT = DisplayFormat(
     slots=[
         DisplaySlot(SLOT_KIND_TITLE, enabled=True),
         DisplaySlot(SLOT_KIND_ARTIST, enabled=True),
-        DisplaySlot(SLOT_KIND_COMMENT, enabled=True),
+        DisplaySlot(SLOT_KIND_DESCRIPTION, enabled=True),
+        DisplaySlot(SLOT_KIND_ALBUM, enabled=False),
     ],
     separators=list(DEFAULT_SEPARATORS),
 )
 
 
-def slot_kind_label(kind: str) -> str:
-    return _KIND_LABELS.get(kind, kind)
+def default_display_format_for_mapping(mapping: MetadataFieldMapping) -> DisplayFormat:
+    """Factory default display layout from a metadata field mapping."""
+    return DisplayFormat(
+        slots=[
+            DisplaySlot(SLOT_KIND_TITLE, enabled=mapping.title_slot is not None),
+            DisplaySlot(SLOT_KIND_ARTIST, enabled=mapping.artist_slot is not None),
+            DisplaySlot(
+                SLOT_KIND_DESCRIPTION,
+                enabled=bool(mapping.description_slots),
+            ),
+            DisplaySlot(SLOT_KIND_ALBUM, enabled=mapping.album_slot is not None),
+        ],
+        separators=list(DEFAULT_SEPARATORS),
+    )
+
+
+def display_field_labels_from_mapping(
+    mapping: MetadataFieldMapping,
+    *,
+    rename_format=None,
+) -> dict[str, str]:
+    """Map display slot kinds to labels using VLC metadata mapping."""
+    if rename_format is None:
+        from karaoke_blast.utils.filename_rename import DEFAULT_KARAOKE_FORMAT
+
+        rename_format = DEFAULT_KARAOKE_FORMAT
+    vlc_labels = metadata_field_display_labels(rename_format, mapping)
+    return {
+        SLOT_KIND_TITLE: vlc_labels[VLC_FIELD_TITLE],
+        SLOT_KIND_ARTIST: vlc_labels[VLC_FIELD_ARTIST],
+        SLOT_KIND_DESCRIPTION: vlc_labels[VLC_FIELD_DESCRIPTION],
+        SLOT_KIND_ALBUM: vlc_labels[VLC_FIELD_ALBUM],
+    }
+
+
+def slot_kind_label(kind: str, field_labels: dict[str, str] | None = None) -> str:
+    normalized = _normalize_slot_kind(kind)
+    if field_labels and normalized in field_labels:
+        return field_labels[normalized]
+    return _DEFAULT_FIELD_LABELS.get(normalized, normalized)
 
 
 def _slot_value(tags: MediaTags, kind: str) -> str:
-    if kind == SLOT_KIND_TITLE:
+    normalized = _normalize_slot_kind(kind)
+    if normalized == SLOT_KIND_TITLE:
         return tags.title.strip()
-    if kind == SLOT_KIND_ARTIST:
+    if normalized == SLOT_KIND_ARTIST:
         return tags.artist.strip()
-    if kind == SLOT_KIND_COMMENT:
+    if normalized == SLOT_KIND_DESCRIPTION:
         return tags.comment.strip()
+    if normalized == SLOT_KIND_ALBUM:
+        return tags.album.strip()
     return ""
 
 
@@ -150,7 +220,11 @@ def format_metadata_label(tags: MediaTags, fmt: DisplayFormat) -> str:
     return result
 
 
-def format_display_preview(fmt: DisplayFormat) -> str:
+def format_display_preview(
+    fmt: DisplayFormat,
+    *,
+    field_labels: dict[str, str] | None = None,
+) -> str:
     """Human-readable pattern preview for the format dialog."""
     fmt._normalize_shape()
     enabled = [index for index, slot in enumerate(fmt.slots) if slot.enabled]
@@ -160,7 +234,9 @@ def format_display_preview(fmt: DisplayFormat) -> str:
     for position, index in enumerate(enabled):
         if position > 0:
             parts.append(fmt.separators[index - 1] if index > 0 else " - ")
-        parts.append(f"{{{slot_kind_label(fmt.slots[index].kind)}}}")
+        parts.append(
+            f"{{{slot_kind_label(fmt.slots[index].kind, field_labels)}}}"
+        )
     return "".join(parts)
 
 
@@ -235,7 +311,6 @@ def song_matches_query(
     if needle in path.name.lower():
         return True
     if mode == DISPLAY_MODE_METADATA:
-        # Filename stem when label is metadata-only and query hits the stem.
         if needle in display_name(path).lower():
             return True
     return False

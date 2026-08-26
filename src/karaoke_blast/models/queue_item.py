@@ -43,6 +43,13 @@ class MixedQueue:
         self._items.append(item)
         return True
 
+    def prepend(self, item: QueueItem) -> bool:
+        key = item.key()
+        if any(existing.key() == key for existing in self._items):
+            return False
+        self._items.insert(0, item)
+        return True
+
     def enqueue_local(self, path: Path) -> bool:
         return self.enqueue(QueueItem(kind="local", path=path))
 
@@ -61,6 +68,20 @@ class MixedQueue:
     def remove_local(self, path: Path) -> None:
         key = f"local:{_resolve_path(path)}"
         self._items = [item for item in self._items if item.key() != key]
+
+    def rename_local(self, old_path: Path, new_path: Path) -> None:
+        old_key = f"local:{_resolve_path(old_path)}"
+        new_key = f"local:{_resolve_path(new_path)}"
+        updated: list[QueueItem] = []
+        for item in self._items:
+            if item.kind == "local" and item.path is not None and item.key() == old_key:
+                if old_key != new_key:
+                    updated.append(QueueItem(kind="local", path=new_path))
+                else:
+                    updated.append(item)
+                continue
+            updated.append(item)
+        self._items = updated
 
     def remove_youtube(self, video_id: str) -> None:
         key = f"youtube:{video_id}"

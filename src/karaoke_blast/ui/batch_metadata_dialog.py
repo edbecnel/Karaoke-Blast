@@ -26,10 +26,7 @@ from karaoke_blast.ui.video_type_selector import VideoTypeSelectorWidget
 from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
 from karaoke_blast.ui.metadata_file_dialog import MetadataFileDialog, MetadataResult
 from karaoke_blast.ui.recent_folders_panel import PINNED_LABEL
-from karaoke_blast.utils.filename_rename import (
-    FilenameFormat,
-    SLOT_KIND_ADDITIONAL,
-)
+from karaoke_blast.utils.filename_rename import FilenameFormat
 from karaoke_blast.utils.media_metadata import has_title_and_artist, supports_metadata
 from karaoke_blast.utils.video_types import VideoTypeProfile, find_video_type
 from karaoke_blast.utils.video_scanner import scan_videos
@@ -84,8 +81,6 @@ QPushButton:hover {
 }
 """
 
-_SECTION_LABEL_STYLE = "color: #ccc; font-size: 13px; font-weight: 600;"
-
 
 class BatchMetadataDialog(QDialog):
     """Pick a folder and tag media files one at a time from filename slots."""
@@ -111,11 +106,6 @@ class BatchMetadataDialog(QDialog):
         self._fmt = active_profile.rename_format.copy()
         self._skip_tagged = skip_tagged
         self._auto_fill_slots = auto_fill_slots
-        self._comment_slot_indices = (
-            list(active_profile.metadata_comment_slot_indices)
-            if active_profile.metadata_comment_slot_indices is not None
-            else None
-        )
         self._folder = initial_folder
         self._recent_folders = list(recent_folders or [])
         self._pinned_folders = list(pinned_folders or [])
@@ -123,7 +113,6 @@ class BatchMetadataDialog(QDialog):
         self._skipped_count = 0
         self._unsupported_count = 0
         self._failed_count = 0
-        self._comment_checkboxes: dict[int, QCheckBox] = {}
 
         self.setWindowTitle("Tag Metadata")
         self.setModal(True)
@@ -176,17 +165,6 @@ class BatchMetadataDialog(QDialog):
         self._format_widget.format_changed.connect(self._on_format_changed)
         layout.addWidget(self._format_widget)
 
-        comments_label = QLabel("Add these slots to Comments:")
-        comments_label.setStyleSheet(_SECTION_LABEL_STYLE)
-        layout.addWidget(comments_label)
-
-        self._comments_container = QWidget()
-        self._comments_layout = QVBoxLayout(self._comments_container)
-        self._comments_layout.setContentsMargins(0, 0, 0, 0)
-        self._comments_layout.setSpacing(6)
-        layout.addWidget(self._comments_container)
-        self._rebuild_comment_checkboxes(preferred_indices=self._comment_slot_indices)
-
         self._status_label = QLabel()
         self._status_label.setStyleSheet("color: #aaa; font-size: 12px;")
         layout.addWidget(self._status_label)
@@ -222,88 +200,39 @@ class BatchMetadataDialog(QDialog):
     def auto_fill_slots(self) -> bool:
         return self._auto_fill_checkbox.isChecked()
 
-    def comment_slot_indices(self) -> list[int]:
-        return sorted(
-            index for index, checkbox in self._comment_checkboxes.items() if checkbox.isChecked()
-        )
+    def _active_profile(self) -> VideoTypeProfile:
+        active_id = self._type_selector.active_id()
+        profile = find_video_type(self._video_types, active_id)
+        if profile is None:
+            return self._video_types[0]
+        return profile
 
-    def _default_comment_indices(self, fmt: FilenameFormat) -> list[int]:
-        indices: list[int] = []
-        for index in fmt.enabled_slot_indices():
-            slot = fmt.slots[index]
-            if (
-                slot.kind == SLOT_KIND_ADDITIONAL
-                and slot.hint_fixed
-                and bool(slot.hint)
-            ):
-                indices.append(index)
-        return indices
-
-    def _rebuild_comment_checkboxes(
-        self,
-        *,
-        preferred_indices: list[int] | None = None,
-    ) -> None:
-        previous_checked = {
-            index
-            for index, checkbox in self._comment_checkboxes.items()
-            if checkbox.isChecked()
-        }
-        while self._comments_layout.count():
-            item = self._comments_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-        self._comment_checkboxes.clear()
-
-        fmt = self._fmt
-        enabled = fmt.enabled_slot_indices()
-        if preferred_indices is not None:
-            selected = {index for index in preferred_indices if index in enabled}
-        elif previous_checked:
-            selected = {index for index in previous_checked if index in enabled}
-        else:
-            selected = set(self._default_comment_indices(fmt))
-
-        if not enabled:
-            empty = QLabel("Enable at least one slot in the format above.")
-            empty.setStyleSheet("color: #aaa; font-size: 12px;")
-            self._comments_layout.addWidget(empty)
-            return
-
-        for index in enabled:
-            slot = fmt.slots[index]
-            checkbox = QCheckBox(slot.label)
-            checkbox.setStyleSheet(CHECKBOX_STYLE_WHITE_LABEL)
-            checkbox.setChecked(index in selected)
-            checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
-            self._comment_checkboxes[index] = checkbox
-            self._comments_layout.addWidget(checkbox)
+    def _metadata_mapping(self):
+        return self._active_profile().resolved_metadata_mapping()
 
     def _on_format_changed(self, fmt: FilenameFormat) -> None:
         self._fmt = fmt.copy()
         self._persist_active_profile()
-        self._rebuild_comment_checkboxes()
 
     def _persist_active_profile(self) -> None:
         active_id = self._type_selector.active_id()
         for profile in self._video_types:
             if profile.id == active_id:
                 profile.rename_format = self._fmt.copy()
-                profile.metadata_comment_slot_indices = self.comment_slot_indices()
+                mapping = profile.resolved_metadata_mapping().normalize_for_format(
+                    self._fmt
+                )
+                profile.metadata_field_mapping = mapping
+                profile.metadata_comment_slot_indices = (
+                    list(mapping.description_slots) or None
+                )
                 return
 
     def _on_video_type_changed(self, profile: VideoTypeProfile) -> None:
         self._persist_active_profile()
         self._active_video_type_id = profile.id
         self._fmt = profile.rename_format.copy()
-        self._comment_slot_indices = (
-            list(profile.metadata_comment_slot_indices)
-            if profile.metadata_comment_slot_indices is not None
-            else None
-        )
         self._format_widget.set_format(self._fmt)
-        self._rebuild_comment_checkboxes(preferred_indices=self._comment_slot_indices)
 
     def _on_video_types_changed(self, profiles: list[VideoTypeProfile]) -> None:
         self._persist_active_profile()
@@ -397,7 +326,7 @@ class BatchMetadataDialog(QDialog):
         self._fmt = self._format_widget.format()
         self._skip_tagged = self._skip_checkbox.isChecked()
         self._auto_fill_slots = self._auto_fill_checkbox.isChecked()
-        self._comment_slot_indices = self.comment_slot_indices()
+        self._persist_active_profile()
         self._run_batch()
 
     def _run_batch(self) -> None:
@@ -428,7 +357,7 @@ class BatchMetadataDialog(QDialog):
             dialog = MetadataFileDialog(
                 path,
                 fmt=self._fmt,
-                comment_slot_indices=self._comment_slot_indices,
+                metadata_field_mapping=self._metadata_mapping(),
                 progress_label=progress,
                 auto_fill_slots=self._auto_fill_slots,
                 parent=self.parentWidget(),

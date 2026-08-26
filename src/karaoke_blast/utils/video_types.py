@@ -14,6 +14,15 @@ from karaoke_blast.utils.filename_rename import (
     SLOT_KIND_ARTIST,
     SLOT_KIND_SONG,
 )
+from karaoke_blast.utils.metadata_field_mapping import (
+    MetadataFieldMapping,
+    builtin_metadata_mapping,
+    default_metadata_mapping,
+)
+from karaoke_blast.utils.song_display import (
+    DisplayFormat,
+    default_display_format_for_mapping,
+)
 
 BUILTIN_SONGS_ID = "songs"
 BUILTIN_TV_SHOWS_ID = "tv_shows"
@@ -49,8 +58,8 @@ def _default_songs_format() -> FilenameFormat:
 def _default_tv_shows_format() -> FilenameFormat:
     return FilenameFormat(
         slots=[
-            FormatSlot(SLOT_KIND_SONG, "Episode Title", enabled=True),
-            FormatSlot(SLOT_KIND_ARTIST, "Series Name", enabled=True),
+            FormatSlot(SLOT_KIND_SONG, "Series Name", enabled=True),
+            FormatSlot(SLOT_KIND_ARTIST, "Episode Title", enabled=True),
             FormatSlot(SLOT_KIND_ADDITIONAL, "Episode Number", enabled=True, hint=""),
             FormatSlot(SLOT_KIND_ADDITIONAL, "Notes", enabled=False, hint=""),
         ],
@@ -111,6 +120,29 @@ class VideoTypeProfile:
     builtin: bool
     rename_format: FilenameFormat
     metadata_comment_slot_indices: list[int] | None = None
+    metadata_field_mapping: MetadataFieldMapping | None = None
+    display_format: DisplayFormat | None = None
+
+    def resolved_metadata_mapping(self) -> MetadataFieldMapping:
+        if self.metadata_field_mapping is not None:
+            return self.metadata_field_mapping.copy().normalize_for_format(
+                self.rename_format
+            )
+        if self.builtin:
+            return builtin_metadata_mapping(
+                self.id, self.rename_format
+            ).normalize_for_format(self.rename_format)
+        return default_metadata_mapping(
+            self.rename_format,
+            legacy_comment_slot_indices=self.metadata_comment_slot_indices,
+        ).normalize_for_format(self.rename_format)
+
+    def resolved_display_format(self) -> DisplayFormat:
+        if self.display_format is not None:
+            return self.display_format.copy()
+        return default_display_format_for_mapping(
+            self.resolved_metadata_mapping()
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -122,6 +154,16 @@ class VideoTypeProfile:
                 None
                 if self.metadata_comment_slot_indices is None
                 else list(self.metadata_comment_slot_indices)
+            ),
+            "metadata_field_mapping": (
+                None
+                if self.metadata_field_mapping is None
+                else self.metadata_field_mapping.to_dict()
+            ),
+            "display_format": (
+                None
+                if self.display_format is None
+                else self.display_format.to_dict()
             ),
         }
 
@@ -146,13 +188,33 @@ class VideoTypeProfile:
                 if isinstance(item, int) and 0 <= item < 4 and item not in parsed:
                     parsed.append(item)
             metadata_comment_slot_indices = parsed
-        return cls(
+        mapping_data = data.get("metadata_field_mapping")
+        metadata_field_mapping = (
+            MetadataFieldMapping.from_dict(mapping_data)
+            if isinstance(mapping_data, dict)
+            else None
+        )
+        display_data = data.get("display_format")
+        display_format = (
+            DisplayFormat.from_dict(display_data)
+            if isinstance(display_data, dict)
+            else None
+        )
+        profile = cls(
             id=profile_id,
             name=name,
             builtin=builtin,
             rename_format=rename_format,
             metadata_comment_slot_indices=metadata_comment_slot_indices,
+            metadata_field_mapping=metadata_field_mapping,
+            display_format=display_format,
         )
+        if metadata_field_mapping is None and metadata_comment_slot_indices is not None:
+            profile.metadata_field_mapping = default_metadata_mapping(
+                rename_format,
+                legacy_comment_slot_indices=metadata_comment_slot_indices,
+            )
+        return profile
 
     def copy(self) -> VideoTypeProfile:
         return VideoTypeProfile.from_dict(self.to_dict())
@@ -162,18 +224,62 @@ def builtin_video_type(profile_id: str) -> VideoTypeProfile:
     """Return a factory-default built-in profile."""
     if profile_id not in BUILTIN_IDS:
         raise ValueError(f"Unknown built-in video type: {profile_id}")
+    rename_format = _BUILTIN_DEFAULTS[profile_id].copy()
+    mapping = builtin_metadata_mapping(profile_id, rename_format)
     return VideoTypeProfile(
         id=profile_id,
         name=_BUILTIN_NAMES[profile_id],
         builtin=True,
-        rename_format=_BUILTIN_DEFAULTS[profile_id].copy(),
+        rename_format=rename_format,
         metadata_comment_slot_indices=None,
+        metadata_field_mapping=mapping,
+        display_format=default_display_format_for_mapping(mapping),
     )
 
 
 def default_video_types() -> list[VideoTypeProfile]:
     """Return all built-in video types with factory defaults."""
     return [builtin_video_type(profile_id) for profile_id in BUILTIN_ORDER]
+
+
+_LEGACY_PIPE_SEPARATORS = (" | ", " | ", " | ")
+
+
+def _migrate_legacy_separators(profile: VideoTypeProfile) -> VideoTypeProfile:
+    """Replace legacy pipe separators with the standard dash default."""
+    separators = profile.rename_format.separators
+    if list(separators) == list(_LEGACY_PIPE_SEPARATORS):
+        updated = profile.copy()
+        updated.rename_format.separators = list(DEFAULT_SEPARATORS)
+        return updated
+    if profile.builtin and any("|" in sep for sep in separators):
+        updated = profile.copy()
+        updated.rename_format.separators = [
+            " - " if "|" in sep else sep for sep in separators
+        ]
+        return updated
+    return profile
+
+
+def _is_legacy_tv_shows_format(fmt: FilenameFormat) -> bool:
+    slots = fmt.slots
+    if len(slots) < 3:
+        return False
+    return (
+        slots[0].label == "Episode Title"
+        and slots[1].label == "Series Name"
+        and slots[2].label == "Episode Number"
+    )
+
+
+def _migrate_legacy_tv_shows_format(profile: VideoTypeProfile) -> VideoTypeProfile:
+    if profile.id != BUILTIN_TV_SHOWS_ID or not profile.builtin:
+        return profile
+    if not _is_legacy_tv_shows_format(profile.rename_format):
+        return profile
+    updated = profile.copy()
+    updated.rename_format = _default_tv_shows_format()
+    return updated
 
 
 def normalize_video_types(profiles: list[VideoTypeProfile]) -> list[VideoTypeProfile]:
@@ -183,7 +289,9 @@ def normalize_video_types(profiles: list[VideoTypeProfile]) -> list[VideoTypePro
     customs: list[VideoTypeProfile] = []
 
     for profile in profiles:
-        copied = profile.copy()
+        copied = _migrate_legacy_tv_shows_format(
+            _migrate_legacy_separators(profile.copy())
+        )
         if copied.id in by_id:
             continue
         if copied.id in BUILTIN_IDS:
@@ -240,6 +348,14 @@ def create_custom_video_type(
             else _default_custom_format()
         ),
         metadata_comment_slot_indices=None,
+        metadata_field_mapping=default_metadata_mapping(
+            rename_format if rename_format is not None else _default_custom_format()
+        ),
+        display_format=default_display_format_for_mapping(
+            default_metadata_mapping(
+                rename_format if rename_format is not None else _default_custom_format()
+            )
+        ),
     )
 
 
