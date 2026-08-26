@@ -149,7 +149,7 @@ class FormatConfigWidget(QWidget):
             combo.setFixedWidth(120)
             for mode, label in _CASING_OPTIONS:
                 combo.addItem(label, mode)
-            combo.currentIndexChanged.connect(self._on_field_changed)
+            combo.activated.connect(self._on_field_changed)
             self._casing_combos[kind] = combo
             kind_col.addWidget(combo)
             casing_row.addLayout(kind_col)

@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, Qt
+from PyQt6.QtCore import QEvent, Qt, QTimer
 from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import (
     QButtonGroup,
@@ -224,6 +224,7 @@ class RenameFileDialog(QDialog):
         self._hint_buttons: dict[int, QPushButton] = {}
         self._slot_radios: dict[int, QRadioButton] = {}
         self._chip_buttons: list[QPushButton] = []
+        self._format_structure_apply_pending = False
         self._target_group = QButtonGroup(self)
         self._target_selector_widget = QWidget()
         self._target_selector_layout = QHBoxLayout(self._target_selector_widget)
@@ -575,15 +576,42 @@ class RenameFileDialog(QDialog):
                 self._update_target_highlight()
         return super().eventFilter(obj, event)
 
-    def _on_format_changed(self, fmt: FilenameFormat) -> None:
-        self._fmt = fmt.copy()
-        self._persist_active_profile_format()
+    @staticmethod
+    def _format_structure_unchanged(previous: FilenameFormat, current: FilenameFormat) -> bool:
+        return previous.slots == current.slots and previous.separators == current.separators
+
+    def _apply_casing_to_slots(self) -> None:
+        for slot_index, field in self._slot_fields.items():
+            if field.isReadOnly():
+                continue
+            slot = self._fmt.slots[slot_index]
+            apply_casing_to_field(field, slot.kind, self._fmt)
+            self._update_hint_button(slot_index)
+
+    def _schedule_format_structure_apply(self) -> None:
+        if self._format_structure_apply_pending:
+            return
+        self._format_structure_apply_pending = True
+        QTimer.singleShot(0, self._apply_format_structure_change)
+
+    def _apply_format_structure_change(self) -> None:
+        self._format_structure_apply_pending = False
         values = {index: field.text() for index, field in self._slot_fields.items()}
         self._rebuild_target_selector()
         self._rebuild_slot_fields(preserved_values=values)
         self._ensure_appendable_focus()
         self._update_target_highlight()
         self._update_preview()
+
+    def _on_format_changed(self, fmt: FilenameFormat) -> None:
+        previous = self._fmt
+        self._fmt = fmt.copy()
+        self._persist_active_profile_format()
+        if self._format_structure_unchanged(previous, self._fmt):
+            self._apply_casing_to_slots()
+            self._update_preview()
+            return
+        self._schedule_format_structure_apply()
 
     def _assign_part(self, part: str) -> None:
         if self._focused_slot_index not in self._slot_fields:

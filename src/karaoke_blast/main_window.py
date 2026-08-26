@@ -2354,6 +2354,12 @@ class MainWindow(QWidget):
             return
 
         if key == Qt.Key.Key_Escape:
+            app = QApplication.instance()
+            if app is not None and (
+                app.activeModalWidget() is not None or app.activePopupWidget() is not None
+            ):
+                super().keyPressEvent(event)
+                return
             if self.isFullScreen():
                 self.showNormal()
                 self._sync_fullscreen_control()
