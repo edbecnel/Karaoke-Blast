@@ -20,10 +20,17 @@ from karaoke_blast.utils.filename_rename import (
     safe_rename,
     split_title,
 )
+from karaoke_blast.utils.video_types import (
+    VideoTypeProfile,
+    active_video_type,
+    find_video_type,
+)
 from karaoke_blast.utils.video_scanner import scan_videos
 
 
-def _load_settings_format() -> tuple[FilenameFormat, bool]:
+def _load_settings_video_type(
+    video_type_id: str | None = None,
+) -> tuple[FilenameFormat, bool]:
     settings_path = config_dir() / "settings.json"
     if not settings_path.exists():
         return DEFAULT_KARAOKE_FORMAT.copy(), True
@@ -32,12 +39,26 @@ def _load_settings_format() -> tuple[FilenameFormat, bool]:
     except (OSError, json.JSONDecodeError):
         return DEFAULT_KARAOKE_FORMAT.copy(), True
 
-    rename_data = data.get("filename_rename")
-    fmt = (
-        FilenameFormat.from_dict(rename_data)
-        if isinstance(rename_data, dict)
-        else DEFAULT_KARAOKE_FORMAT.copy()
-    )
+    raw_video_types = data.get("video_types")
+    profiles: list[VideoTypeProfile] = []
+    if isinstance(raw_video_types, list):
+        for entry in raw_video_types:
+            if isinstance(entry, dict):
+                profiles.append(VideoTypeProfile.from_dict(entry))
+
+    active_id = video_type_id or data.get("active_video_type_id")
+    if isinstance(active_id, str) and profiles:
+        profile = find_video_type(profiles, active_id)
+        if profile is None:
+            profile = active_video_type(profiles, active_id)
+        fmt = profile.rename_format.copy()
+    else:
+        rename_data = data.get("filename_rename")
+        fmt = (
+            FilenameFormat.from_dict(rename_data)
+            if isinstance(rename_data, dict)
+            else DEFAULT_KARAOKE_FORMAT.copy()
+        )
     skip_canonical = data.get("filename_rename_skip_canonical", True)
     return fmt, bool(skip_canonical)
 
@@ -56,7 +77,7 @@ def _build_format(args: argparse.Namespace) -> FilenameFormat:
             fmt.slots[2].hint_fixed = bool(args.suffix)
             fmt.slots[2].enabled = bool(args.suffix)
         return fmt
-    fmt, _skip = _load_settings_format()
+    fmt, _skip = _load_settings_video_type(args.video_type)
     return fmt
 
 
@@ -118,6 +139,10 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Include files that already appear to match the format",
     )
+    parser.add_argument(
+        "--video-type",
+        help="Video type id from settings (default: active video type)",
+    )
     args = parser.parse_args(argv)
 
     folder = args.folder.resolve()
@@ -126,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     fmt = _build_format(args)
-    skip_canonical = not args.include_canonical and _load_settings_format()[1]
+    skip_canonical = not args.include_canonical and _load_settings_video_type(args.video_type)[1]
 
     files = sorted(scan_videos(folder), key=lambda path: path.name.lower())
     if skip_canonical:

@@ -113,6 +113,27 @@ class FilenameFormat:
     def slot_label(self, index: int) -> str:
         return self.slots[index].label
 
+    def required_slot_label(self) -> str:
+        """Return the label for the required primary slot."""
+        index = self.song_slot_index()
+        if index is not None:
+            return self.slots[index].label
+        return "Song Name"
+
+    def casing_label_for_kind(self, kind: str) -> str:
+        """Return a display label for casing controls using configured slot labels."""
+        enabled_labels = [
+            slot.label for slot in self.slots if slot.kind == kind and slot.enabled
+        ]
+        if enabled_labels:
+            if len(enabled_labels) == 1:
+                return enabled_labels[0]
+            return " / ".join(enabled_labels)
+        for slot in self.slots:
+            if slot.kind == kind:
+                return slot.label
+        return kind
+
     def to_dict(self) -> dict[str, object]:
         self._normalize_shape()
         return {

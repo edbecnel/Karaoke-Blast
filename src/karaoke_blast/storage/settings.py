@@ -12,6 +12,16 @@ from karaoke_blast.utils.song_display import (
     DISPLAY_MODE_METADATA,
     DisplayFormat,
 )
+from karaoke_blast.utils.video_types import (
+    BUILTIN_SONGS_ID,
+    VideoTypeProfile,
+    active_video_type,
+    default_video_types,
+    normalize_video_types,
+    find_video_type,
+    migrate_video_types,
+    reset_builtin_video_type,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +52,8 @@ class Settings:
         self.metadata_skip_tagged: bool = True
         self.song_display_mode: str = DISPLAY_MODE_FILENAME
         self.song_display_format: DisplayFormat = DEFAULT_DISPLAY_FORMAT.copy()
+        self.video_types: list[VideoTypeProfile] = default_video_types()
+        self.active_video_type_id: str = BUILTIN_SONGS_ID
         self.load()
 
     def load(self) -> None:
@@ -106,10 +118,30 @@ class Settings:
             display_format = data.get("song_display_format")
             if isinstance(display_format, dict):
                 self.song_display_format = DisplayFormat.from_dict(display_format)
+            raw_video_types = data.get("video_types")
+            if isinstance(raw_video_types, list) and raw_video_types:
+                profiles: list[VideoTypeProfile] = []
+                for entry in raw_video_types:
+                    if isinstance(entry, dict):
+                        profiles.append(VideoTypeProfile.from_dict(entry))
+                if profiles:
+                    self.video_types = normalize_video_types(profiles)
+            else:
+                self.video_types = migrate_video_types(
+                    existing_rename_format=self.filename_rename_format,
+                    existing_comment_indices=self.metadata_comment_slot_indices,
+                )
+            active_id = data.get("active_video_type_id")
+            if isinstance(active_id, str) and active_id.strip():
+                self.active_video_type_id = active_id.strip()
+            if find_video_type(self.video_types, self.active_video_type_id) is None:
+                self.active_video_type_id = BUILTIN_SONGS_ID
+            self._sync_legacy_fields_from_active_type()
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning("Could not load settings: %s", exc)
 
     def save(self) -> None:
+        self.video_types = normalize_video_types(self.video_types)
         data = {
             "controls_auto_hide": self.controls_auto_hide,
             "volume": self.volume,
@@ -133,6 +165,8 @@ class Settings:
             "metadata_skip_tagged": self.metadata_skip_tagged,
             "song_display_mode": self.song_display_mode,
             "song_display_format": self.song_display_format.to_dict(),
+            "video_types": [profile.to_dict() for profile in self.video_types],
+            "active_video_type_id": self.active_video_type_id,
         }
         try:
             _settings_file().write_text(
@@ -159,3 +193,53 @@ class Settings:
         resolved.mkdir(parents=True, exist_ok=True)
         self.youtube_downloads_dir = str(resolved)
         self.save()
+
+    def get_active_video_type(self) -> VideoTypeProfile:
+        """Return the currently selected video type profile."""
+        return active_video_type(self.video_types, self.active_video_type_id)
+
+    def set_active_video_type_id(self, profile_id: str) -> None:
+        """Switch the active video type and sync legacy rename fields."""
+        if find_video_type(self.video_types, profile_id) is None:
+            return
+        self.active_video_type_id = profile_id
+        self._sync_legacy_fields_from_active_type()
+
+    def update_video_type(self, profile: VideoTypeProfile) -> None:
+        """Replace a video type profile in the stored list."""
+        for index, existing in enumerate(self.video_types):
+            if existing.id == profile.id:
+                self.video_types[index] = profile.copy()
+                if profile.id == self.active_video_type_id:
+                    self._sync_legacy_fields_from_active_type()
+                return
+        self.video_types.append(profile.copy())
+        if profile.id == self.active_video_type_id:
+            self._sync_legacy_fields_from_active_type()
+
+    def reset_builtin_video_type(self, profile_id: str) -> None:
+        """Restore a built-in video type to its factory default."""
+        profile = find_video_type(self.video_types, profile_id)
+        if profile is None or not profile.builtin:
+            return
+        self.update_video_type(reset_builtin_video_type(profile))
+
+    def remove_video_type(self, profile_id: str) -> None:
+        """Remove a custom video type. Built-in types cannot be removed."""
+        profile = find_video_type(self.video_types, profile_id)
+        if profile is None or profile.builtin:
+            return
+        self.video_types = [item for item in self.video_types if item.id != profile_id]
+        if self.active_video_type_id == profile_id:
+            self.active_video_type_id = BUILTIN_SONGS_ID
+            self._sync_legacy_fields_from_active_type()
+
+    def _sync_legacy_fields_from_active_type(self) -> None:
+        """Keep legacy single-format fields aligned with the active video type."""
+        profile = self.get_active_video_type()
+        self.filename_rename_format = profile.rename_format.copy()
+        self.metadata_comment_slot_indices = (
+            None
+            if profile.metadata_comment_slot_indices is None
+            else list(profile.metadata_comment_slot_indices)
+        )

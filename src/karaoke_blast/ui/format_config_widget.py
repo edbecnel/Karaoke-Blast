@@ -20,12 +20,11 @@ from karaoke_blast.utils.filename_rename import (
     CASING_NONE,
     CASING_TITLE,
     CASING_UPPER,
-    DEFAULT_KARAOKE_FORMAT,
     SLOT_KIND_ADDITIONAL,
     SLOT_KIND_ARTIST,
     SLOT_KIND_SONG,
     SLOT_KINDS,
-    SONG_ARTIST_FORMAT,
+    DEFAULT_KARAOKE_FORMAT,
     FilenameFormat,
     format_preview,
 )
@@ -60,8 +59,6 @@ QPushButton:disabled {
 }
 """
 
-_BADGE_STYLE = "color: #aaa; font-size: 11px; background: transparent;"
-_LABEL_STYLE = "color: white; font-size: 12px; font-weight: 600; background: transparent;"
 _PREVIEW_STYLE = "color: #7ee787; font-size: 12px; background: transparent;"
 _SEP_LABEL_STYLE = "color: #888; font-size: 11px; background: transparent;"
 _CASING_LABEL_STYLE = "color: #888; font-size: 11px; background: transparent;"
@@ -106,14 +103,6 @@ _CASING_OPTIONS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _kind_label(kind: str) -> str:
-    if kind == SLOT_KIND_SONG:
-        return "Song"
-    if kind == SLOT_KIND_ARTIST:
-        return "Artist"
-    return "Additional"
-
-
 class FormatConfigWidget(QWidget):
     """Configure four reorderable slots and separators for filename composition."""
 
@@ -130,6 +119,7 @@ class FormatConfigWidget(QWidget):
         self._hint_fields: dict[int, VisibleSpaceLineEdit] = {}
         self._hint_fixed_boxes: dict[int, QCheckBox] = {}
         self._casing_combos: dict[str, QComboBox] = {}
+        self._casing_kind_labels: dict[str, QLabel] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -150,8 +140,9 @@ class FormatConfigWidget(QWidget):
         for kind in SLOT_KINDS:
             kind_col = QHBoxLayout()
             kind_col.setSpacing(6)
-            kind_label = QLabel(_kind_label(kind))
+            kind_label = QLabel()
             kind_label.setStyleSheet(_CASING_LABEL_STYLE)
+            self._casing_kind_labels[kind] = kind_label
             kind_col.addWidget(kind_label)
             combo = QComboBox()
             combo.setStyleSheet(_COMBO_STYLE)
@@ -164,20 +155,6 @@ class FormatConfigWidget(QWidget):
             casing_row.addLayout(kind_col)
         casing_row.addStretch()
         layout.addLayout(casing_row)
-
-        preset_row = QHBoxLayout()
-        preset_row.setSpacing(8)
-        karaoke_btn = QPushButton("Karaoke standard")
-        karaoke_btn.setStyleSheet(_BUTTON_STYLE)
-        karaoke_btn.clicked.connect(self._apply_karaoke_preset)
-        preset_row.addWidget(karaoke_btn)
-
-        song_artist_btn = QPushButton("Song + Artist only")
-        song_artist_btn.setStyleSheet(_BUTTON_STYLE)
-        song_artist_btn.clicked.connect(self._apply_song_artist_preset)
-        preset_row.addWidget(song_artist_btn)
-        preset_row.addStretch()
-        layout.addLayout(preset_row)
 
         self._preview_label = QLabel()
         self._preview_label.setStyleSheet(_PREVIEW_STYLE)
@@ -195,6 +172,7 @@ class FormatConfigWidget(QWidget):
         self._format = fmt.copy()
         self._sync_casing_combos()
         self._rebuild_rows()
+        self._update_casing_labels()
         self._update_preview()
         self._building = False
 
@@ -217,6 +195,7 @@ class FormatConfigWidget(QWidget):
 
     def _finish_rebuild(self) -> None:
         self._rebuild_rows()
+        self._update_casing_labels()
         self._update_preview()
         self.format_changed.emit(self.format())
 
@@ -259,20 +238,15 @@ class FormatConfigWidget(QWidget):
             )
             row.addWidget(enabled_box)
 
-            badge = QLabel(_kind_label(slot.kind))
-            badge.setFixedWidth(72)
-            badge.setStyleSheet(_BADGE_STYLE)
-            row.addWidget(badge)
+            label_field = VisibleSpaceLineEdit()
+            label_field.setText(slot.label)
+            label_field.setStyleSheet(_FIELD_STYLE)
+            label_field.setPlaceholderText("Slot label")
+            label_field.textChanged.connect(self._on_field_changed)
+            self._label_fields[index] = label_field
+            row.addWidget(label_field, 1)
 
             if slot.kind == SLOT_KIND_ADDITIONAL:
-                label_field = VisibleSpaceLineEdit()
-                label_field.setText(slot.label)
-                label_field.setStyleSheet(_FIELD_STYLE)
-                label_field.setPlaceholderText("Slot label")
-                label_field.textChanged.connect(self._on_field_changed)
-                self._label_fields[index] = label_field
-                row.addWidget(label_field, 1)
-
                 hint_field = VisibleSpaceLineEdit()
                 hint_field.setText(slot.hint)
                 hint_field.setStyleSheet(_FIELD_STYLE)
@@ -288,10 +262,6 @@ class FormatConfigWidget(QWidget):
                 fixed_box.toggled.connect(self._on_field_changed)
                 self._hint_fixed_boxes[index] = fixed_box
                 row.addWidget(fixed_box)
-            else:
-                fixed_label = QLabel(slot.label)
-                fixed_label.setStyleSheet(_LABEL_STYLE)
-                row.addWidget(fixed_label, 1)
 
             up_btn = QPushButton("↑")
             up_btn.setFixedSize(28, 28)
@@ -331,22 +301,11 @@ class FormatConfigWidget(QWidget):
         slots[index], slots[new_index] = slots[new_index], slots[index]
         self._schedule_rebuild()
 
-    def _apply_karaoke_preset(self) -> None:
-        preset = DEFAULT_KARAOKE_FORMAT.copy()
-        preset.casing = dict(self._format.casing)
-        self.set_format(preset)
-        self.format_changed.emit(self.format())
-
-    def _apply_song_artist_preset(self) -> None:
-        preset = SONG_ARTIST_FORMAT.copy()
-        preset.casing = dict(self._format.casing)
-        self.set_format(preset)
-        self.format_changed.emit(self.format())
-
     def _on_field_changed(self, *_args) -> None:
         if self._building:
             return
         self._sync_from_fields()
+        self._update_casing_labels()
         self._update_preview()
         self.format_changed.emit(self.format())
 
@@ -356,7 +315,13 @@ class FormatConfigWidget(QWidget):
                 self._format.separators[index] = sep_field.text()
 
         for index, label_field in self._label_fields.items():
-            self._format.slots[index].label = label_field.text().strip() or "Additional"
+            slot = self._format.slots[index]
+            fallback = {
+                SLOT_KIND_SONG: "Song Name",
+                SLOT_KIND_ARTIST: "Artist Name",
+                SLOT_KIND_ADDITIONAL: "Additional",
+            }.get(slot.kind, "Additional")
+            self._format.slots[index].label = label_field.text().strip() or fallback
 
         for index, hint_field in self._hint_fields.items():
             self._format.slots[index].hint = hint_field.text().strip()
@@ -368,6 +333,10 @@ class FormatConfigWidget(QWidget):
             mode = combo.currentData()
             if mode in CASING_MODES:
                 self._format.casing[kind] = mode
+
+    def _update_casing_labels(self) -> None:
+        for kind, label_widget in self._casing_kind_labels.items():
+            label_widget.setText(self._format.casing_label_for_kind(kind))
 
     def _update_preview(self) -> None:
         self._preview_label.setText(f"Pattern: {format_preview(self._format)}")

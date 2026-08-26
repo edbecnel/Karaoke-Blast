@@ -173,6 +173,7 @@ class LibraryPanel(QWidget):
     append_karaoke_changed = pyqtSignal(bool)
     browse_downloads_folder_requested = pyqtSignal()
     youtube_search_requested = pyqtSignal(str)
+    video_types_settings_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -209,6 +210,14 @@ class LibraryPanel(QWidget):
         refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         refresh_btn.clicked.connect(self.refresh_requested.emit)
         header_row.addWidget(refresh_btn)
+
+        video_types_btn = QPushButton("⚙")
+        video_types_btn.setToolTip("Video types")
+        video_types_btn.setFixedSize(28, 28)
+        video_types_btn.setStyleSheet(_DISMISS_BTN_STYLE)
+        video_types_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        video_types_btn.clicked.connect(self.video_types_settings_requested.emit)
+        header_row.addWidget(video_types_btn)
 
         close_btn = QPushButton("×")
         close_btn.setToolTip("Hide library panel (L)")

@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 from karaoke_blast.ui.checkbox_style import CHECKBOX_STYLE_WHITE_LABEL
 from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
 from karaoke_blast.ui.format_config_widget import FormatConfigWidget
+from karaoke_blast.ui.video_type_selector import VideoTypeSelectorWidget
 from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
 from karaoke_blast.ui.metadata_file_dialog import MetadataFileDialog, MetadataResult
 from karaoke_blast.ui.recent_folders_panel import PINNED_LABEL
@@ -30,6 +31,7 @@ from karaoke_blast.utils.filename_rename import (
     SLOT_KIND_ADDITIONAL,
 )
 from karaoke_blast.utils.media_metadata import has_title_and_artist, supports_metadata
+from karaoke_blast.utils.video_types import VideoTypeProfile, find_video_type
 from karaoke_blast.utils.video_scanner import scan_videos
 
 _DIALOG_STYLE = """
@@ -94,18 +96,25 @@ class BatchMetadataDialog(QDialog):
         initial_folder: Path | None = None,
         recent_folders: list[Path] | None = None,
         pinned_folders: list[Path] | None = None,
-        fmt: FilenameFormat,
+        video_types: list[VideoTypeProfile],
+        active_video_type_id: str,
         skip_tagged: bool = True,
         auto_fill_slots: bool = False,
-        comment_slot_indices: list[int] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self._fmt = fmt.copy()
+        self._video_types = [profile.copy() for profile in video_types]
+        self._active_video_type_id = active_video_type_id
+        active_profile = find_video_type(self._video_types, active_video_type_id)
+        if active_profile is None:
+            active_profile = self._video_types[0]
+        self._fmt = active_profile.rename_format.copy()
         self._skip_tagged = skip_tagged
         self._auto_fill_slots = auto_fill_slots
         self._comment_slot_indices = (
-            list(comment_slot_indices) if comment_slot_indices is not None else None
+            list(active_profile.metadata_comment_slot_indices)
+            if active_profile.metadata_comment_slot_indices is not None
+            else None
         )
         self._folder = initial_folder
         self._recent_folders = list(recent_folders or [])
@@ -123,6 +132,14 @@ class BatchMetadataDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
+
+        self._type_selector = VideoTypeSelectorWidget(
+            video_types=self._video_types,
+            active_id=self._active_video_type_id,
+        )
+        self._type_selector.type_changed.connect(self._on_video_type_changed)
+        self._type_selector.types_changed.connect(self._on_video_types_changed)
+        layout.addWidget(self._type_selector)
 
         folder_row = QHBoxLayout()
         folder_label = QLabel("Folder:")
@@ -150,8 +167,7 @@ class BatchMetadataDialog(QDialog):
         self._auto_fill_checkbox.setChecked(auto_fill_slots)
         self._auto_fill_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
         self._auto_fill_checkbox.setToolTip(
-            "Map split filename parts to enabled slots in order "
-            "(Song Name, Artist Name, and so on)."
+            "Map split filename parts to enabled slots in order."
         )
         layout.addWidget(self._auto_fill_checkbox)
 
@@ -192,6 +208,13 @@ class BatchMetadataDialog(QDialog):
 
     def format(self) -> FilenameFormat:
         return self._format_widget.format()
+
+    def video_types(self) -> list[VideoTypeProfile]:
+        self._persist_active_profile()
+        return [profile.copy() for profile in self._video_types]
+
+    def active_video_type_id(self) -> str:
+        return self._type_selector.active_id()
 
     def skip_tagged(self) -> bool:
         return self._skip_checkbox.isChecked()
@@ -259,7 +282,33 @@ class BatchMetadataDialog(QDialog):
 
     def _on_format_changed(self, fmt: FilenameFormat) -> None:
         self._fmt = fmt.copy()
+        self._persist_active_profile()
         self._rebuild_comment_checkboxes()
+
+    def _persist_active_profile(self) -> None:
+        active_id = self._type_selector.active_id()
+        for profile in self._video_types:
+            if profile.id == active_id:
+                profile.rename_format = self._fmt.copy()
+                profile.metadata_comment_slot_indices = self.comment_slot_indices()
+                return
+
+    def _on_video_type_changed(self, profile: VideoTypeProfile) -> None:
+        self._persist_active_profile()
+        self._active_video_type_id = profile.id
+        self._fmt = profile.rename_format.copy()
+        self._comment_slot_indices = (
+            list(profile.metadata_comment_slot_indices)
+            if profile.metadata_comment_slot_indices is not None
+            else None
+        )
+        self._format_widget.set_format(self._fmt)
+        self._rebuild_comment_checkboxes(preferred_indices=self._comment_slot_indices)
+
+    def _on_video_types_changed(self, profiles: list[VideoTypeProfile]) -> None:
+        self._persist_active_profile()
+        self._video_types = [profile.copy() for profile in profiles]
+        self._active_video_type_id = self._type_selector.active_id()
 
     def _current_folder(self) -> Path | None:
         text = self._folder_field.text().strip()

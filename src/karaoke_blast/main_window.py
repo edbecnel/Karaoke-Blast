@@ -42,7 +42,10 @@ from karaoke_blast.ui.edit_metadata_dialog import EditMetadataDialog
 from karaoke_blast.ui.panel_splitter import PanelSplitter
 from karaoke_blast.ui.rename_file_dialog import RenameFileDialog, RenameResult
 from karaoke_blast.ui.recent_folders_panel import RecentFoldersPanel
+from karaoke_blast.ui.video_type_selector import VideoTypeSelectorWidget
+from karaoke_blast.ui.video_types_manager_dialog import VideoTypesManagerDialog
 from karaoke_blast.ui.youtube_downloads_folder_row import YouTubeDownloadsFolderRow
+from karaoke_blast.utils.video_types import VideoTypeProfile
 from karaoke_blast.ui.library_panel import (
     PANEL_DEFAULT_WIDTH,
     PANEL_MAX_WIDTH,
@@ -300,6 +303,23 @@ class MainWindow(QWidget):
         layout.addWidget(subtitle)
         layout.addWidget(open_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(youtube_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self._startup_video_type_selector = VideoTypeSelectorWidget(
+            video_types=self._settings.video_types,
+            active_id=self._settings.active_video_type_id,
+        )
+        self._startup_video_type_selector.setMaximumWidth(520)
+        self._startup_video_type_selector.type_changed.connect(
+            self._on_startup_video_type_changed
+        )
+        self._startup_video_type_selector.types_changed.connect(
+            self._on_startup_video_types_changed
+        )
+        layout.addWidget(
+            self._startup_video_type_selector,
+            alignment=Qt.AlignmentFlag.AlignCenter,
+        )
+
         layout.addWidget(rename_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(metadata_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -421,6 +441,9 @@ class MainWindow(QWidget):
         self._library_panel.download_requested.connect(self._on_youtube_download_requested)
         self._library_panel.browse_downloads_folder_requested.connect(
             self._browse_youtube_downloads_folder
+        )
+        self._library_panel.video_types_settings_requested.connect(
+            self._open_video_types_manager
         )
         self._library_panel.set_downloads_folder(self._youtube_downloads_path())
         self._library_panel.set_display_format(self._settings.song_display_format)
@@ -1574,17 +1597,82 @@ class MainWindow(QWidget):
         self._playlist.go_to(index)
         self._play_current()
 
+    def _on_startup_video_type_changed(self, profile: object) -> None:
+        if not isinstance(profile, VideoTypeProfile):
+            return
+        self._settings.set_active_video_type_id(profile.id)
+        self._settings.save()
+
+    def _on_startup_video_types_changed(self, profiles: object) -> None:
+        if not isinstance(profiles, list):
+            return
+        parsed = [item for item in profiles if isinstance(item, VideoTypeProfile)]
+        if not parsed:
+            return
+        self._settings.video_types = parsed
+        self._settings.set_active_video_type_id(
+            self._startup_video_type_selector.active_id()
+        )
+        self._settings.save()
+
+    def _sync_startup_video_type_selector(self) -> None:
+        if not hasattr(self, "_startup_video_type_selector"):
+            return
+        self._startup_video_type_selector.set_video_types(
+            self._settings.video_types,
+            active_id=self._settings.active_video_type_id,
+        )
+
+    def _apply_video_type_settings(
+        self,
+        *,
+        video_types: list[VideoTypeProfile],
+        active_video_type_id: str,
+        rename_format=None,
+        comment_slot_indices: list[int] | None = None,
+    ) -> None:
+        if not video_types:
+            return
+        self._settings.video_types = video_types
+        self._settings.set_active_video_type_id(active_video_type_id)
+        profile = self._settings.get_active_video_type()
+        if rename_format is not None:
+            profile.rename_format = rename_format
+        if comment_slot_indices is not None:
+            profile.metadata_comment_slot_indices = list(comment_slot_indices)
+        self._settings.update_video_type(profile)
+        self._sync_startup_video_type_selector()
+        self._settings.save()
+
+    def _open_video_types_manager(self) -> None:
+        dialog = VideoTypesManagerDialog(
+            video_types=self._settings.video_types,
+            active_id=self._settings.active_video_type_id,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._apply_video_type_settings(
+            video_types=dialog.video_types(),
+            active_video_type_id=dialog.active_id(),
+        )
+
     def _open_batch_rename_dialog(self) -> None:
         dialog = BatchRenameDialog(
             initial_folder=self._youtube_downloads_path(),
-            fmt=self._settings.filename_rename_format,
+            video_types=self._settings.video_types,
+            active_video_type_id=self._settings.active_video_type_id,
             skip_canonical=self._settings.filename_rename_skip_canonical,
             auto_fill_slots=self._settings.filename_rename_auto_fill_slots,
             parent=self,
         )
         dialog.file_renamed.connect(self._on_file_renamed)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self._settings.filename_rename_format = dialog.format()
+            self._apply_video_type_settings(
+                video_types=dialog.video_types(),
+                active_video_type_id=dialog.active_video_type_id(),
+                rename_format=dialog.format(),
+            )
             self._settings.filename_rename_skip_canonical = dialog.skip_canonical()
             self._settings.filename_rename_auto_fill_slots = dialog.auto_fill_slots()
             self._settings.save()
@@ -1600,17 +1688,21 @@ class MainWindow(QWidget):
             initial_folder=downloads,
             recent_folders=recent,
             pinned_folders=[downloads],
-            fmt=self._settings.filename_rename_format,
+            video_types=self._settings.video_types,
+            active_video_type_id=self._settings.active_video_type_id,
             skip_tagged=self._settings.metadata_skip_tagged,
             auto_fill_slots=self._settings.metadata_auto_fill_slots,
-            comment_slot_indices=self._settings.metadata_comment_slot_indices,
             parent=self,
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self._settings.filename_rename_format = dialog.format()
+            self._apply_video_type_settings(
+                video_types=dialog.video_types(),
+                active_video_type_id=dialog.active_video_type_id(),
+                rename_format=dialog.format(),
+                comment_slot_indices=dialog.comment_slot_indices(),
+            )
             self._settings.metadata_skip_tagged = dialog.skip_tagged()
             self._settings.metadata_auto_fill_slots = dialog.auto_fill_slots()
-            self._settings.metadata_comment_slot_indices = dialog.comment_slot_indices()
             self._settings.save()
 
     def _on_rename_requested(self, index: int) -> None:
@@ -1622,13 +1714,24 @@ class MainWindow(QWidget):
             fmt=self._settings.filename_rename_format,
             show_format_config=True,
             rename_button_label="Rename",
+            video_types=self._settings.video_types,
+            active_video_type_id=self._settings.active_video_type_id,
             parent=self,
         )
         self.raise_()
         self.activateWindow()
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self._settings.filename_rename_format = dialog.format()
-            self._settings.save()
+            updated_types = dialog.video_types()
+            active_id = dialog.active_video_type_id()
+            if updated_types is not None and active_id is not None:
+                self._apply_video_type_settings(
+                    video_types=updated_types,
+                    active_video_type_id=active_id,
+                    rename_format=dialog.format(),
+                )
+            else:
+                self._settings.filename_rename_format = dialog.format()
+                self._settings.save()
             if dialog.result_value() == RenameResult.RENAMED:
                 new_path = dialog.new_path()
                 if new_path is not None:

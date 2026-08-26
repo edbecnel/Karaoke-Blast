@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 )
 
 from karaoke_blast.ui.format_config_widget import FormatConfigWidget
+from karaoke_blast.ui.video_type_selector import VideoTypeSelectorWidget
 from karaoke_blast.ui.slot_field_casing import apply_casing_to_field, cased_slot_text
 from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
 from karaoke_blast.utils.filename_rename import (
@@ -35,6 +36,7 @@ from karaoke_blast.utils.filename_rename import (
     safe_rename,
     split_title,
 )
+from karaoke_blast.utils.video_types import VideoTypeProfile
 
 _DIALOG_STYLE = """
 QDialog {
@@ -197,11 +199,18 @@ class RenameFileDialog(QDialog):
         show_format_config: bool = False,
         auto_fill_slots: bool = False,
         rename_button_label: str = "Rename & Next",
+        video_types: list[VideoTypeProfile] | None = None,
+        active_video_type_id: str | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._path = path
         self._fmt = fmt.copy()
+        self._video_types = (
+            [profile.copy() for profile in video_types] if video_types is not None else None
+        )
+        self._active_video_type_id = active_video_type_id
+        self._type_selector: VideoTypeSelectorWidget | None = None
         self._auto_fill_slots = auto_fill_slots
         self._auto_filled_values = (
             default_slot_values(path.stem, self._fmt) if auto_fill_slots else {}
@@ -241,6 +250,14 @@ class RenameFileDialog(QDialog):
         layout.addWidget(original)
 
         if show_format_config:
+            if self._video_types is not None and self._active_video_type_id is not None:
+                self._type_selector = VideoTypeSelectorWidget(
+                    video_types=self._video_types,
+                    active_id=self._active_video_type_id,
+                )
+                self._type_selector.type_changed.connect(self._on_video_type_changed)
+                self._type_selector.types_changed.connect(self._on_video_types_changed)
+                layout.addWidget(self._type_selector)
             self._format_widget = FormatConfigWidget()
             self._format_widget.set_format(self._fmt)
             self._format_widget.format_changed.connect(self._on_format_changed)
@@ -297,6 +314,39 @@ class RenameFileDialog(QDialog):
         if self._format_widget is not None:
             return self._format_widget.format()
         return self._fmt
+
+    def video_types(self) -> list[VideoTypeProfile] | None:
+        if self._video_types is None:
+            return None
+        self._persist_active_profile_format()
+        return [profile.copy() for profile in self._video_types]
+
+    def active_video_type_id(self) -> str | None:
+        if self._type_selector is None:
+            return self._active_video_type_id
+        return self._type_selector.active_id()
+
+    def _persist_active_profile_format(self) -> None:
+        if self._video_types is None or self._type_selector is None:
+            return
+        active_id = self._type_selector.active_id()
+        for profile in self._video_types:
+            if profile.id == active_id:
+                profile.rename_format = self.format().copy()
+                return
+
+    def _on_video_type_changed(self, profile: VideoTypeProfile) -> None:
+        self._persist_active_profile_format()
+        self._active_video_type_id = profile.id
+        self._fmt = profile.rename_format.copy()
+        if self._format_widget is not None:
+            self._format_widget.set_format(self._fmt)
+
+    def _on_video_types_changed(self, profiles: list[VideoTypeProfile]) -> None:
+        self._persist_active_profile_format()
+        self._video_types = [profile.copy() for profile in profiles]
+        if self._type_selector is not None:
+            self._active_video_type_id = self._type_selector.active_id()
 
     def _appendable_slot_indices(self) -> list[int]:
         fmt = self.format()
@@ -527,6 +577,7 @@ class RenameFileDialog(QDialog):
 
     def _on_format_changed(self, fmt: FilenameFormat) -> None:
         self._fmt = fmt.copy()
+        self._persist_active_profile_format()
         values = {index: field.text() for index, field in self._slot_fields.items()}
         self._rebuild_target_selector()
         self._rebuild_slot_fields(preserved_values=values)
@@ -564,7 +615,8 @@ class RenameFileDialog(QDialog):
             self._preview_label.setText(f"Preview: {preview}{self._path.suffix}")
         else:
             self._preview_label.setStyleSheet(_PREVIEW_STYLE)
-            self._preview_label.setText("Preview: (fill Song Name to preview)")
+            required_label = self.format().required_slot_label()
+            self._preview_label.setText(f"Preview: (fill {required_label} to preview)")
         self._rename_button.setEnabled(bool(preview))
 
     def _skip(self) -> None:

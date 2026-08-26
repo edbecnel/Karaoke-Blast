@@ -19,9 +19,11 @@ from PyQt6.QtWidgets import (
 
 from karaoke_blast.ui.checkbox_style import CHECKBOX_STYLE_WHITE_LABEL
 from karaoke_blast.ui.format_config_widget import FormatConfigWidget
+from karaoke_blast.ui.video_type_selector import VideoTypeSelectorWidget
 from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
 from karaoke_blast.ui.rename_file_dialog import RenameFileDialog, RenameResult
 from karaoke_blast.utils.filename_rename import FilenameFormat, looks_canonical
+from karaoke_blast.utils.video_types import VideoTypeProfile, find_video_type
 from karaoke_blast.utils.video_scanner import scan_videos
 
 _DIALOG_STYLE = """
@@ -84,13 +86,21 @@ class BatchRenameDialog(QDialog):
         self,
         *,
         initial_folder: Path | None = None,
-        fmt: FilenameFormat,
+        video_types: list[VideoTypeProfile],
+        active_video_type_id: str,
         skip_canonical: bool = True,
         auto_fill_slots: bool = False,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self._fmt = fmt.copy()
+        self._video_types = [profile.copy() for profile in video_types]
+        self._active_video_type_id = active_video_type_id
+        active_profile = find_video_type(self._video_types, active_video_type_id)
+        self._fmt = (
+            active_profile.rename_format.copy()
+            if active_profile is not None
+            else self._video_types[0].rename_format.copy()
+        )
         self._skip_canonical = skip_canonical
         self._auto_fill_slots = auto_fill_slots
         self._folder = initial_folder
@@ -104,6 +114,14 @@ class BatchRenameDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
+
+        self._type_selector = VideoTypeSelectorWidget(
+            video_types=self._video_types,
+            active_id=self._active_video_type_id,
+        )
+        self._type_selector.type_changed.connect(self._on_video_type_changed)
+        self._type_selector.types_changed.connect(self._on_video_types_changed)
+        layout.addWidget(self._type_selector)
 
         folder_row = QHBoxLayout()
         folder_label = QLabel("Folder:")
@@ -130,8 +148,7 @@ class BatchRenameDialog(QDialog):
         self._auto_fill_checkbox.setChecked(auto_fill_slots)
         self._auto_fill_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
         self._auto_fill_checkbox.setToolTip(
-            "Map split filename parts to enabled slots in order "
-            "(Song Name, Artist Name, and so on)."
+            "Map split filename parts to enabled slots in order."
         )
         layout.addWidget(self._auto_fill_checkbox)
 
@@ -162,6 +179,13 @@ class BatchRenameDialog(QDialog):
     def format(self) -> FilenameFormat:
         return self._format_widget.format()
 
+    def video_types(self) -> list[VideoTypeProfile]:
+        self._persist_active_profile_format()
+        return [profile.copy() for profile in self._video_types]
+
+    def active_video_type_id(self) -> str:
+        return self._type_selector.active_id()
+
     def skip_canonical(self) -> bool:
         return self._skip_checkbox.isChecked()
 
@@ -170,6 +194,25 @@ class BatchRenameDialog(QDialog):
 
     def _on_format_changed(self, fmt: FilenameFormat) -> None:
         self._fmt = fmt.copy()
+        self._persist_active_profile_format()
+
+    def _persist_active_profile_format(self) -> None:
+        active_id = self._type_selector.active_id()
+        for profile in self._video_types:
+            if profile.id == active_id:
+                profile.rename_format = self._fmt.copy()
+                return
+
+    def _on_video_type_changed(self, profile: VideoTypeProfile) -> None:
+        self._persist_active_profile_format()
+        self._active_video_type_id = profile.id
+        self._fmt = profile.rename_format.copy()
+        self._format_widget.set_format(self._fmt)
+
+    def _on_video_types_changed(self, profiles: list[VideoTypeProfile]) -> None:
+        self._persist_active_profile_format()
+        self._video_types = [profile.copy() for profile in profiles]
+        self._active_video_type_id = self._type_selector.active_id()
 
     def _browse_folder(self) -> None:
         start_dir = self._folder_field.text() or str(Path.home())
