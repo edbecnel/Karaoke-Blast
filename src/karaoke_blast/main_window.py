@@ -39,17 +39,15 @@ from karaoke_blast.storage.paths import is_default_downloads_dir
 from karaoke_blast.storage.play_history import PlayHistory
 from karaoke_blast.storage.settings import Settings
 from karaoke_blast.storage.startup_folders import startup_folder_lists
-from karaoke_blast.ui.media_type_library_folder_row import MediaTypeLibraryFolderRow
 from karaoke_blast.ui.opening_screen import OpeningScreen
 from karaoke_blast.ui.batch_metadata_dialog import BatchMetadataDialog
 from karaoke_blast.ui.batch_rename_dialog import BatchRenameDialog
 from karaoke_blast.ui.edit_metadata_dialog import EditMetadataDialog
 from karaoke_blast.ui.panel_splitter import PanelSplitter
 from karaoke_blast.ui.rename_file_dialog import RenameFileDialog, RenameResult
-from karaoke_blast.ui.recent_folders_panel import RecentFoldersPanel
-from karaoke_blast.ui.video_type_selector import VideoTypeSelectorWidget
+from karaoke_blast.ui.startup_folder_section import StartupFolderSection
+from karaoke_blast.ui.startup_media_type_selector import StartupMediaTypeSelector
 from karaoke_blast.ui.video_types_manager_dialog import VideoTypesManagerDialog
-from karaoke_blast.ui.youtube_downloads_folder_row import YouTubeDownloadsFolderRow
 from karaoke_blast.utils.video_types import BUILTIN_SONGS_ID, VideoTypeProfile
 from karaoke_blast.ui.library_panel import (
     PANEL_DEFAULT_WIDTH,
@@ -270,102 +268,61 @@ class MainWindow(QWidget):
         page = OpeningScreen()
         layout = page.content_layout()
 
-        subtitle = QLabel("Open a folder to start playing")
+        subtitle = QLabel("Choose the type of media you wish to play")
         subtitle.setStyleSheet(
-            "color: white; font-size: 18px; font-weight: 600; background: transparent;"
+            "color: white; font-size: 22px; font-weight: 600; background: transparent;"
         )
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        open_btn = QPushButton("Open Folder")
-        open_btn.setFixedSize(180, 48)
-        open_btn.setStyleSheet(
-            "QPushButton { background: #e94560; color: white; border: none;"
-            " border-radius: 8px; font-size: 16px; font-weight: bold; }"
-            "QPushButton:hover { background: #ff6b81; }"
-        )
-        open_btn.clicked.connect(self._open_folder_dialog)
-
-        youtube_btn = QPushButton("Search YouTube")
-        youtube_btn.setFixedSize(180, 48)
-        youtube_btn.setStyleSheet(
+        secondary_btn_style = (
             "QPushButton { background: #2d2d42; color: white; border: 1px solid #5a5a72;"
             " border-radius: 8px; font-size: 16px; font-weight: bold; }"
             "QPushButton:hover { background: #3a3a52; border-color: #7a7a92; }"
         )
-        youtube_btn.clicked.connect(self._enter_youtube_mode)
 
         rename_btn = QPushButton("Rename Downloads")
         rename_btn.setFixedSize(180, 48)
-        rename_btn.setStyleSheet(
-            "QPushButton { background: #2d2d42; color: white; border: 1px solid #5a5a72;"
-            " border-radius: 8px; font-size: 16px; font-weight: bold; }"
-            "QPushButton:hover { background: #3a3a52; border-color: #7a7a92; }"
-        )
+        rename_btn.setStyleSheet(secondary_btn_style)
         rename_btn.clicked.connect(self._open_batch_rename_dialog)
 
         metadata_btn = QPushButton("Tag Metadata")
         metadata_btn.setFixedSize(180, 48)
-        metadata_btn.setStyleSheet(
-            "QPushButton { background: #2d2d42; color: white; border: 1px solid #5a5a72;"
-            " border-radius: 8px; font-size: 16px; font-weight: bold; }"
-            "QPushButton:hover { background: #3a3a52; border-color: #7a7a92; }"
-        )
+        metadata_btn.setStyleSheet(secondary_btn_style)
         metadata_btn.clicked.connect(self._open_batch_metadata_dialog)
 
         layout.addWidget(subtitle)
-        layout.addWidget(open_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(youtube_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        self._startup_video_type_selector = VideoTypeSelectorWidget(
+        self._startup_video_type_selector = StartupMediaTypeSelector(
             video_types=self._settings.video_types,
             active_id=self._settings.active_video_type_id,
-            folder_picker_provider=self._folder_picker_kwargs,
         )
-        self._startup_video_type_selector.setMaximumWidth(520)
+        self._startup_video_type_selector.setMinimumWidth(640)
+        self._startup_video_type_selector.setMaximumWidth(720)
         self._startup_video_type_selector.type_changed.connect(
             self._on_startup_video_type_changed
-        )
-        self._startup_video_type_selector.types_changed.connect(
-            self._on_startup_video_types_changed
         )
         layout.addWidget(
             self._startup_video_type_selector,
             alignment=Qt.AlignmentFlag.AlignCenter,
         )
 
-        self._startup_library_folder_row = MediaTypeLibraryFolderRow()
-        self._startup_library_folder_row.setMaximumWidth(520)
-        self._startup_library_folder_row.open_clicked.connect(
+        self._startup_folder_section = StartupFolderSection()
+        self._startup_folder_section.setMinimumWidth(640)
+        self._startup_folder_section.setMaximumWidth(720)
+        self._startup_folder_section.open_clicked.connect(
             self._open_active_media_type_default_folder
         )
+        self._startup_folder_section.browse_clicked.connect(self._browse_startup_folder)
         layout.addWidget(
-            self._startup_library_folder_row,
+            self._startup_folder_section,
             alignment=Qt.AlignmentFlag.AlignCenter,
         )
 
         layout.addWidget(rename_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(metadata_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        self._recent_folders = RecentFoldersPanel()
-        self._recent_folders.folder_selected.connect(self._on_start_menu_folder_selected)
-        self._recent_folders.folder_remove_requested.connect(
-            self._on_recent_folder_remove_requested
-        )
-        layout.addSpacing(8)
-        layout.addWidget(self._recent_folders, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        self._startup_downloads_folder_row = YouTubeDownloadsFolderRow(sidebar=False)
-        self._startup_downloads_folder_row.setMaximumWidth(520)
-        self._startup_downloads_folder_row.browse_clicked.connect(
-            self._browse_youtube_downloads_folder
-        )
-        self._startup_downloads_folder_row.use_current_folder_clicked.connect(
-            self._use_current_folder_as_downloads
-        )
-        layout.addWidget(self._startup_downloads_folder_row, alignment=Qt.AlignmentFlag.AlignCenter)
         self._update_downloads_folder_display()
         self._update_media_type_library_folder_display()
-        self._refresh_recent_folders()
 
         return page
 
@@ -380,20 +337,30 @@ class MainWindow(QWidget):
     def _update_downloads_folder_display(self) -> None:
         path = self._youtube_downloads_path()
         current = self._active_library_folder()
-        self._startup_downloads_folder_row.set_folder(path)
-        self._startup_downloads_folder_row.set_current_library_folder(current)
         if hasattr(self, "_library_panel"):
             self._library_panel.set_downloads_folder(
                 path, current_library_folder=current
             )
 
     def _update_media_type_library_folder_display(self) -> None:
-        if not hasattr(self, "_startup_library_folder_row"):
+        if not hasattr(self, "_startup_folder_section"):
             return
-        profile = self._settings.get_active_video_type()
-        folder = self._settings.resolved_video_type_default_folder(profile.id)
-        self._startup_library_folder_row.set_media_type_name(profile.name)
-        self._startup_library_folder_row.set_folder(folder)
+        folder = self._settings.resolved_video_type_default_folder()
+        self._startup_folder_section.set_folder(folder)
+
+    def _browse_startup_folder(self) -> None:
+        current = self._settings.resolved_video_type_default_folder()
+        start_dir = str(current) if current is not None else str(Path.home())
+        folder = QFileDialog.getExistingDirectory(self, "Select Folder", start_dir)
+        if not folder:
+            return
+        path = Path(folder)
+        self._settings.set_video_type_library_folder(
+            self._settings.active_video_type_id, path
+        )
+        self._folder_history.add(path)
+        self._refresh_recent_folders()
+        self._update_media_type_library_folder_display()
 
     def _open_active_media_type_default_folder(self) -> None:
         folder = self._settings.resolved_video_type_default_folder()
@@ -444,11 +411,6 @@ class MainWindow(QWidget):
     def _refresh_recent_folders(self) -> None:
         self._ensure_custom_downloads_folder_in_history()
         folders = startup_folder_lists(self._folder_history.folders(), self._youtube_downloads_path())
-        self._recent_folders.set_folders(
-            folders.recent,
-            pinned=folders.pinned,
-            pinned_label=folders.pinned_label,
-        )
         if hasattr(self, "_library_panel"):
             self._library_panel.set_recent_folders(
                 folders.recent,
@@ -479,10 +441,6 @@ class MainWindow(QWidget):
 
     def _on_start_menu_folder_selected(self, folder: Path) -> None:
         self._load_folder(folder)
-
-    def _on_recent_folder_remove_requested(self, folder: Path) -> None:
-        self._folder_history.remove(folder)
-        self._refresh_recent_folders()
 
     def _build_player_page(self) -> QWidget:
         page = QWidget()
@@ -1838,21 +1796,6 @@ class MainWindow(QWidget):
     def _on_startup_video_type_changed(self, profile: object) -> None:
         self._on_active_video_type_changed(profile)
 
-    def _on_startup_video_types_changed(self, profiles: object) -> None:
-        if not isinstance(profiles, list):
-            return
-        parsed = [item for item in profiles if isinstance(item, VideoTypeProfile)]
-        if not parsed:
-            return
-        self._settings.video_types = parsed
-        self._settings.set_active_video_type_id(
-            self._startup_video_type_selector.active_id()
-        )
-        self._settings.save()
-        self._on_active_video_type_changed(
-            self._settings.get_active_video_type()
-        )
-
     def _on_active_video_type_changed(self, profile: object) -> None:
         if not isinstance(profile, VideoTypeProfile):
             return
@@ -2698,14 +2641,15 @@ class MainWindow(QWidget):
             return
 
         if key == Qt.Key.Key_O:
-            self._open_folder_dialog()
+            if self._stack.currentWidget() == self._empty_state:
+                self._open_active_media_type_default_folder()
+            else:
+                self._open_folder_dialog()
             return
 
         if key == Qt.Key.Key_Y:
             if self._stack.currentWidget() == self._player_page:
                 self._library_panel.focus_search(tab="youtube")
-            else:
-                self._enter_youtube_mode()
             return
 
         if key == Qt.Key.Key_L:

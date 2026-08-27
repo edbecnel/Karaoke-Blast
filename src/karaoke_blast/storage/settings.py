@@ -13,6 +13,7 @@ from karaoke_blast.utils.song_display import (
     DisplayFormat,
 )
 from karaoke_blast.utils.video_types import (
+    BUILTIN_ANY_ID,
     BUILTIN_SONGS_ID,
     YOUTUBE_APPEND_KARAOKE,
     VideoTypeProfile,
@@ -54,7 +55,7 @@ class Settings:
         self.song_display_mode: str = DISPLAY_MODE_FILENAME
         self.song_display_format: DisplayFormat = DEFAULT_DISPLAY_FORMAT.copy()
         self.video_types: list[VideoTypeProfile] = default_video_types()
-        self.active_video_type_id: str = BUILTIN_SONGS_ID
+        self.active_video_type_id: str = BUILTIN_ANY_ID
         self.library_flat_browse: bool = False
         self.load()
 
@@ -244,6 +245,8 @@ class Settings:
         profile = find_video_type(self.video_types, resolved_id)
         if profile is None:
             return None
+        if profile.id == BUILTIN_ANY_ID:
+            return Path.home().resolve()
         return self._resolve_profile_downloads_dir(profile)
 
     def set_video_type_library_folder(self, profile_id: str, folder: Path) -> None:

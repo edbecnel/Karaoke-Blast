@@ -191,6 +191,13 @@ def metadata_field_display_labels(
 
 def builtin_metadata_mapping(profile_id: str, fmt: FilenameFormat) -> MetadataFieldMapping:
     """Factory defaults for built-in media types."""
+    if profile_id == "any":
+        return MetadataFieldMapping(
+            title_slot=0,
+            artist_slot=2 if len(fmt.slots) > 2 and fmt.slots[2].enabled else None,
+            description_slots=[1] if len(fmt.slots) > 1 and fmt.slots[1].enabled else [],
+            album_slot=None,
+        )
     if profile_id == "songs":
         return MetadataFieldMapping(
             title_slot=0,

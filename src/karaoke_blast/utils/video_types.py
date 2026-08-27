@@ -49,6 +49,7 @@ _MEDIA_CATEGORY_LABELS = {
     MediaCategory.NONE: "None",
 }
 
+BUILTIN_ANY_ID = "any"
 BUILTIN_SONGS_ID = "songs"
 BUILTIN_KARAOKE_ID = BUILTIN_SONGS_ID
 BUILTIN_MUSIC_VIDEOS_ID = "music_videos"
@@ -58,6 +59,7 @@ BUILTIN_MOVIES_ID = "movies"
 BUILTIN_PERSONAL_VIDEOS_ID = "personal_videos"
 
 _BUILTIN_MEDIA_CATEGORIES: dict[str, MediaCategory] = {
+    BUILTIN_ANY_ID: MediaCategory.VIDEO,
     BUILTIN_SONGS_ID: MediaCategory.KARAOKE_VIDEOKE,
     BUILTIN_MUSIC_VIDEOS_ID: MediaCategory.VIDEO,
     BUILTIN_MUSIC_AUDIO_ID: MediaCategory.AUDIO,
@@ -67,6 +69,7 @@ _BUILTIN_MEDIA_CATEGORIES: dict[str, MediaCategory] = {
 }
 
 BUILTIN_IDS = frozenset({
+    BUILTIN_ANY_ID,
     BUILTIN_SONGS_ID,
     BUILTIN_MUSIC_VIDEOS_ID,
     BUILTIN_MUSIC_AUDIO_ID,
@@ -76,6 +79,7 @@ BUILTIN_IDS = frozenset({
 })
 
 BUILTIN_ORDER = (
+    BUILTIN_ANY_ID,
     BUILTIN_SONGS_ID,
     BUILTIN_MUSIC_VIDEOS_ID,
     BUILTIN_MUSIC_AUDIO_ID,
@@ -85,6 +89,7 @@ BUILTIN_ORDER = (
 )
 
 _BUILTIN_NAMES = {
+    BUILTIN_ANY_ID: "Any",
     BUILTIN_SONGS_ID: "Karaoke",
     BUILTIN_MUSIC_VIDEOS_ID: "Music (Videos)",
     BUILTIN_MUSIC_AUDIO_ID: "Music (Audio)",
@@ -92,6 +97,18 @@ _BUILTIN_NAMES = {
     BUILTIN_MOVIES_ID: "Movies",
     BUILTIN_PERSONAL_VIDEOS_ID: "Personal Videos",
 }
+
+
+def _default_any_format() -> FilenameFormat:
+    return FilenameFormat(
+        slots=[
+            FormatSlot(SLOT_KIND_SONG, "Media name", enabled=True),
+            FormatSlot(SLOT_KIND_ARTIST, "Description", enabled=True),
+            FormatSlot(SLOT_KIND_ADDITIONAL, "Additional", enabled=True, hint=""),
+            FormatSlot(SLOT_KIND_ADDITIONAL, "Additional", enabled=False, hint=""),
+        ],
+        separators=list(DEFAULT_SEPARATORS),
+    )
 
 
 def _default_songs_format() -> FilenameFormat:
@@ -159,6 +176,7 @@ def _default_custom_format() -> FilenameFormat:
 
 
 _BUILTIN_DEFAULTS: dict[str, FilenameFormat] = {
+    BUILTIN_ANY_ID: _default_any_format(),
     BUILTIN_SONGS_ID: _default_songs_format(),
     BUILTIN_MUSIC_VIDEOS_ID: _default_music_format(),
     BUILTIN_MUSIC_AUDIO_ID: _default_music_format(),
