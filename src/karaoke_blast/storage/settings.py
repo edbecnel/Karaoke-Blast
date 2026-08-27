@@ -14,6 +14,7 @@ from karaoke_blast.utils.song_display import (
 )
 from karaoke_blast.utils.video_types import (
     BUILTIN_SONGS_ID,
+    YOUTUBE_APPEND_KARAOKE,
     VideoTypeProfile,
     active_video_type,
     default_video_types,
@@ -309,6 +310,7 @@ class Settings:
         if songs is None:
             return
         updated = songs.copy()
+        updated.youtube_search_append = YOUTUBE_APPEND_KARAOKE if legacy else None
         updated.youtube_append_karaoke = legacy
         self.update_video_type(updated)
 
@@ -329,7 +331,7 @@ class Settings:
         description_slots = list(mapping.description_slots)
         self.metadata_comment_slot_indices = description_slots or None
         self.song_display_format = profile.resolved_display_format().copy()
-        self.youtube_append_karaoke = profile.youtube_append_karaoke
+        self.youtube_append_karaoke = bool(profile.youtube_search_append)
         self.youtube_downloads_dir = profile.youtube_downloads_dir
 
     def _migrate_legacy_youtube_downloads_dir(self, data: dict[str, object]) -> None:

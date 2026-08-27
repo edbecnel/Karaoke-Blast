@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from enum import Enum
 
 from karaoke_blast.utils.filename_rename import (
     DEFAULT_KARAOKE_FORMAT,
@@ -24,13 +25,51 @@ from karaoke_blast.utils.song_display import (
     default_display_format_for_mapping,
 )
 
+YOUTUBE_APPEND_KARAOKE = "karaoke"
+YOUTUBE_APPEND_VIDEOKE = "videoke"
+
+YOUTUBE_APPEND_COMBO_ITEMS: tuple[tuple[str, str | None], ...] = (
+    ("Karaoke", YOUTUBE_APPEND_KARAOKE),
+    ("Videoke", YOUTUBE_APPEND_VIDEOKE),
+    ("None", None),
+)
+
+
+class MediaCategory(str, Enum):
+    KARAOKE_VIDEOKE = "karaoke_videoke"
+    VIDEO = "video"
+    AUDIO = "audio"
+    NONE = "none"
+
+
+_MEDIA_CATEGORY_LABELS = {
+    MediaCategory.KARAOKE_VIDEOKE: "Karaoke/Videoke",
+    MediaCategory.VIDEO: "Video",
+    MediaCategory.AUDIO: "Audio",
+    MediaCategory.NONE: "None",
+}
+
 BUILTIN_SONGS_ID = "songs"
+BUILTIN_KARAOKE_ID = BUILTIN_SONGS_ID
+BUILTIN_MUSIC_VIDEOS_ID = "music_videos"
+BUILTIN_MUSIC_AUDIO_ID = "music_audio"
 BUILTIN_TV_SHOWS_ID = "tv_shows"
 BUILTIN_MOVIES_ID = "movies"
 BUILTIN_PERSONAL_VIDEOS_ID = "personal_videos"
 
+_BUILTIN_MEDIA_CATEGORIES: dict[str, MediaCategory] = {
+    BUILTIN_SONGS_ID: MediaCategory.KARAOKE_VIDEOKE,
+    BUILTIN_MUSIC_VIDEOS_ID: MediaCategory.VIDEO,
+    BUILTIN_MUSIC_AUDIO_ID: MediaCategory.AUDIO,
+    BUILTIN_TV_SHOWS_ID: MediaCategory.VIDEO,
+    BUILTIN_MOVIES_ID: MediaCategory.VIDEO,
+    BUILTIN_PERSONAL_VIDEOS_ID: MediaCategory.VIDEO,
+}
+
 BUILTIN_IDS = frozenset({
     BUILTIN_SONGS_ID,
+    BUILTIN_MUSIC_VIDEOS_ID,
+    BUILTIN_MUSIC_AUDIO_ID,
     BUILTIN_TV_SHOWS_ID,
     BUILTIN_MOVIES_ID,
     BUILTIN_PERSONAL_VIDEOS_ID,
@@ -38,13 +77,17 @@ BUILTIN_IDS = frozenset({
 
 BUILTIN_ORDER = (
     BUILTIN_SONGS_ID,
+    BUILTIN_MUSIC_VIDEOS_ID,
+    BUILTIN_MUSIC_AUDIO_ID,
     BUILTIN_TV_SHOWS_ID,
     BUILTIN_MOVIES_ID,
     BUILTIN_PERSONAL_VIDEOS_ID,
 )
 
 _BUILTIN_NAMES = {
-    BUILTIN_SONGS_ID: "Songs",
+    BUILTIN_SONGS_ID: "Karaoke",
+    BUILTIN_MUSIC_VIDEOS_ID: "Music (Videos)",
+    BUILTIN_MUSIC_AUDIO_ID: "Music (Audio)",
     BUILTIN_TV_SHOWS_ID: "TV Shows",
     BUILTIN_MOVIES_ID: "Movies",
     BUILTIN_PERSONAL_VIDEOS_ID: "Personal Videos",
@@ -91,6 +134,18 @@ def _default_personal_videos_format() -> FilenameFormat:
     )
 
 
+def _default_music_format() -> FilenameFormat:
+    return FilenameFormat(
+        slots=[
+            FormatSlot(SLOT_KIND_SONG, "Song Name", enabled=True),
+            FormatSlot(SLOT_KIND_ARTIST, "Artist Name", enabled=True),
+            FormatSlot(SLOT_KIND_ADDITIONAL, "Album", enabled=True, hint=""),
+            FormatSlot(SLOT_KIND_ADDITIONAL, "Additional", enabled=False, hint=""),
+        ],
+        separators=list(DEFAULT_SEPARATORS),
+    )
+
+
 def _default_custom_format() -> FilenameFormat:
     return FilenameFormat(
         slots=[
@@ -105,15 +160,93 @@ def _default_custom_format() -> FilenameFormat:
 
 _BUILTIN_DEFAULTS: dict[str, FilenameFormat] = {
     BUILTIN_SONGS_ID: _default_songs_format(),
+    BUILTIN_MUSIC_VIDEOS_ID: _default_music_format(),
+    BUILTIN_MUSIC_AUDIO_ID: _default_music_format(),
     BUILTIN_TV_SHOWS_ID: _default_tv_shows_format(),
     BUILTIN_MOVIES_ID: _default_movies_format(),
     BUILTIN_PERSONAL_VIDEOS_ID: _default_personal_videos_format(),
 }
 
 
+def default_media_category(profile_id: str, *, builtin: bool) -> MediaCategory:
+    if builtin and profile_id in _BUILTIN_MEDIA_CATEGORIES:
+        return _BUILTIN_MEDIA_CATEGORIES[profile_id]
+    return MediaCategory.NONE
+
+
+def default_youtube_search_append(category: MediaCategory) -> str | None:
+    if category == MediaCategory.KARAOKE_VIDEOKE:
+        return YOUTUBE_APPEND_KARAOKE
+    return None
+
+
+def shows_youtube_append_dropdown(category: MediaCategory) -> bool:
+    return category == MediaCategory.KARAOKE_VIDEOKE
+
+
+def resolve_youtube_append_term(profile: VideoTypeProfile) -> str | None:
+    if not shows_youtube_append_dropdown(profile.media_category):
+        return None
+    return profile.youtube_search_append
+
+
+def media_category_label(category: MediaCategory) -> str:
+    return _MEDIA_CATEGORY_LABELS[category]
+
+
+def parse_media_category(value: object) -> MediaCategory | None:
+    if isinstance(value, str):
+        try:
+            return MediaCategory(value)
+        except ValueError:
+            pass
+    return None
+
+
+def parse_youtube_search_append(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        lowered = value.casefold()
+        if lowered == YOUTUBE_APPEND_KARAOKE:
+            return YOUTUBE_APPEND_KARAOKE
+        if lowered == YOUTUBE_APPEND_VIDEOKE:
+            return YOUTUBE_APPEND_VIDEOKE
+    return None
+
+
+def youtube_append_combo_index(append: str | None) -> int:
+    for index, (_, value) in enumerate(YOUTUBE_APPEND_COMBO_ITEMS):
+        if value == append:
+            return index
+    return len(YOUTUBE_APPEND_COMBO_ITEMS) - 1
+
+
+def youtube_append_from_combo_index(index: int) -> str | None:
+    if 0 <= index < len(YOUTUBE_APPEND_COMBO_ITEMS):
+        return YOUTUBE_APPEND_COMBO_ITEMS[index][1]
+    return None
+
+
 def default_youtube_append_karaoke(profile_id: str) -> bool:
-    """Return whether YouTube search should append 'karaoke' for a media type."""
-    return profile_id == BUILTIN_SONGS_ID
+    """Backward-compatible default derived from built-in media category."""
+    if profile_id not in BUILTIN_IDS:
+        return False
+    return shows_youtube_append_dropdown(default_media_category(profile_id, builtin=True))
+
+
+def _migrate_youtube_search_append(
+    data: dict[str, object],
+    media_category: MediaCategory,
+) -> str | None:
+    if "youtube_search_append" in data:
+        return parse_youtube_search_append(data.get("youtube_search_append"))
+    legacy = data.get("youtube_append_karaoke")
+    if isinstance(legacy, bool):
+        if legacy and shows_youtube_append_dropdown(media_category):
+            return YOUTUBE_APPEND_KARAOKE
+        return None
+    return default_youtube_search_append(media_category)
 
 
 @dataclass
@@ -127,6 +260,8 @@ class VideoTypeProfile:
     metadata_comment_slot_indices: list[int] | None = None
     metadata_field_mapping: MetadataFieldMapping | None = None
     display_format: DisplayFormat | None = None
+    media_category: MediaCategory = MediaCategory.NONE
+    youtube_search_append: str | None = None
     youtube_append_karaoke: bool = False
     last_library_folder: str | None = None
     youtube_downloads_dir: str | None = None
@@ -173,7 +308,9 @@ class VideoTypeProfile:
                 if self.display_format is None
                 else self.display_format.to_dict()
             ),
-            "youtube_append_karaoke": self.youtube_append_karaoke,
+            "media_category": self.media_category.value,
+            "youtube_search_append": self.youtube_search_append,
+            "youtube_append_karaoke": bool(self.youtube_search_append),
             "last_library_folder": self.last_library_folder,
             "youtube_downloads_dir": self.youtube_downloads_dir,
         }
@@ -211,11 +348,11 @@ class VideoTypeProfile:
             if isinstance(display_data, dict)
             else None
         )
-        append_karaoke = data.get("youtube_append_karaoke")
-        if isinstance(append_karaoke, bool):
-            youtube_append_karaoke = append_karaoke
-        else:
-            youtube_append_karaoke = default_youtube_append_karaoke(profile_id)
+        media_category = parse_media_category(data.get("media_category"))
+        if media_category is None:
+            media_category = default_media_category(profile_id, builtin=builtin)
+        youtube_search_append = _migrate_youtube_search_append(data, media_category)
+        youtube_append_karaoke = bool(youtube_search_append)
         last_library_folder = data.get("last_library_folder")
         if isinstance(last_library_folder, str) and last_library_folder.strip():
             stored_library_folder: str | None = last_library_folder.strip()
@@ -234,6 +371,8 @@ class VideoTypeProfile:
             metadata_comment_slot_indices=metadata_comment_slot_indices,
             metadata_field_mapping=metadata_field_mapping,
             display_format=display_format,
+            media_category=media_category,
+            youtube_search_append=youtube_search_append,
             youtube_append_karaoke=youtube_append_karaoke,
             last_library_folder=stored_library_folder,
             youtube_downloads_dir=stored_downloads_dir,
@@ -255,6 +394,7 @@ def builtin_video_type(profile_id: str) -> VideoTypeProfile:
         raise ValueError(f"Unknown built-in video type: {profile_id}")
     rename_format = _BUILTIN_DEFAULTS[profile_id].copy()
     mapping = builtin_metadata_mapping(profile_id, rename_format)
+    category = default_media_category(profile_id, builtin=True)
     return VideoTypeProfile(
         id=profile_id,
         name=_BUILTIN_NAMES[profile_id],
@@ -263,7 +403,9 @@ def builtin_video_type(profile_id: str) -> VideoTypeProfile:
         metadata_comment_slot_indices=None,
         metadata_field_mapping=mapping,
         display_format=default_display_format_for_mapping(mapping),
-        youtube_append_karaoke=default_youtube_append_karaoke(profile_id),
+        media_category=category,
+        youtube_search_append=default_youtube_search_append(category),
+        youtube_append_karaoke=category == MediaCategory.KARAOKE_VIDEOKE,
     )
 
 
@@ -325,6 +467,9 @@ def normalize_video_types(profiles: list[VideoTypeProfile]) -> list[VideoTypePro
         if copied.id in by_id:
             continue
         if copied.id in BUILTIN_IDS:
+            copied.name = _BUILTIN_NAMES[copied.id]
+            factory = builtin_video_type(copied.id)
+            copied.media_category = factory.media_category
             by_id[copied.id] = copied
             continue
         if copied.name.strip().casefold() in builtin_names:
@@ -365,28 +510,28 @@ def create_custom_video_type(
     name: str,
     *,
     rename_format: FilenameFormat | None = None,
+    media_category: MediaCategory = MediaCategory.NONE,
 ) -> VideoTypeProfile:
     """Create a new user-defined video type."""
     cleaned = name.strip() or "Custom"
+    fmt = (
+        rename_format.copy()
+        if rename_format is not None
+        else _default_custom_format()
+    )
     return VideoTypeProfile(
         id=uuid.uuid4().hex,
         name=cleaned,
         builtin=False,
-        rename_format=(
-            rename_format.copy()
-            if rename_format is not None
-            else _default_custom_format()
-        ),
+        rename_format=fmt,
         metadata_comment_slot_indices=None,
-        metadata_field_mapping=default_metadata_mapping(
-            rename_format if rename_format is not None else _default_custom_format()
-        ),
+        metadata_field_mapping=default_metadata_mapping(fmt),
         display_format=default_display_format_for_mapping(
-            default_metadata_mapping(
-                rename_format if rename_format is not None else _default_custom_format()
-            )
+            default_metadata_mapping(fmt)
         ),
-        youtube_append_karaoke=False,
+        media_category=media_category,
+        youtube_search_append=default_youtube_search_append(media_category),
+        youtube_append_karaoke=shows_youtube_append_dropdown(media_category),
     )
 
 
@@ -405,6 +550,8 @@ def migrate_video_types(
     )
     return [
         songs,
+        builtin_video_type(BUILTIN_MUSIC_VIDEOS_ID),
+        builtin_video_type(BUILTIN_MUSIC_AUDIO_ID),
         builtin_video_type(BUILTIN_TV_SHOWS_ID),
         builtin_video_type(BUILTIN_MOVIES_ID),
         builtin_video_type(BUILTIN_PERSONAL_VIDEOS_ID),

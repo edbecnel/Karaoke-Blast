@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget
 
 _DISMISS_BTN_STYLE = (
@@ -15,8 +15,11 @@ _DISMISS_BTN_STYLE = (
 class YouTubeDownloadStatus(QWidget):
     """Shows download progress, success, or failure in the YouTube panel."""
 
+    cancel_requested = pyqtSignal()
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._is_downloading = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(4)
@@ -29,11 +32,11 @@ class YouTubeDownloadStatus(QWidget):
         header_row.addWidget(self._title_label, 1)
 
         self._close_btn = QPushButton("×")
-        self._close_btn.setToolTip("Dismiss")
+        self._close_btn.setToolTip("Cancel download")
         self._close_btn.setFixedSize(24, 24)
         self._close_btn.setStyleSheet(_DISMISS_BTN_STYLE)
         self._close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._close_btn.clicked.connect(self.reset)
+        self._close_btn.clicked.connect(self._on_close_clicked)
         self._close_btn.hide()
         header_row.addWidget(self._close_btn)
         layout.addLayout(header_row)
@@ -58,9 +61,11 @@ class YouTubeDownloadStatus(QWidget):
         self.hide()
 
     def show_downloading(self, title: str, *, percent: float = 0.0, status: str = "Downloading…") -> None:
+        self._is_downloading = True
         self._title_label.setText(title)
         self._title_label.setStyleSheet("color: white; font-size: 12px; font-weight: bold;")
-        self._close_btn.hide()
+        self._close_btn.setToolTip("Cancel download")
+        self._close_btn.show()
         self._progress.setValue(int(percent))
         self._progress.show()
         self._status_label.setText(status)
@@ -72,25 +77,39 @@ class YouTubeDownloadStatus(QWidget):
         self._progress.setValue(int(percent))
         self._status_label.setText(status)
 
+    def show_cancelling(self) -> None:
+        self._status_label.setText("Cancelling…")
+
     def show_success(self, title: str, *, message: str = "Download complete") -> None:
+        self._is_downloading = False
         self._title_label.setText(title)
         self._title_label.setStyleSheet("color: #7ee787; font-size: 12px; font-weight: bold;")
         self._progress.hide()
         self._status_label.setText(message)
         self._status_label.setStyleSheet("color: #7ee787; font-size: 11px;")
+        self._close_btn.setToolTip("Dismiss")
         self._close_btn.show()
         self.show()
 
     def show_error(self, title: str, message: str) -> None:
+        self._is_downloading = False
         self._title_label.setText(title)
         self._title_label.setStyleSheet("color: #ff6b81; font-size: 12px; font-weight: bold;")
         self._progress.hide()
         self._status_label.setText(message)
         self._status_label.setStyleSheet("color: #ff6b81; font-size: 11px;")
+        self._close_btn.setToolTip("Dismiss")
         self._close_btn.show()
         self.show()
 
+    def _on_close_clicked(self) -> None:
+        if self._is_downloading:
+            self.cancel_requested.emit()
+            return
+        self.reset()
+
     def reset(self) -> None:
+        self._is_downloading = False
         self._title_label.clear()
         self._progress.setValue(0)
         self._progress.show()

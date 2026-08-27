@@ -198,6 +198,13 @@ def builtin_metadata_mapping(profile_id: str, fmt: FilenameFormat) -> MetadataFi
             description_slots=[2] if len(fmt.slots) > 2 and fmt.slots[2].enabled else [],
             album_slot=None,
         )
+    if profile_id in {"music_videos", "music_audio"}:
+        return MetadataFieldMapping(
+            title_slot=0,
+            artist_slot=1,
+            description_slots=[],
+            album_slot=2 if len(fmt.slots) > 2 and fmt.slots[2].enabled else None,
+        )
     if profile_id == "tv_shows":
         return MetadataFieldMapping(
             title_slot=0,

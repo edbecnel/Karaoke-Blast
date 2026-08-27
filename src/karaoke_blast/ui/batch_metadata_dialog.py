@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -24,8 +23,8 @@ from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
 from karaoke_blast.ui.format_config_widget import FormatConfigWidget
 from karaoke_blast.ui.video_type_selector import VideoTypeSelectorWidget
 from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
+from karaoke_blast.ui.library_folder_menu import populate_library_folder_menu
 from karaoke_blast.ui.metadata_file_dialog import MetadataFileDialog, MetadataResult
-from karaoke_blast.ui.recent_folders_panel import PINNED_LABEL
 from karaoke_blast.utils.filename_rename import FilenameFormat
 from karaoke_blast.utils.media_metadata import has_title_and_artist, supports_metadata
 from karaoke_blast.utils.video_types import VideoTypeProfile, find_video_type
@@ -257,53 +256,15 @@ class BatchMetadataDialog(QDialog):
     def _show_folder_menu(self) -> None:
         menu = QMenu(self)
         menu.setStyleSheet(CONTEXT_MENU_STYLE)
-        current = self._current_folder()
-        pinned_resolved = {path.resolve() for path in self._pinned_folders}
-        pinned_label = self._pinned_folder_label or PINNED_LABEL
-
-        for folder in self._pinned_folders:
-            action = QAction(pinned_label, self)
-            action.setToolTip(str(folder))
-            resolved = folder.resolve()
-            if current == resolved:
-                action.setCheckable(True)
-                action.setChecked(True)
-                action.setEnabled(False)
-            else:
-                action.triggered.connect(
-                    lambda _checked=False, selected=folder: self._set_folder(selected)
-                )
-            menu.addAction(action)
-
-        recent = [
-            folder
-            for folder in self._recent_folders
-            if folder.resolve() not in pinned_resolved
-        ]
-        if recent and self._pinned_folders:
-            menu.addSeparator()
-
-        for folder in recent:
-            action = QAction(folder.name, self)
-            action.setToolTip(str(folder))
-            resolved = folder.resolve()
-            if current == resolved:
-                action.setCheckable(True)
-                action.setChecked(True)
-                action.setEnabled(False)
-            else:
-                action.triggered.connect(
-                    lambda _checked=False, selected=folder: self._set_folder(selected)
-                )
-            menu.addAction(action)
-
-        if self._pinned_folders or recent:
-            menu.addSeparator()
-
-        browse = QAction("Browse…", self)
-        browse.triggered.connect(self._browse_folder)
-        menu.addAction(browse)
-
+        populate_library_folder_menu(
+            menu,
+            current=self._current_folder(),
+            recent_folders=self._recent_folders,
+            pinned_folders=self._pinned_folders,
+            pinned_folder_label=self._pinned_folder_label,
+            on_folder_selected=self._set_folder,
+            on_browse=self._browse_folder,
+        )
         menu.exec(
             self._folder_btn.mapToGlobal(self._folder_btn.rect().bottomLeft())
         )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import signal
 import sys
 from importlib.util import find_spec
 from pathlib import Path
@@ -26,6 +27,32 @@ VLC_FORMAT = (
     "bestvideo+bestaudio/"
     "best"
 )
+
+
+class DownloadCancelled(Exception):
+    """Raised when a download is cancelled by the user."""
+
+
+def cleanup_partial_download(video_id: str, output_dir: Path) -> None:
+    """Remove incomplete download files for *video_id* from *output_dir*."""
+    if not output_dir.is_dir():
+        return
+    marker = f" [{video_id}]."
+    for path in output_dir.iterdir():
+        if not path.is_file():
+            continue
+        name = path.name
+        if marker in name or name.endswith(f".{video_id}.part"):
+            try:
+                path.unlink()
+            except OSError as exc:
+                logger.warning("Could not remove partial download %s: %s", path, exc)
+    for path in output_dir.glob(f"*{video_id}*.part"):
+        if path.is_file():
+            try:
+                path.unlink()
+            except OSError as exc:
+                logger.warning("Could not remove partial download %s: %s", path, exc)
 
 
 def downloaded_file_for(video_id: str, folder: Path | None = None) -> Path | None:
@@ -116,11 +143,17 @@ def run_download_in_process(
     watch_url: str,
     output_dir: Path,
     on_progress,
+    is_cancelled=None,
 ) -> Path:
     """Download a video with yt-dlp in the current process."""
+    def check_cancelled() -> None:
+        if is_cancelled is not None and is_cancelled():
+            raise YtDlpDownloadCancelled()
+
     configure_runtime_dependencies()
     try:
         import yt_dlp
+        from yt_dlp.utils import DownloadCancelled as YtDlpDownloadCancelled
         from yt_dlp.utils import DownloadError
     except ImportError as exc:
         raise RuntimeError(f"yt-dlp is not installed: {exc}") from exc
@@ -136,6 +169,7 @@ def run_download_in_process(
     on_progress(0.0, "Starting download…")
 
     def on_ytdl_progress(progress: dict[str, Any]) -> None:
+        check_cancelled()
         status = progress.get("status")
         if status == "downloading":
             total = progress.get("total_bytes") or progress.get("total_bytes_estimate")
@@ -153,7 +187,12 @@ def run_download_in_process(
     try:
         ydl_opts = _build_ydl_opts(output_dir, progress_callback=on_ytdl_progress)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            check_cancelled()
             info = ydl.extract_info(watch_url, download=True)
+            check_cancelled()
+    except (DownloadCancelled, YtDlpDownloadCancelled):
+        cleanup_partial_download(video_id, output_dir)
+        raise DownloadCancelled() from None
     except DownloadError as exc:
         raise RuntimeError(str(exc)) from exc
 
@@ -175,6 +214,13 @@ def run_isolated_download(config_path: Path) -> int:
         _emit_event({"event": "failed", "message": f"Invalid download config: {exc}"})
         return 1
 
+    cancelled = False
+
+    def _on_sigterm(_signum: int, _frame: object) -> None:
+        nonlocal cancelled
+        cancelled = True
+
+    previous_handler = signal.signal(signal.SIGTERM, _on_sigterm)
     try:
         path = run_download_in_process(
             video_id=video_id,
@@ -189,11 +235,17 @@ def run_isolated_download(config_path: Path) -> int:
                     "status": status,
                 }
             ),
+            is_cancelled=lambda: cancelled,
         )
+    except DownloadCancelled:
+        _emit_event({"event": "cancelled"})
+        return 2
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
         logger.warning("Isolated YouTube download failed for %s: %s", video_id, exc)
         _emit_event({"event": "failed", "message": _friendly_download_error(exc)})
         return 1
+    finally:
+        signal.signal(signal.SIGTERM, previous_handler)
 
     _emit_event({"event": "finished", "path": str(path)})
     return 0

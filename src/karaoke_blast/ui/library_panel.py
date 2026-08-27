@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QPalette
 from PyQt6.QtWidgets import (
-    QCheckBox,
     QHBoxLayout,
     QLabel,
     QMenu,
@@ -22,7 +21,6 @@ from PyQt6.QtWidgets import (
 from karaoke_blast.models.play_history_entry import PlayHistoryEntry
 from karaoke_blast.models.queue_item import QueueItem
 from karaoke_blast.models.youtube_video import YouTubeVideo
-from karaoke_blast.ui.checkbox_style import CHECKBOX_STYLE
 from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
 from karaoke_blast.ui.list_style import SIDEBAR_LIST_STYLE
 from karaoke_blast.ui.mixed_queue_list_widget import (
@@ -34,6 +32,7 @@ from karaoke_blast.ui.play_history_panel import PlayHistoryPanel
 from karaoke_blast.ui.song_list_panel import SongListPanel
 from karaoke_blast.ui.video_type_selector import VideoTypeSwitchWidget
 from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
+from karaoke_blast.ui.youtube_append_combo import YouTubeAppendComboRow
 from karaoke_blast.ui.youtube_download_status import YouTubeDownloadStatus
 from karaoke_blast.ui.youtube_downloads_folder_row import YouTubeDownloadsFolderRow
 from karaoke_blast.ui.youtube_search_panel import (
@@ -43,13 +42,30 @@ from karaoke_blast.ui.youtube_search_panel import (
     YouTubeSearchPanel,
 )
 from karaoke_blast.utils.song_display import DisplayFormat
-from karaoke_blast.utils.video_types import BUILTIN_SONGS_ID, VideoTypeProfile, find_video_type
+from karaoke_blast.utils.video_types import (
+    BUILTIN_SONGS_ID,
+    MediaCategory,
+    VideoTypeProfile,
+    find_video_type,
+)
 from karaoke_blast.utils.youtube_url import extract_video_id
 
 PANEL_DEFAULT_WIDTH = 320
-QUEUE_SECTION_MIN_HEIGHT = 72
-LIST_MIN_HEIGHT = 80
+QUEUE_MIN_LINES = 2
+QUEUE_SECTION_MIN_RATIO = 0.12
+QUEUE_SECTION_MAX_RATIO = 0.75
 QUEUE_SECTION_DEFAULT_RATIO = 0.28
+LIST_MIN_HEIGHT = 80
+
+QUEUE_SPLITTER_STYLE = """
+QSplitter::handle:vertical {
+    background: rgba(255, 255, 255, 30);
+    height: 4px;
+}
+QSplitter::handle:vertical:hover {
+    background: rgba(233, 69, 96, 160);
+}
+"""
 
 SEARCH_STYLE = """
 QLineEdit {
@@ -159,6 +175,7 @@ class LibraryPanel(QWidget):
     queue_all_folder_requested = pyqtSignal(object)
     back_to_folders_requested = pyqtSignal()
     flat_browse_toggled = pyqtSignal(bool)
+    queue_split_changed = pyqtSignal(float)
     close_requested = pyqtSignal()
     resize_dragged = pyqtSignal(int)
     queue_reordered = pyqtSignal(list)
@@ -169,12 +186,13 @@ class LibraryPanel(QWidget):
     youtube_play_requested = pyqtSignal(object)
     youtube_queue_requested = pyqtSignal(object)
     download_requested = pyqtSignal(object)
+    download_cancel_requested = pyqtSignal()
     history_play_requested = pyqtSignal(object)
     history_queue_requested = pyqtSignal(object)
     history_remove_requested = pyqtSignal(object)
     history_clear_requested = pyqtSignal()
     search_backend_fallback = pyqtSignal(str)
-    append_karaoke_changed = pyqtSignal(bool)
+    youtube_append_changed = pyqtSignal(object)
     browse_downloads_folder_requested = pyqtSignal()
     use_current_folder_for_downloads_requested = pyqtSignal()
     youtube_search_requested = pyqtSignal(str)
@@ -263,18 +281,17 @@ class LibraryPanel(QWidget):
         self._search_panel.queue_requested.connect(self.youtube_queue_requested)
         self._search_panel.download_requested.connect(self.download_requested)
         self._search_panel.search_backend_fallback.connect(self.search_backend_fallback)
-        self._search_panel.append_karaoke_changed.connect(self._sync_append_karaoke)
 
         self._youtube_controls = QWidget()
         youtube_controls_layout = QVBoxLayout(self._youtube_controls)
         youtube_controls_layout.setContentsMargins(0, 0, 0, 0)
         youtube_controls_layout.setSpacing(6)
 
-        self._append_karaoke_checkbox = QCheckBox('Append "karaoke" to search')
-        self._append_karaoke_checkbox.setChecked(True)
-        self._append_karaoke_checkbox.setStyleSheet(CHECKBOX_STYLE)
-        self._append_karaoke_checkbox.toggled.connect(self.append_karaoke_changed.emit)
-        youtube_controls_layout.addWidget(self._append_karaoke_checkbox)
+        self._append_combo_row = YouTubeAppendComboRow()
+        self._append_combo_row.append_changed.connect(self._on_youtube_append_changed)
+        youtube_controls_layout.addWidget(self._append_combo_row)
+        self._append_category = MediaCategory.KARAOKE_VIDEOKE
+        self._append_search_value: str | None = "karaoke"
 
         search_row = QHBoxLayout()
         search_row.setSpacing(8)
@@ -282,7 +299,7 @@ class LibraryPanel(QWidget):
         self._search_btn.setStyleSheet(SEARCH_BTN_STYLE)
         self._search_btn.clicked.connect(self._trigger_youtube_search)
         search_row.addWidget(self._search_btn)
-        self._search_more_btn = QPushButton("Search more")
+        self._search_more_btn = QPushButton("Load more...")
         self._search_more_btn.setStyleSheet(SEARCH_MORE_BTN_STYLE)
         self._search_more_btn.clicked.connect(self._search_panel.start_search_more)
         search_row.addWidget(self._search_more_btn)
@@ -322,11 +339,16 @@ class LibraryPanel(QWidget):
         self._queue_list.download_requested.connect(self.download_requested)
         self._queue_list.queue_reordered.connect(self.queue_reordered)
         queue_outer.addWidget(self._queue_list, 1)
-        self._queue_section.setMinimumHeight(QUEUE_SECTION_MIN_HEIGHT)
-        layout.addWidget(self._queue_section)
+        self._queue_list.setMinimumHeight(self._queue_list_min_height())
+
+        self._lower_section = QWidget()
+        lower_layout = QVBoxLayout(self._lower_section)
+        lower_layout.setContentsMargins(0, 0, 0, 0)
+        lower_layout.setSpacing(8)
 
         self._download_status = YouTubeDownloadStatus()
-        layout.addWidget(self._download_status)
+        self._download_status.cancel_requested.connect(self.download_cancel_requested.emit)
+        lower_layout.addWidget(self._download_status)
 
         self._downloads_folder_row = YouTubeDownloadsFolderRow()
         self._downloads_folder_row.browse_clicked.connect(
@@ -335,7 +357,7 @@ class LibraryPanel(QWidget):
         self._downloads_folder_row.use_current_folder_clicked.connect(
             self.use_current_folder_for_downloads_requested.emit
         )
-        layout.addWidget(self._downloads_folder_row)
+        lower_layout.addWidget(self._downloads_folder_row)
 
         self._tabs = QTabWidget()
         self._tabs.setStyleSheet(TAB_STYLE)
@@ -394,11 +416,82 @@ class LibraryPanel(QWidget):
         self._tabs.addTab(self._song_list, "Local")
         self._tabs.addTab(youtube_outer, "YouTube")
         self._tabs.addTab(history_tab, "History")
-        layout.addWidget(self._tabs, 1)
+        lower_layout.addWidget(self._tabs, 1)
+
+        self._queue_section.setMinimumHeight(self._queue_section_min_height())
+        self._queue_splitter = QSplitter(Qt.Orientation.Vertical)
+        self._queue_splitter.setStyleSheet(QUEUE_SPLITTER_STYLE)
+        self._queue_splitter.setHandleWidth(4)
+        self._queue_splitter.setChildrenCollapsible(False)
+        self._queue_splitter.addWidget(self._queue_section)
+        self._queue_splitter.addWidget(self._lower_section)
+        self._queue_splitter.setStretchFactor(0, 0)
+        self._queue_splitter.setStretchFactor(1, 1)
+        self._queue_splitter.splitterMoved.connect(self._on_queue_splitter_moved)
+        layout.addWidget(self._queue_splitter, 1)
+
+        self._queue_section_ratio: float | None = None
+        queue_handle = self._queue_splitter.handle(0)
+        if queue_handle is not None:
+            queue_handle.setVisible(False)
 
         self._edge_grip = PanelEdgeGrip(self)
         self._edge_grip.dragged.connect(self.resize_dragged)
         self._edge_grip.raise_()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        QTimer.singleShot(0, self._apply_queue_split_sizes)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._edge_grip.setGeometry(
+            self.width() - EDGE_GRIP_WIDTH,
+            0,
+            EDGE_GRIP_WIDTH,
+            self.height(),
+        )
+        QTimer.singleShot(0, self._apply_queue_split_sizes)
+
+    def _queue_list_min_height(self) -> int:
+        line_height = self._queue_list.fontMetrics().height() + 13
+        return line_height * QUEUE_MIN_LINES
+
+    def _queue_section_min_height(self) -> int:
+        header_height = self._queue_title.fontMetrics().height() + 8
+        return header_height + 4 + self._queue_list_min_height()
+
+    def set_queue_section_ratio(self, ratio: float | None) -> None:
+        self._queue_section_ratio = ratio
+        QTimer.singleShot(0, self._apply_queue_split_sizes)
+
+    def _apply_queue_split_sizes(self) -> None:
+        total = self._queue_splitter.height()
+        if total <= 0:
+            return
+        if not self._queue_section.isVisible():
+            self._queue_splitter.setSizes([0, total])
+            return
+
+        ratio = self._queue_section_ratio
+        if ratio is None:
+            ratio = QUEUE_SECTION_DEFAULT_RATIO
+        ratio = max(QUEUE_SECTION_MIN_RATIO, min(QUEUE_SECTION_MAX_RATIO, ratio))
+        queue_height = max(self._queue_section.minimumHeight(), int(total * ratio))
+        max_queue = total - LIST_MIN_HEIGHT
+        queue_height = min(queue_height, max_queue) if max_queue > 0 else queue_height
+        self._queue_splitter.setSizes([queue_height, max(0, total - queue_height)])
+
+    def _on_queue_splitter_moved(self, _pos: int, _index: int) -> None:
+        if not self._queue_section.isVisible():
+            return
+        sizes = self._queue_splitter.sizes()
+        total = sum(sizes)
+        if total <= 0:
+            return
+        ratio = sizes[0] / total
+        self._queue_section_ratio = ratio
+        self.queue_split_changed.emit(ratio)
 
     def _wire_song_list(self) -> None:
         self._song_list.song_selected.connect(self.song_selected)
@@ -479,20 +572,18 @@ class LibraryPanel(QWidget):
         if self._tabs.currentIndex() == TAB_YOUTUBE:
             self._trigger_youtube_search()
 
+    def _on_youtube_append_changed(self, append: object) -> None:
+        self._append_search_value = append if isinstance(append, str) else None
+        self.youtube_append_changed.emit(self._append_search_value)
+
     def _trigger_youtube_search(self) -> None:
         query = self._search.text().strip()
         if not query:
             return
         self._search_panel.search_with_query(
             query,
-            append_karaoke=self._append_karaoke_checkbox.isChecked(),
+            append_term=self._append_search_value,
         )
-
-    def _sync_append_karaoke(self, checked: bool) -> None:
-        self._append_karaoke_checkbox.blockSignals(True)
-        self._append_karaoke_checkbox.setChecked(checked)
-        self._append_karaoke_checkbox.blockSignals(False)
-        self.append_karaoke_changed.emit(checked)
 
     def set_active_tab(self, tab: str) -> None:
         mapping = {"local": TAB_LOCAL, "youtube": TAB_YOUTUBE, "history": TAB_HISTORY}
@@ -506,9 +597,22 @@ class LibraryPanel(QWidget):
     def configure_search(self, *, backend_name: str, api_key: str | None) -> None:
         self._search_panel.configure_search(backend_name=backend_name, api_key=api_key)
 
-    def set_append_karaoke(self, checked: bool) -> None:
-        self._append_karaoke_checkbox.setChecked(checked)
-        self._search_panel.set_append_karaoke(checked)
+    def configure_youtube_append_search(
+        self, *, category: MediaCategory, append: str | None
+    ) -> None:
+        self._append_category = category
+        self._append_search_value = append
+        self._append_combo_row.configure(category=category, append=append)
+        self._search_panel.configure_youtube_append_search(
+            category=category,
+            append=append,
+        )
+
+    def set_youtube_append(self, append: str | None) -> None:
+        self.configure_youtube_append_search(
+            category=self._append_category,
+            append=append,
+        )
 
     def set_downloads_folder(
         self, path: Path, *, current_library_folder: Path | None = None
@@ -558,10 +662,14 @@ class LibraryPanel(QWidget):
     def set_queue_state(self, *, current: QueueItem | None, queued: list[QueueItem]) -> None:
         has_queue = current is not None or bool(queued)
         self._queue_section.setVisible(has_queue)
+        handle = self._queue_splitter.handle(0)
+        if handle is not None:
+            handle.setVisible(has_queue)
         if has_queue:
             count = (1 if current else 0) + len(queued)
             self._queue_title.setText(f"Queue ({count})")
         self._queue_list.set_queue(current=current, queued=queued)
+        QTimer.singleShot(0, self._apply_queue_split_sizes)
 
     def set_history(
         self,
@@ -638,6 +746,9 @@ class LibraryPanel(QWidget):
     def update_download_progress(self, title: str, percent: float, status: str) -> None:
         self._download_status.update_progress(title, percent, status)
 
+    def show_download_cancelling(self) -> None:
+        self._download_status.show_cancelling()
+
     def show_download_success(self, title: str, *, message: str = "Download complete") -> None:
         self._download_status.show_success(title, message=message)
 
@@ -655,15 +766,6 @@ class LibraryPanel(QWidget):
     def raise_edge_grip(self) -> None:
         self._edge_grip.raise_()
         self._edge_grip.setCursor(Qt.CursorShape.SizeHorCursor)
-
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        self._edge_grip.setGeometry(
-            self.width() - EDGE_GRIP_WIDTH,
-            0,
-            EDGE_GRIP_WIDTH,
-            self.height(),
-        )
 
     def _video_from_url_field(self) -> YouTubeVideo | None:
         video_id = extract_video_id(self._url_input.text())

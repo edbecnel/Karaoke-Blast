@@ -27,7 +27,7 @@ from karaoke_blast.ui.display_format_dialog import DisplayFormatDialog
 from karaoke_blast.ui.list_style import QUEUE_LIST_STYLE, SIDEBAR_LIST_STYLE
 from karaoke_blast.ui.local_history_panel import LocalHistoryPanel
 from karaoke_blast.ui.panel_splitter import EDGE_GRIP_WIDTH, PanelEdgeGrip
-from karaoke_blast.ui.recent_folders_panel import PINNED_LABEL
+from karaoke_blast.ui.library_folder_menu import populate_library_folder_menu
 from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
 from karaoke_blast.ui.queue_list_widget import PlayOrderListWidget, _ROLE_INDEX, _ROLE_PATH
 from karaoke_blast.utils.file_manager import (
@@ -145,14 +145,6 @@ QPushButton::menu-indicator {
     margin-right: 4px;
 }
 """
-
-
-def _safe_resolve(path: Path) -> Path:
-    try:
-        return path.resolve()
-    except OSError:
-        return path
-
 
 class SongListPanel(QWidget):
     """Left sidebar listing songs and subfolders in the current browse folder."""
@@ -790,27 +782,19 @@ class SongListPanel(QWidget):
 
     def populate_folder_menu(self, menu: QMenu) -> None:
         """Fill *menu* with pinned and recent folders from the start-screen list."""
-        menu.clear()
         current = self._current_folder
-        pinned_resolved = {_safe_resolve(path) for path in self._pinned_folders}
-        pinned_label = self._pinned_folder_label or PINNED_LABEL
+        populate_library_folder_menu(
+            menu,
+            current=current,
+            recent_folders=self._recent_folders,
+            pinned_folders=self._pinned_folders,
+            pinned_folder_label=self._pinned_folder_label,
+            on_folder_selected=self.folder_selected.emit,
+            on_browse=self.browse_folder_requested.emit,
+            include_browse=False,
+        )
 
-        for folder in self._pinned_folders:
-            self._add_folder_menu_action(menu, folder, pinned_label, current)
-
-        recent = [
-            folder
-            for folder in self._recent_folders
-            if _safe_resolve(folder) not in pinned_resolved
-        ]
-        if recent and self._pinned_folders:
-            menu.addSeparator()
-
-        for folder in recent:
-            self._add_folder_menu_action(menu, folder, folder.name, current)
-
-        if self._pinned_folders or recent:
-            menu.addSeparator()
+        menu.addSeparator()
 
         copy_path = QAction("Copy path to clipboard", menu)
         copy_path.setEnabled(current is not None)
@@ -824,26 +808,6 @@ class SongListPanel(QWidget):
         browse = QAction("Browse…", menu)
         browse.triggered.connect(self.browse_folder_requested.emit)
         menu.addAction(browse)
-
-    def _add_folder_menu_action(
-        self,
-        menu: QMenu,
-        folder: Path,
-        label: str,
-        current: Path | None,
-    ) -> None:
-        action = QAction(label, menu)
-        action.setToolTip(str(folder))
-        resolved = _safe_resolve(folder)
-        if current is not None and current == resolved:
-            action.setCheckable(True)
-            action.setChecked(True)
-            action.setEnabled(False)
-        else:
-            action.triggered.connect(
-                lambda _checked=False, selected=folder: self.folder_selected.emit(selected)
-            )
-        menu.addAction(action)
 
     def _on_refresh_clicked(self, _checked: bool = False) -> None:
         self.refresh_requested.emit()

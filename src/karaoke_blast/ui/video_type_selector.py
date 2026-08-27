@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from pathlib import Path
+
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -206,11 +209,23 @@ class VideoTypeSelectorWidget(QWidget):
         video_types: list[VideoTypeProfile],
         active_id: str,
         parent: QWidget | None = None,
+        folder_picker_provider: Callable[[], dict] | None = None,
+        recent_folders: list[Path] | None = None,
+        pinned_folders: list[Path] | None = None,
+        pinned_folder_label: str | None = None,
+        on_folder_browsed: Callable[[Path], None] | None = None,
+        resolve_library_folder: Callable[[VideoTypeProfile], Path | None] | None = None,
     ) -> None:
         super().__init__(parent)
         self._video_types = [profile.copy() for profile in video_types]
         self._active_id = active_id
         self._building = False
+        self._folder_picker_provider = folder_picker_provider
+        self._recent_folders = list(recent_folders or [])
+        self._pinned_folders = list(pinned_folders or [])
+        self._pinned_folder_label = pinned_folder_label
+        self._on_folder_browsed = on_folder_browsed
+        self._resolve_library_folder = resolve_library_folder
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -262,6 +277,12 @@ class VideoTypeSelectorWidget(QWidget):
             video_types=self._video_types,
             active_id=self._active_id,
             parent=self,
+            folder_picker_provider=self._folder_picker_provider,
+            recent_folders=self._recent_folders,
+            pinned_folders=self._pinned_folders,
+            pinned_folder_label=self._pinned_folder_label,
+            on_folder_browsed=self._on_folder_browsed,
+            resolve_library_folder=self._resolve_library_folder,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
@@ -354,8 +375,30 @@ class VideoTypeSelectorWidget(QWidget):
         if profile is not None:
             self.type_changed.emit(profile.copy())
 
+    def _editor_folder_kwargs(self, profile: VideoTypeProfile | None = None) -> dict:
+        if self._folder_picker_provider is not None:
+            kwargs = dict(self._folder_picker_provider())
+        else:
+            kwargs = {
+                "recent_folders": self._recent_folders,
+                "pinned_folders": self._pinned_folders,
+                "pinned_folder_label": self._pinned_folder_label,
+                "on_folder_browsed": self._on_folder_browsed,
+            }
+        initial_library_folder: Path | None = None
+        if profile is not None:
+            if profile.last_library_folder:
+                initial_library_folder = Path(profile.last_library_folder)
+            else:
+                resolver = kwargs.get("resolve_library_folder", self._resolve_library_folder)
+                if resolver is not None:
+                    initial_library_folder = resolver(profile)
+        kwargs["initial_library_folder"] = initial_library_folder
+        kwargs.pop("resolve_library_folder", None)
+        return kwargs
+
     def _add_type(self) -> None:
-        dialog = VideoTypeEditorDialog(self)
+        dialog = VideoTypeEditorDialog(self, **self._editor_folder_kwargs())
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         profile = dialog.profile()
@@ -372,7 +415,11 @@ class VideoTypeSelectorWidget(QWidget):
         profile = find_video_type(self._video_types, self._active_id)
         if profile is None:
             return
-        dialog = VideoTypeEditorDialog(self, profile=profile)
+        dialog = VideoTypeEditorDialog(
+            self,
+            profile=profile,
+            **self._editor_folder_kwargs(profile),
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         updated = dialog.profile()

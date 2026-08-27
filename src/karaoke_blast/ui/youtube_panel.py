@@ -29,6 +29,7 @@ from karaoke_blast.ui.youtube_search_panel import (
     RESULTS_MIN_HEIGHT,
     YouTubeSearchPanel,
 )
+from karaoke_blast.utils.video_types import MediaCategory
 from karaoke_blast.utils.youtube_url import extract_video_id
 
 INPUT_STYLE = """
@@ -80,7 +81,7 @@ class YouTubePanel(QWidget):
     close_requested = pyqtSignal()
     resize_dragged = pyqtSignal(int)
     search_backend_fallback = pyqtSignal(str)
-    append_karaoke_changed = pyqtSignal(bool)
+    youtube_append_changed = pyqtSignal(object)
     history_remove_requested = pyqtSignal(str)
     history_clear_requested = pyqtSignal()
     download_requested = pyqtSignal(object)
@@ -150,7 +151,7 @@ class YouTubePanel(QWidget):
         self._search_panel.close_requested.connect(self.close_requested)
         self._search_panel.resize_dragged.connect(self.resize_dragged)
         self._search_panel.search_backend_fallback.connect(self.search_backend_fallback)
-        self._search_panel.append_karaoke_changed.connect(self.append_karaoke_changed)
+        self._search_panel.youtube_append_changed.connect(self.youtube_append_changed)
         self._search_panel.download_requested.connect(self.download_requested)
 
         self._url_page = QWidget()
@@ -253,8 +254,16 @@ class YouTubePanel(QWidget):
     def configure_search(self, *, backend_name: str, api_key: str | None) -> None:
         self._search_panel.configure_search(backend_name=backend_name, api_key=api_key)
 
-    def set_append_karaoke(self, checked: bool) -> None:
-        self._search_panel.set_append_karaoke(checked)
+    def configure_youtube_append_search(
+        self, *, category: MediaCategory, append: str | None
+    ) -> None:
+        self._search_panel.configure_youtube_append_search(
+            category=category,
+            append=append,
+        )
+
+    def set_youtube_append(self, append: str | None) -> None:
+        self._search_panel.set_youtube_append(append)
 
     def focus_search(self) -> None:
         self._tabs.setCurrentIndex(0)
