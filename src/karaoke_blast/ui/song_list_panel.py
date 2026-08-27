@@ -185,6 +185,7 @@ class SongListPanel(QWidget):
     play_all_folder_requested = pyqtSignal(object)
     queue_all_folder_requested = pyqtSignal(object)
     back_to_folders_requested = pyqtSignal()
+    flat_browse_toggled = pyqtSignal(bool)
     display_mode_changed = pyqtSignal(str)
     display_format_changed = pyqtSignal(object)
 
@@ -335,6 +336,21 @@ class SongListPanel(QWidget):
         self._sort_combo.currentIndexChanged.connect(self._on_sort_changed)
         songs_layout.addWidget(self._sort_combo)
 
+        self._flat_browse_btn = QPushButton("Include subfolders")
+        self._flat_browse_btn.setCheckable(True)
+        self._flat_browse_btn.setToolTip(
+            "Show all media files in subfolders as a flat list"
+        )
+        self._flat_browse_btn.setStyleSheet(
+            "QPushButton { background-color: #2d2d42; color: #b8b8c8; border: 1px solid #5a5a72;"
+            " border-radius: 4px; padding: 6px 10px; font-size: 12px; }"
+            "QPushButton:hover { border-color: #7a7a92; color: white; }"
+            "QPushButton:checked { background-color: #e94560; color: white; border-color: #e94560; }"
+        )
+        self._flat_browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._flat_browse_btn.toggled.connect(self._on_flat_browse_toggled)
+        songs_layout.addWidget(self._flat_browse_btn)
+
         if not embedded:
             self._search = VisibleSpaceLineEdit()
             self._search.setPlaceholderText("Search songs…")
@@ -475,7 +491,9 @@ class SongListPanel(QWidget):
         self._paths: list[Path] = []
         self._subfolders: list[Path] = []
         self._can_navigate_up = False
-        self._recursive_list_mode = False
+        self._flat_list_mode = False
+        self._show_back_to_folders = False
+        self._flat_browse_enabled = False
         self._label_root: Path | None = None
         self._library_root: Path | None = None
         self._search_query = ""
@@ -532,6 +550,19 @@ class SongListPanel(QWidget):
 
     def set_queue_section_ratio(self, ratio: float | None) -> None:
         self._queue_section_ratio = ratio
+
+    def set_flat_browse_enabled(self, enabled: bool) -> None:
+        self._flat_browse_enabled = enabled
+        self._flat_browse_btn.blockSignals(True)
+        self._flat_browse_btn.setChecked(enabled)
+        self._flat_browse_btn.blockSignals(False)
+
+    def flat_browse_enabled(self) -> bool:
+        return self._flat_browse_enabled
+
+    def _on_flat_browse_toggled(self, checked: bool) -> None:
+        self._flat_browse_enabled = checked
+        self.flat_browse_toggled.emit(checked)
 
     def set_search_query(self, query: str) -> None:
         self._search_query = query.strip()
@@ -728,11 +759,20 @@ class SongListPanel(QWidget):
         menu.addAction(browse_folder)
         menu.addSeparator()
 
-        if self._recursive_list_mode:
+        if self._show_back_to_folders:
             back = QAction("Back to folders", self)
             back.triggered.connect(self.back_to_folders_requested.emit)
             menu.addAction(back)
             menu.addSeparator()
+
+        include_subfolders = QAction("Include subfolders", self)
+        include_subfolders.setCheckable(True)
+        include_subfolders.setChecked(self._flat_browse_enabled)
+        include_subfolders.triggered.connect(
+            lambda checked: self._flat_browse_btn.setChecked(checked)
+        )
+        menu.addAction(include_subfolders)
+        menu.addSeparator()
 
         play_all = QAction("Play all under this folder", self)
         play_all.triggered.connect(self.play_all_requested.emit)
@@ -1167,17 +1207,19 @@ class SongListPanel(QWidget):
         clear_search: bool = True,
         subfolders: list[Path] | None = None,
         can_navigate_up: bool = False,
-        recursive_list_mode: bool = False,
+        flat_list_mode: bool = False,
+        show_back_to_folders: bool = False,
         label_root: Path | None = None,
     ) -> None:
         self._paths = paths
         self._subfolders = list(subfolders or [])
-        self._can_navigate_up = can_navigate_up and not recursive_list_mode
-        self._recursive_list_mode = recursive_list_mode
+        self._can_navigate_up = can_navigate_up
+        self._flat_list_mode = flat_list_mode
+        self._show_back_to_folders = show_back_to_folders
         self._label_root = label_root.resolve() if label_root is not None else None
         self._current_index = current_index
         self._selected_index = None
-        if self._recursive_list_mode:
+        if self._show_back_to_folders:
             self._back_folders_btn.show()
         elif self._embedded and self._search_query:
             self._back_folders_btn.show()
@@ -1242,7 +1284,7 @@ class SongListPanel(QWidget):
     def _song_label(self, path: Path) -> str:
         leaf = self._leaf_label(path)
         root = self._label_root or self._library_root
-        if root is not None and (self._recursive_list_mode or bool(self._search_query)):
+        if root is not None and (self._flat_list_mode or bool(self._search_query)):
             try:
                 relative = path.resolve().relative_to(root)
             except (OSError, ValueError):
@@ -1368,7 +1410,7 @@ class SongListPanel(QWidget):
             visible += 1
 
         folder_part = ""
-        if not self._recursive_list_mode and self._subfolders:
+        if not self._flat_list_mode and self._subfolders:
             if query:
                 folder_part = (
                     f"{visible_folders} of {len(self._subfolders)} folder"

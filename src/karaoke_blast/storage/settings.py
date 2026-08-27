@@ -54,6 +54,7 @@ class Settings:
         self.song_display_format: DisplayFormat = DEFAULT_DISPLAY_FORMAT.copy()
         self.video_types: list[VideoTypeProfile] = default_video_types()
         self.active_video_type_id: str = BUILTIN_SONGS_ID
+        self.library_flat_browse: bool = False
         self.load()
 
     def load(self) -> None:
@@ -136,6 +137,8 @@ class Settings:
                 self.active_video_type_id = active_id.strip()
             if find_video_type(self.video_types, self.active_video_type_id) is None:
                 self.active_video_type_id = BUILTIN_SONGS_ID
+            if isinstance(data.get("library_flat_browse"), bool):
+                self.library_flat_browse = data["library_flat_browse"]
             self._migrate_legacy_youtube_append_karaoke(data)
             self._migrate_legacy_youtube_downloads_dir(data)
             self._migrate_legacy_display_formats()
@@ -170,6 +173,7 @@ class Settings:
             "song_display_format": self.song_display_format.to_dict(),
             "video_types": [profile.to_dict() for profile in self.video_types],
             "active_video_type_id": self.active_video_type_id,
+            "library_flat_browse": self.library_flat_browse,
         }
         try:
             _settings_file().write_text(

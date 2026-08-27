@@ -118,6 +118,7 @@ class MainWindow(QWidget):
         self._folder: Path | None = None  # library root
         self._browse_folder: Path | None = None
         self._recursive_list_mode = False
+        self._flat_browse_mode = False
         self._raw_paths: list[Path] = []
         self._library_paths: list[Path] = []
         self._sort_strategy = SortStrategy.NAME_ASC
@@ -134,6 +135,7 @@ class MainWindow(QWidget):
         self._folder_history = FolderHistory()
         self._folder_queues = FolderQueues()
         self._settings = Settings()
+        self._flat_browse_mode = self._settings.library_flat_browse
         self._download_thread: QThread | None = None
         self._download_worker = None
         self._downloading_video_id: str | None = None
@@ -515,6 +517,7 @@ class MainWindow(QWidget):
         self._library_panel.play_all_folder_requested.connect(self._on_play_all_folder_requested)
         self._library_panel.queue_all_folder_requested.connect(self._on_queue_all_folder_requested)
         self._library_panel.back_to_folders_requested.connect(self._on_back_to_folders)
+        self._library_panel.flat_browse_toggled.connect(self._on_flat_browse_toggled)
         self._library_panel.play_requested.connect(self._on_queue_item_play_requested)
         self._library_panel.queue_requested.connect(self._on_queue_item_queue_requested)
         self._library_panel.youtube_play_requested.connect(self._on_youtube_play_requested)
@@ -536,6 +539,7 @@ class MainWindow(QWidget):
         self._library_panel.video_type_changed.connect(self._on_active_video_type_changed)
         self._library_panel.set_downloads_folder(self._youtube_downloads_path())
         self._library_panel.set_display_mode(self._settings.song_display_mode)
+        self._library_panel.set_flat_browse_enabled(self._flat_browse_mode)
         self._sync_library_display_format()
         self._sync_library_video_type_selector()
         self._sync_library_list_count_labels()
@@ -999,9 +1003,13 @@ class MainWindow(QWidget):
         self._library_panel.set_library_root(folder)
         self._sort_strategy = SortStrategy.NAME_ASC
 
-        paths = scan_videos(folder)
+        if self._flat_browse_mode:
+            paths = scan_videos(folder, recursive=True)
+            subfolders: list[Path] = []
+        else:
+            paths = scan_videos(folder)
+            subfolders = child_folders_with_videos(folder)
         self._library_paths = scan_videos(folder, recursive=True)
-        subfolders = child_folders_with_videos(folder)
         self._raw_paths = paths
         sorted_paths = self._sort_paths(self._raw_paths)
         restored_index = self._restore_folder_current(sorted_paths) if sorted_paths else None
@@ -1023,13 +1031,16 @@ class MainWindow(QWidget):
             self._vlc.stop()
             self._controls.set_playing(False)
         self._library_panel.set_sort_strategy(self._sort_strategy)
+        self._library_panel.set_flat_browse_enabled(self._flat_browse_mode)
         self._restore_folder_queue(sorted_paths)
         self._library_panel.set_songs(
             sorted_paths,
             current_index=restored_index,
             subfolders=subfolders,
             can_navigate_up=False,
-            recursive_list_mode=False,
+            flat_list_mode=self._flat_browse_mode,
+            show_back_to_folders=False,
+            label_root=folder if self._flat_browse_mode else None,
         )
         self._update_queue_display()
         self._update_history_display()
@@ -1068,6 +1079,14 @@ class MainWindow(QWidget):
         except (OSError, ValueError):
             return False
 
+    def _flat_list_active(self) -> bool:
+        return self._flat_browse_mode or self._recursive_list_mode
+
+    def _browse_subfolders(self) -> list[Path]:
+        if self._flat_list_active() or self._browse_folder is None:
+            return []
+        return child_folders_with_videos(self._browse_folder)
+
     def _can_navigate_up(self) -> bool:
         if self._folder is None or self._browse_folder is None:
             return False
@@ -1089,14 +1108,13 @@ class MainWindow(QWidget):
         if keep_playback and not self._stopped:
             playing_path = self._external_path or self._playlist.current()
 
-        if self._recursive_list_mode:
+        if self._flat_list_active():
             paths = scan_videos(self._browse_folder, recursive=True)
             subfolders: list[Path] = []
-            can_up = False
         else:
             paths = scan_videos(self._browse_folder, recursive=False)
             subfolders = child_folders_with_videos(self._browse_folder)
-            can_up = self._can_navigate_up()
+        can_up = self._can_navigate_up()
 
         self._raw_paths = paths
         sorted_paths = self._sort_paths(self._raw_paths)
@@ -1135,8 +1153,9 @@ class MainWindow(QWidget):
             clear_search=clear_search,
             subfolders=subfolders,
             can_navigate_up=can_up,
-            recursive_list_mode=self._recursive_list_mode,
-            label_root=self._browse_folder if self._recursive_list_mode else None,
+            flat_list_mode=self._flat_list_active(),
+            show_back_to_folders=self._recursive_list_mode,
+            label_root=self._browse_folder if self._flat_list_active() else None,
         )
         self._update_queue_display()
         self._update_downloads_folder_display()
@@ -1190,7 +1209,8 @@ class MainWindow(QWidget):
             current_index=0,
             subfolders=[],
             can_navigate_up=False,
-            recursive_list_mode=True,
+            flat_list_mode=True,
+            show_back_to_folders=True,
             label_root=self._browse_folder,
         )
         self._update_queue_display(include_now_playing=False)
@@ -1243,6 +1263,12 @@ class MainWindow(QWidget):
         if self._browse_folder is None:
             return
         self._recursive_list_mode = False
+        self._apply_browse_contents(clear_search=True, keep_playback=True)
+
+    def _on_flat_browse_toggled(self, enabled: bool) -> None:
+        self._flat_browse_mode = enabled
+        self._settings.library_flat_browse = enabled
+        self._settings.save()
         self._apply_browse_contents(clear_search=True, keep_playback=True)
 
     def showEvent(self, event) -> None:
@@ -1434,7 +1460,8 @@ class MainWindow(QWidget):
             clear_search=False,
             subfolders=[],
             can_navigate_up=False,
-            recursive_list_mode=True,
+            flat_list_mode=True,
+            show_back_to_folders=False,
             label_root=self._folder,
         )
 
@@ -1719,15 +1746,18 @@ class MainWindow(QWidget):
         if self._folder is not None:
             return
 
-        paths = scan_videos(target)
-        if not paths:
-            return
-
-        subfolders = child_folders_with_videos(target)
         self._folder = target
         self._browse_folder = target
         self._recursive_list_mode = False
         self._library_paths = scan_videos(target, recursive=True)
+        if self._flat_browse_mode:
+            paths = scan_videos(target, recursive=True)
+            subfolders: list[Path] = []
+        else:
+            paths = scan_videos(target)
+            subfolders = child_folders_with_videos(target)
+        if not paths and not subfolders:
+            return
         self._raw_paths = paths
         sorted_paths = self._sort_paths(paths)
         self._playlist = Playlist(paths=sorted_paths, index=0)
@@ -1738,7 +1768,9 @@ class MainWindow(QWidget):
             current_index=None,
             subfolders=subfolders,
             can_navigate_up=False,
-            recursive_list_mode=False,
+            flat_list_mode=self._flat_browse_mode,
+            show_back_to_folders=False,
+            label_root=target if self._flat_browse_mode else None,
         )
         self._update_queue_display()
 
@@ -2084,11 +2116,7 @@ class MainWindow(QWidget):
         sorted_paths = self._sort_paths(self._raw_paths)
         self._playlist.reorder(sorted_paths, keep_path=keep_path)
 
-        subfolders = (
-            []
-            if self._recursive_list_mode or self._browse_folder is None
-            else child_folders_with_videos(self._browse_folder)
-        )
+        subfolders = self._browse_subfolders()
         highlight: int | None = None
         if not self._stopped and not was_playing:
             if self._external_path is not None:
@@ -2102,8 +2130,9 @@ class MainWindow(QWidget):
             clear_search=False,
             subfolders=subfolders,
             can_navigate_up=self._can_navigate_up(),
-            recursive_list_mode=self._recursive_list_mode,
-            label_root=self._browse_folder if self._recursive_list_mode else None,
+            flat_list_mode=self._flat_list_active(),
+            show_back_to_folders=self._recursive_list_mode,
+            label_root=self._browse_folder if self._flat_list_active() else None,
         )
 
         search_text = self._library_panel.local_search_text().strip()
@@ -2177,19 +2206,16 @@ class MainWindow(QWidget):
             updated_paths = [remap(path) for path in self._playlist.paths]
             sorted_paths = self._sort_paths(updated_paths)
             self._playlist.reorder(sorted_paths, keep_path=keep_path)
-            subfolders = (
-                []
-                if self._recursive_list_mode or self._browse_folder is None
-                else child_folders_with_videos(self._browse_folder)
-            )
+            subfolders = self._browse_subfolders()
             self._library_panel.set_songs(
                 self._playlist.paths,
                 current_index=self._playlist.index,
                 clear_search=False,
                 subfolders=subfolders,
                 can_navigate_up=self._can_navigate_up(),
-                recursive_list_mode=self._recursive_list_mode,
-                label_root=self._browse_folder if self._recursive_list_mode else None,
+                flat_list_mode=self._flat_list_active(),
+                show_back_to_folders=self._recursive_list_mode,
+                label_root=self._browse_folder if self._flat_list_active() else None,
             )
 
         search_text = self._library_panel.local_search_text().strip()
@@ -2197,7 +2223,7 @@ class MainWindow(QWidget):
             self._on_local_search_changed(search_text)
         elif (
             not playlist_updated
-            and self._recursive_list_mode
+            and self._flat_list_active()
             and self._browse_folder is not None
             and any(matches_old(path) for path in self._raw_paths)
         ):
@@ -2207,8 +2233,9 @@ class MainWindow(QWidget):
                 current_index=self._playlist.index if self._external_path is None else None,
                 clear_search=False,
                 subfolders=[],
-                can_navigate_up=False,
-                recursive_list_mode=True,
+                can_navigate_up=self._can_navigate_up(),
+                flat_list_mode=True,
+                show_back_to_folders=self._recursive_list_mode,
                 label_root=self._browse_folder,
             )
 
@@ -2249,19 +2276,16 @@ class MainWindow(QWidget):
         current = self._playlist.current()
         sorted_paths = self._sort_paths(self._raw_paths)
         self._playlist.reorder(sorted_paths, keep_path=current)
-        subfolders = (
-            []
-            if self._recursive_list_mode or self._browse_folder is None
-            else child_folders_with_videos(self._browse_folder)
-        )
+        subfolders = self._browse_subfolders()
         self._library_panel.set_songs(
             self._playlist.paths,
             current_index=self._playlist.index,
             clear_search=False,
             subfolders=subfolders,
             can_navigate_up=self._can_navigate_up(),
-            recursive_list_mode=self._recursive_list_mode,
-            label_root=self._browse_folder if self._recursive_list_mode else None,
+            flat_list_mode=self._flat_list_active(),
+            show_back_to_folders=self._recursive_list_mode,
+            label_root=self._browse_folder if self._flat_list_active() else None,
         )
         self._update_queue_display()
 
@@ -2277,7 +2301,7 @@ class MainWindow(QWidget):
                 return
 
         keep_path = self._external_path or self._playlist.current()
-        if self._recursive_list_mode:
+        if self._flat_list_active():
             paths = scan_videos(self._browse_folder, recursive=True)
             subfolders: list[Path] = []
         else:
@@ -2311,8 +2335,9 @@ class MainWindow(QWidget):
             clear_search=False,
             subfolders=subfolders,
             can_navigate_up=self._can_navigate_up(),
-            recursive_list_mode=self._recursive_list_mode,
-            label_root=self._browse_folder if self._recursive_list_mode else None,
+            flat_list_mode=self._flat_list_active(),
+            show_back_to_folders=self._recursive_list_mode,
+            label_root=self._browse_folder if self._flat_list_active() else None,
         )
         self._update_queue_display()
 

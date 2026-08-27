@@ -158,6 +158,7 @@ class LibraryPanel(QWidget):
     play_all_folder_requested = pyqtSignal(object)
     queue_all_folder_requested = pyqtSignal(object)
     back_to_folders_requested = pyqtSignal()
+    flat_browse_toggled = pyqtSignal(bool)
     close_requested = pyqtSignal()
     resize_dragged = pyqtSignal(int)
     queue_reordered = pyqtSignal(list)
@@ -418,6 +419,7 @@ class LibraryPanel(QWidget):
         self._song_list.play_all_folder_requested.connect(self.play_all_folder_requested)
         self._song_list.queue_all_folder_requested.connect(self.queue_all_folder_requested)
         self._song_list.back_to_folders_requested.connect(self.back_to_folders_requested)
+        self._song_list.flat_browse_toggled.connect(self.flat_browse_toggled)
 
     def _build_url_page(self) -> QWidget:
         page = QWidget()
@@ -609,6 +611,9 @@ class LibraryPanel(QWidget):
 
     def set_sort_strategy(self, strategy) -> None:
         self._song_list.set_sort_strategy(strategy)
+
+    def set_flat_browse_enabled(self, enabled: bool) -> None:
+        self._song_list.set_flat_browse_enabled(enabled)
 
     def set_songs(self, *args, **kwargs) -> None:
         self._song_list.set_songs(*args, **kwargs)
