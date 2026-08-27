@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import QUrl
+from PyQt6.QtCore import QUrl, QFile
 from PyQt6.QtGui import QDesktopServices
 
 
@@ -19,6 +19,24 @@ def reveal_action_label() -> str:
     if sys.platform == "win32":
         return "Show in Explorer"
     return "Show in file manager"
+
+
+def trash_action_label() -> str:
+    """Menu label for moving a file to the system trash."""
+    if sys.platform == "win32":
+        return "Move to Recycle Bin"
+    return "Move to Trash"
+
+
+def move_path_to_trash(path: Path) -> bool:
+    """Move *path* to the system trash/recycle bin."""
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    if not resolved.is_file():
+        return False
+    return QFile.moveToTrash(str(resolved))
 
 
 def open_folder_in_file_manager(folder: Path) -> bool:

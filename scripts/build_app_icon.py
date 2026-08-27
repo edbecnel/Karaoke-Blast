@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import QApplication
 
 ICON_SIZES = (
@@ -30,12 +30,14 @@ def render_icon(png_path: Path, size: int) -> QPixmap:
     pixmap = QPixmap(str(png_path))
     if pixmap.isNull():
         raise FileNotFoundError(f"Could not load icon: {png_path}")
-    return pixmap.scaled(
+    image = pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
+    scaled = image.scaled(
         size,
         size,
         Qt.AspectRatioMode.KeepAspectRatio,
         Qt.TransformationMode.SmoothTransformation,
     )
+    return QPixmap.fromImage(scaled)
 
 
 def build_icns(png_path: Path, output_path: Path) -> None:

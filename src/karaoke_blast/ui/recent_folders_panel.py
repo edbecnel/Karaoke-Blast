@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
+from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE, copy_text_to_clipboard
 from karaoke_blast.ui.list_style import RECENT_FOLDERS_LIST_STYLE
 from karaoke_blast.utils.file_manager import open_folder_in_file_manager
 
@@ -56,18 +56,20 @@ class RecentFoldersPanel(QWidget):
         folders: list[Path],
         *,
         pinned: list[Path] | None = None,
+        pinned_label: str | None = None,
     ) -> None:
         self._list.clear()
         pinned_paths = pinned or []
         pinned_resolved = {path.resolve() for path in pinned_paths}
         recent = [folder for folder in folders if folder.resolve() not in pinned_resolved]
+        label = pinned_label or PINNED_LABEL
 
         if not pinned_paths and not recent:
             self.hide()
             return
 
         for folder in pinned_paths:
-            item = QListWidgetItem(PINNED_LABEL)
+            item = QListWidgetItem(label)
             item.setData(_ROLE_FOLDER, folder)
             item.setData(_ROLE_PINNED, True)
             item.setToolTip(str(folder))
@@ -120,6 +122,12 @@ class RecentFoldersPanel(QWidget):
             )
         )
         menu.addAction(browse_folder)
+
+        copy_path = QAction("Copy path to clipboard", self)
+        copy_path.triggered.connect(
+            lambda _checked=False, selected=folder: copy_text_to_clipboard(str(selected))
+        )
+        menu.addAction(copy_path)
 
         if not self._is_pinned_item(item):
             menu.addSeparator()

@@ -85,6 +85,7 @@ class YouTubePanel(QWidget):
     history_clear_requested = pyqtSignal()
     download_requested = pyqtSignal(object)
     browse_downloads_folder_requested = pyqtSignal()
+    use_current_folder_for_downloads_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -134,6 +135,9 @@ class YouTubePanel(QWidget):
         self._downloads_folder_row = YouTubeDownloadsFolderRow()
         self._downloads_folder_row.browse_clicked.connect(
             self.browse_downloads_folder_requested.emit
+        )
+        self._downloads_folder_row.use_current_folder_clicked.connect(
+            self.use_current_folder_for_downloads_requested.emit
         )
         layout.addWidget(self._downloads_folder_row)
 
@@ -240,8 +244,11 @@ class YouTubePanel(QWidget):
         self._tabs.addTab(history_tab, "History")
         layout.addWidget(self._tabs, 1)
 
-    def set_downloads_folder(self, path: Path) -> None:
+    def set_downloads_folder(
+        self, path: Path, *, current_library_folder: Path | None = None
+    ) -> None:
         self._downloads_folder_row.set_folder(path)
+        self._downloads_folder_row.set_current_library_folder(current_library_folder)
 
     def configure_search(self, *, backend_name: str, api_key: str | None) -> None:
         self._search_panel.configure_search(backend_name=backend_name, api_key=api_key)

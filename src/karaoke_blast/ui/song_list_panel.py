@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 )
 
 from karaoke_blast.models.sort_strategy import SortStrategy
-from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
+from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE, copy_text_to_clipboard
 from karaoke_blast.ui.display_format_dialog import DisplayFormatDialog
 from karaoke_blast.ui.list_style import QUEUE_LIST_STYLE, SIDEBAR_LIST_STYLE
 from karaoke_blast.ui.local_history_panel import LocalHistoryPanel
@@ -34,6 +34,7 @@ from karaoke_blast.utils.file_manager import (
     open_folder_in_file_manager,
     reveal_action_label,
     reveal_in_file_manager,
+    trash_action_label,
 )
 from karaoke_blast.utils.song_display import (
     DEFAULT_DISPLAY_FORMAT,
@@ -173,6 +174,7 @@ class SongListPanel(QWidget):
     history_remove_requested = pyqtSignal(object)
     history_clear_requested = pyqtSignal()
     rename_requested = pyqtSignal(int)
+    move_to_trash_requested = pyqtSignal(object)
     edit_metadata_requested = pyqtSignal(object)
     folder_selected = pyqtSignal(object)
     browse_folder_requested = pyqtSignal()
@@ -216,6 +218,12 @@ class SongListPanel(QWidget):
                 lambda: self.populate_folder_menu(self._folder_menu)
             )
             self._folder_btn.setMenu(self._folder_menu)
+            self._folder_btn.setContextMenuPolicy(
+                Qt.ContextMenuPolicy.CustomContextMenu
+            )
+            self._folder_btn.customContextMenuRequested.connect(
+                self._show_folder_button_context_menu
+            )
             header_row.addWidget(self._folder_btn, 1)
 
             self._back_folders_btn = QPushButton("←")
@@ -474,6 +482,7 @@ class SongListPanel(QWidget):
         self._current_folder: Path | None = None
         self._recent_folders: list[Path] = []
         self._pinned_folders: list[Path] = []
+        self._pinned_folder_label: str | None = None
         self._current_index: int | None = None
         self._selected_index: int | None = None
         self._queue_indices: list[int] = []
@@ -662,9 +671,11 @@ class SongListPanel(QWidget):
         folders: list[Path],
         *,
         pinned: list[Path] | None = None,
+        pinned_label: str | None = None,
     ) -> None:
         self._recent_folders = folders
         self._pinned_folders = pinned or []
+        self._pinned_folder_label = pinned_label
 
     def _open_folder_in_file_manager(self, folder: Path) -> None:
         if not open_folder_in_file_manager(folder):
@@ -686,6 +697,26 @@ class SongListPanel(QWidget):
         if self._current_folder is None:
             return
         self._open_folder_in_file_manager(self._current_folder)
+
+    def copy_current_folder_path(self) -> None:
+        if self._current_folder is None:
+            return
+        copy_text_to_clipboard(str(self._current_folder))
+
+    def show_folder_path_context_menu(self, widget: QWidget, pos) -> None:
+        if self._current_folder is None:
+            return
+        menu = QMenu(self)
+        menu.setStyleSheet(CONTEXT_MENU_STYLE)
+        copy_path = QAction("Copy path to clipboard", self)
+        copy_path.triggered.connect(self.copy_current_folder_path)
+        menu.addAction(copy_path)
+        menu.exec(widget.mapToGlobal(pos))
+
+    def _show_folder_button_context_menu(self, pos) -> None:
+        if self._embedded:
+            return
+        self.show_folder_path_context_menu(self._folder_btn, pos)
 
     def _show_folder_actions_menu(self) -> None:
         menu = QMenu(self)
@@ -722,9 +753,10 @@ class SongListPanel(QWidget):
         menu.clear()
         current = self._current_folder
         pinned_resolved = {_safe_resolve(path) for path in self._pinned_folders}
+        pinned_label = self._pinned_folder_label or PINNED_LABEL
 
         for folder in self._pinned_folders:
-            self._add_folder_menu_action(menu, folder, PINNED_LABEL, current)
+            self._add_folder_menu_action(menu, folder, pinned_label, current)
 
         recent = [
             folder
@@ -739,6 +771,15 @@ class SongListPanel(QWidget):
 
         if self._pinned_folders or recent:
             menu.addSeparator()
+
+        copy_path = QAction("Copy path to clipboard", menu)
+        copy_path.setEnabled(current is not None)
+        if current is not None:
+            copy_path.setToolTip(str(current))
+        copy_path.triggered.connect(self.copy_current_folder_path)
+        menu.addAction(copy_path)
+
+        menu.addSeparator()
 
         browse = QAction("Browse…", menu)
         browse.triggered.connect(self.browse_folder_requested.emit)
@@ -860,6 +901,14 @@ class SongListPanel(QWidget):
         open_folder.triggered.connect(lambda: self.folder_entered.emit(folder))
         menu.addAction(open_folder)
 
+        copy_path = QAction("Copy path to clipboard", self)
+        copy_path.triggered.connect(
+            lambda _checked=False, selected=folder: copy_text_to_clipboard(str(selected))
+        )
+        menu.addAction(copy_path)
+
+        menu.addSeparator()
+
         play_all = QAction("Play all under this folder", self)
         play_all.triggered.connect(lambda: self.play_all_folder_requested.emit(folder))
         menu.addAction(play_all)
@@ -931,6 +980,16 @@ class SongListPanel(QWidget):
             lambda: self.edit_metadata_requested.emit(path)
         )
         menu.addAction(edit_meta)
+
+        menu.addSeparator()
+
+        move_to_trash = QAction(trash_action_label(), self)
+        move_to_trash.triggered.connect(
+            lambda _checked=False, selected=path: self.move_to_trash_requested.emit(
+                selected
+            )
+        )
+        menu.addAction(move_to_trash)
 
         menu.exec(list_widget.mapToGlobal(pos))
 
@@ -1018,6 +1077,14 @@ class SongListPanel(QWidget):
                 lambda _checked=False, p=path: self.edit_metadata_requested.emit(p)
             )
             menu.addAction(edit_meta)
+
+            menu.addSeparator()
+
+            move_to_trash = QAction(trash_action_label(), self)
+            move_to_trash.triggered.connect(
+                lambda _checked=False, p=path: self.move_to_trash_requested.emit(p)
+            )
+            menu.addAction(move_to_trash)
 
         menu.exec(list_widget.mapToGlobal(pos))
 

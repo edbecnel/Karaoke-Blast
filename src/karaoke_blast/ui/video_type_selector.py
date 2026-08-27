@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QWidget,
 )
 
@@ -54,6 +55,40 @@ QComboBox QAbstractItemView {
 }
 """
 
+_SWITCH_COMBO_STYLE = """
+QComboBox {
+    background-color: transparent;
+    color: #ffb3c1;
+    border: none;
+    padding: 0 8px 0 4px;
+    font-size: 12px;
+    font-weight: bold;
+}
+QComboBox:hover {
+    background-color: rgba(255, 255, 255, 30);
+    border-radius: 4px;
+}
+QComboBox::drop-down {
+    border: none;
+    width: 20px;
+}
+QComboBox::down-arrow {
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #ffb3c1;
+    margin-right: 4px;
+}
+QComboBox QAbstractItemView {
+    background-color: #1e1e2e;
+    color: #ffffff;
+    border: 1px solid #5a5a72;
+    selection-background-color: #e94560;
+    selection-color: #ffffff;
+    outline: none;
+}
+"""
+
 _BUTTON_STYLE = """
 QPushButton {
     background-color: #2d2d42;
@@ -74,6 +109,89 @@ QPushButton:disabled {
 """
 
 _LABEL_STYLE = "color: #ccc; font-size: 13px; background: transparent;"
+
+
+class VideoTypeSwitchWidget(QWidget):
+    """Compact dropdown for switching the active media type."""
+
+    type_changed = pyqtSignal(object)
+
+    def __init__(
+        self,
+        *,
+        video_types: list[VideoTypeProfile],
+        active_id: str,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._video_types = [profile.copy() for profile in video_types]
+        self._active_id = active_id
+        self._building = False
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._combo = QComboBox()
+        self._combo.setStyleSheet(_SWITCH_COMBO_STYLE)
+        self._combo.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        self._combo.currentIndexChanged.connect(self._on_combo_changed)
+        layout.addWidget(self._combo)
+
+        self._rebuild_combo()
+
+    def set_video_types(
+        self,
+        video_types: list[VideoTypeProfile],
+        *,
+        active_id: str | None = None,
+    ) -> None:
+        self._building = True
+        self._video_types = [profile.copy() for profile in video_types]
+        if active_id is not None:
+            if find_video_type(self._video_types, active_id) is not None:
+                self._active_id = active_id
+        self._rebuild_combo()
+        self._building = False
+
+    def set_active_id(self, active_id: str) -> None:
+        if find_video_type(self._video_types, active_id) is None:
+            return
+        self._building = True
+        self._active_id = active_id
+        index = self._combo.findData(active_id)
+        if index >= 0:
+            self._combo.setCurrentIndex(index)
+        self._building = False
+
+    def _rebuild_combo(self) -> None:
+        self._combo.blockSignals(True)
+        self._combo.clear()
+        for profile in self._video_types:
+            self._combo.addItem(profile.name, profile.id)
+        index = self._combo.findData(self._active_id)
+        if index < 0:
+            index = self._combo.findData(BUILTIN_SONGS_ID)
+        if index < 0 and self._combo.count() > 0:
+            index = 0
+        if index >= 0:
+            self._combo.setCurrentIndex(index)
+            self._active_id = str(self._combo.currentData())
+        self._combo.blockSignals(False)
+
+    def _on_combo_changed(self, _index: int) -> None:
+        if self._building:
+            return
+        profile_id = self._combo.currentData()
+        if not isinstance(profile_id, str):
+            return
+        self._active_id = profile_id
+        profile = find_video_type(self._video_types, profile_id)
+        if profile is not None:
+            self.type_changed.emit(profile.copy())
 
 
 class VideoTypeSelectorWidget(QWidget):

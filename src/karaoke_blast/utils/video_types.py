@@ -111,6 +111,11 @@ _BUILTIN_DEFAULTS: dict[str, FilenameFormat] = {
 }
 
 
+def default_youtube_append_karaoke(profile_id: str) -> bool:
+    """Return whether YouTube search should append 'karaoke' for a media type."""
+    return profile_id == BUILTIN_SONGS_ID
+
+
 @dataclass
 class VideoTypeProfile:
     """A named video type with rename format and metadata options."""
@@ -122,6 +127,9 @@ class VideoTypeProfile:
     metadata_comment_slot_indices: list[int] | None = None
     metadata_field_mapping: MetadataFieldMapping | None = None
     display_format: DisplayFormat | None = None
+    youtube_append_karaoke: bool = False
+    last_library_folder: str | None = None
+    youtube_downloads_dir: str | None = None
 
     def resolved_metadata_mapping(self) -> MetadataFieldMapping:
         if self.metadata_field_mapping is not None:
@@ -165,6 +173,9 @@ class VideoTypeProfile:
                 if self.display_format is None
                 else self.display_format.to_dict()
             ),
+            "youtube_append_karaoke": self.youtube_append_karaoke,
+            "last_library_folder": self.last_library_folder,
+            "youtube_downloads_dir": self.youtube_downloads_dir,
         }
 
     @classmethod
@@ -200,6 +211,21 @@ class VideoTypeProfile:
             if isinstance(display_data, dict)
             else None
         )
+        append_karaoke = data.get("youtube_append_karaoke")
+        if isinstance(append_karaoke, bool):
+            youtube_append_karaoke = append_karaoke
+        else:
+            youtube_append_karaoke = default_youtube_append_karaoke(profile_id)
+        last_library_folder = data.get("last_library_folder")
+        if isinstance(last_library_folder, str) and last_library_folder.strip():
+            stored_library_folder: str | None = last_library_folder.strip()
+        else:
+            stored_library_folder = None
+        downloads_dir = data.get("youtube_downloads_dir")
+        if isinstance(downloads_dir, str) and downloads_dir.strip():
+            stored_downloads_dir: str | None = downloads_dir.strip()
+        else:
+            stored_downloads_dir = None
         profile = cls(
             id=profile_id,
             name=name,
@@ -208,6 +234,9 @@ class VideoTypeProfile:
             metadata_comment_slot_indices=metadata_comment_slot_indices,
             metadata_field_mapping=metadata_field_mapping,
             display_format=display_format,
+            youtube_append_karaoke=youtube_append_karaoke,
+            last_library_folder=stored_library_folder,
+            youtube_downloads_dir=stored_downloads_dir,
         )
         if metadata_field_mapping is None and metadata_comment_slot_indices is not None:
             profile.metadata_field_mapping = default_metadata_mapping(
@@ -234,6 +263,7 @@ def builtin_video_type(profile_id: str) -> VideoTypeProfile:
         metadata_comment_slot_indices=None,
         metadata_field_mapping=mapping,
         display_format=default_display_format_for_mapping(mapping),
+        youtube_append_karaoke=default_youtube_append_karaoke(profile_id),
     )
 
 
@@ -356,6 +386,7 @@ def create_custom_video_type(
                 rename_format if rename_format is not None else _default_custom_format()
             )
         ),
+        youtube_append_karaoke=False,
     )
 
 

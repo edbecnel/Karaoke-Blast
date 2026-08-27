@@ -32,6 +32,7 @@ from karaoke_blast.ui.mixed_queue_list_widget import (
 from karaoke_blast.ui.panel_splitter import EDGE_GRIP_WIDTH, PanelEdgeGrip
 from karaoke_blast.ui.play_history_panel import PlayHistoryPanel
 from karaoke_blast.ui.song_list_panel import SongListPanel
+from karaoke_blast.ui.video_type_selector import VideoTypeSwitchWidget
 from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
 from karaoke_blast.ui.youtube_download_status import YouTubeDownloadStatus
 from karaoke_blast.ui.youtube_downloads_folder_row import YouTubeDownloadsFolderRow
@@ -42,6 +43,7 @@ from karaoke_blast.ui.youtube_search_panel import (
     YouTubeSearchPanel,
 )
 from karaoke_blast.utils.song_display import DisplayFormat
+from karaoke_blast.utils.video_types import BUILTIN_SONGS_ID, VideoTypeProfile, find_video_type
 from karaoke_blast.utils.youtube_url import extract_video_id
 
 PANEL_DEFAULT_WIDTH = 320
@@ -145,6 +147,7 @@ class LibraryPanel(QWidget):
     display_mode_changed = pyqtSignal(str)
     display_format_changed = pyqtSignal(object)
     rename_requested = pyqtSignal(int)
+    move_to_trash_requested = pyqtSignal(object)
     edit_metadata_requested = pyqtSignal(object)
     folder_selected = pyqtSignal(object)
     browse_folder_requested = pyqtSignal()
@@ -172,8 +175,10 @@ class LibraryPanel(QWidget):
     search_backend_fallback = pyqtSignal(str)
     append_karaoke_changed = pyqtSignal(bool)
     browse_downloads_folder_requested = pyqtSignal()
+    use_current_folder_for_downloads_requested = pyqtSignal()
     youtube_search_requested = pyqtSignal(str)
     video_types_settings_requested = pyqtSignal()
+    video_type_changed = pyqtSignal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -201,6 +206,10 @@ class LibraryPanel(QWidget):
             lambda: self._song_list.populate_folder_menu(self._folder_menu)
         )
         self._folder_btn.setMenu(self._folder_menu)
+        self._folder_btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._folder_btn.customContextMenuRequested.connect(
+            lambda pos: self._song_list.show_folder_path_context_menu(self._folder_btn, pos)
+        )
         header_row.addWidget(self._folder_btn, 1)
 
         refresh_btn = QPushButton("↻")
@@ -229,11 +238,12 @@ class LibraryPanel(QWidget):
         header_row.addWidget(close_btn)
         layout.addLayout(header_row)
 
-        self._video_type_label = QLabel("")
-        self._video_type_label.setStyleSheet(
-            "color: #ffb3c1; font-size: 12px; font-weight: bold; padding-left: 4px;"
+        self._video_type_switch = VideoTypeSwitchWidget(
+            video_types=[],
+            active_id=BUILTIN_SONGS_ID,
         )
-        layout.addWidget(self._video_type_label)
+        self._video_type_switch.type_changed.connect(self.video_type_changed.emit)
+        layout.addWidget(self._video_type_switch)
 
         self._search = VisibleSpaceLineEdit()
         self._search.setPlaceholderText("Search songs or YouTube…")
@@ -321,6 +331,9 @@ class LibraryPanel(QWidget):
         self._downloads_folder_row.browse_clicked.connect(
             self.browse_downloads_folder_requested.emit
         )
+        self._downloads_folder_row.use_current_folder_clicked.connect(
+            self.use_current_folder_for_downloads_requested.emit
+        )
         layout.addWidget(self._downloads_folder_row)
 
         self._tabs = QTabWidget()
@@ -394,6 +407,7 @@ class LibraryPanel(QWidget):
         self._song_list.display_mode_changed.connect(self.display_mode_changed)
         self._song_list.display_format_changed.connect(self.display_format_changed)
         self._song_list.rename_requested.connect(self.rename_requested)
+        self._song_list.move_to_trash_requested.connect(self.move_to_trash_requested)
         self._song_list.edit_metadata_requested.connect(self.edit_metadata_requested)
         self._song_list.folder_selected.connect(self.folder_selected)
         self._song_list.browse_folder_requested.connect(self.browse_folder_requested)
@@ -494,8 +508,11 @@ class LibraryPanel(QWidget):
         self._append_karaoke_checkbox.setChecked(checked)
         self._search_panel.set_append_karaoke(checked)
 
-    def set_downloads_folder(self, path: Path) -> None:
+    def set_downloads_folder(
+        self, path: Path, *, current_library_folder: Path | None = None
+    ) -> None:
         self._downloads_folder_row.set_folder(path)
+        self._downloads_folder_row.set_current_library_folder(current_library_folder)
 
     def set_folder(self, folder: Path | None) -> None:
         self._song_list.set_folder(folder)
@@ -509,20 +526,32 @@ class LibraryPanel(QWidget):
             except OSError:
                 self._folder_btn.setToolTip(str(folder))
 
-    def set_active_video_type(self, name: str) -> None:
-        cleaned = name.strip()
-        if cleaned:
-            self._video_type_label.setText(cleaned)
-            self._video_types_btn.setToolTip(f"Video types ({cleaned})")
+    def set_video_types(
+        self,
+        video_types: list[VideoTypeProfile],
+        *,
+        active_id: str,
+    ) -> None:
+        self._video_type_switch.set_video_types(video_types, active_id=active_id)
+        profile = find_video_type(video_types, active_id)
+        if profile is not None:
+            self._video_types_btn.setToolTip(f"Video types ({profile.name})")
         else:
-            self._video_type_label.clear()
             self._video_types_btn.setToolTip("Video types")
 
     def set_use_song_count_label(self, use_song_terminology: bool) -> None:
         self._song_list.set_use_song_count_label(use_song_terminology)
 
-    def set_recent_folders(self, folders: list[Path], *, pinned: list[Path] | None = None) -> None:
-        self._song_list.set_recent_folders(folders, pinned=pinned)
+    def set_recent_folders(
+        self,
+        folders: list[Path],
+        *,
+        pinned: list[Path] | None = None,
+        pinned_label: str | None = None,
+    ) -> None:
+        self._song_list.set_recent_folders(
+            folders, pinned=pinned, pinned_label=pinned_label
+        )
 
     def set_queue_state(self, *, current: QueueItem | None, queued: list[QueueItem]) -> None:
         has_queue = current is not None or bool(queued)

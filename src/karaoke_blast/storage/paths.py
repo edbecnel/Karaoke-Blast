@@ -21,3 +21,15 @@ def default_downloads_dir() -> Path:
     path = config_dir() / "youtube-downloads"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def is_default_downloads_dir(path: Path) -> bool:
+    """Return True when *path* is the built-in YouTube downloads folder."""
+    return path.resolve() == default_downloads_dir().resolve()
+
+
+def pinned_downloads_folder_label(path: Path) -> str:
+    """Label for the pinned default downloads folder on the start screen."""
+    if is_default_downloads_dir(path):
+        return "YouTube Downloads"
+    return path.name or str(path)

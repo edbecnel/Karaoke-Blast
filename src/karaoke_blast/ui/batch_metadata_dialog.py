@@ -91,6 +91,7 @@ class BatchMetadataDialog(QDialog):
         initial_folder: Path | None = None,
         recent_folders: list[Path] | None = None,
         pinned_folders: list[Path] | None = None,
+        pinned_folder_label: str | None = None,
         video_types: list[VideoTypeProfile],
         active_video_type_id: str,
         skip_tagged: bool = True,
@@ -109,6 +110,7 @@ class BatchMetadataDialog(QDialog):
         self._folder = initial_folder
         self._recent_folders = list(recent_folders or [])
         self._pinned_folders = list(pinned_folders or [])
+        self._pinned_folder_label = pinned_folder_label
         self._applied_count = 0
         self._skipped_count = 0
         self._unsupported_count = 0
@@ -257,9 +259,10 @@ class BatchMetadataDialog(QDialog):
         menu.setStyleSheet(CONTEXT_MENU_STYLE)
         current = self._current_folder()
         pinned_resolved = {path.resolve() for path in self._pinned_folders}
+        pinned_label = self._pinned_folder_label or PINNED_LABEL
 
         for folder in self._pinned_folders:
-            action = QAction(PINNED_LABEL, self)
+            action = QAction(pinned_label, self)
             action.setToolTip(str(folder))
             resolved = folder.resolve()
             if current == resolved:

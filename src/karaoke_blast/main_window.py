@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+import sys
 
 from PyQt6.QtCore import QEvent, Qt, QThread, QTimer
 from PyQt6.QtGui import QCloseEvent, QCursor, QKeyEvent, QKeySequence, QShortcut
@@ -33,8 +34,11 @@ from karaoke_blast.player.youtube_widget import YouTubeWidget
 from karaoke_blast.services.youtube_download import downloaded_file_for, start_download
 from karaoke_blast.storage.folder_history import FolderHistory
 from karaoke_blast.storage.folder_queues import FolderQueues
+from karaoke_blast.storage.paths import is_default_downloads_dir
 from karaoke_blast.storage.play_history import PlayHistory
 from karaoke_blast.storage.settings import Settings
+from karaoke_blast.storage.startup_folders import startup_folder_lists
+from karaoke_blast.ui.media_type_library_folder_row import MediaTypeLibraryFolderRow
 from karaoke_blast.ui.opening_screen import OpeningScreen
 from karaoke_blast.ui.batch_metadata_dialog import BatchMetadataDialog
 from karaoke_blast.ui.batch_rename_dialog import BatchRenameDialog
@@ -53,6 +57,7 @@ from karaoke_blast.ui.library_panel import (
     LibraryPanel,
 )
 from karaoke_blast.utils.display import display_name
+from karaoke_blast.utils.file_manager import move_path_to_trash, trash_action_label
 from karaoke_blast.utils.resources import logo_default_window_size
 from karaoke_blast.utils.song_display import (
     DisplayFormat,
@@ -130,6 +135,7 @@ class MainWindow(QWidget):
         self._folder_queues = FolderQueues()
         self._settings = Settings()
         self._download_thread: QThread | None = None
+        self._download_worker = None
         self._downloading_video_id: str | None = None
         self._downloading_video: YouTubeVideo | None = None
 
@@ -324,6 +330,16 @@ class MainWindow(QWidget):
             alignment=Qt.AlignmentFlag.AlignCenter,
         )
 
+        self._startup_library_folder_row = MediaTypeLibraryFolderRow()
+        self._startup_library_folder_row.setMaximumWidth(520)
+        self._startup_library_folder_row.open_clicked.connect(
+            self._open_active_media_type_default_folder
+        )
+        layout.addWidget(
+            self._startup_library_folder_row,
+            alignment=Qt.AlignmentFlag.AlignCenter,
+        )
+
         layout.addWidget(rename_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(metadata_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -340,8 +356,12 @@ class MainWindow(QWidget):
         self._startup_downloads_folder_row.browse_clicked.connect(
             self._browse_youtube_downloads_folder
         )
+        self._startup_downloads_folder_row.use_current_folder_clicked.connect(
+            self._use_current_folder_as_downloads
+        )
         layout.addWidget(self._startup_downloads_folder_row, alignment=Qt.AlignmentFlag.AlignCenter)
         self._update_downloads_folder_display()
+        self._update_media_type_library_folder_display()
         self._refresh_recent_folders()
 
         return page
@@ -349,11 +369,43 @@ class MainWindow(QWidget):
     def _youtube_downloads_path(self) -> Path:
         return self._settings.resolved_youtube_downloads_dir()
 
+    def _active_library_folder(self) -> Path | None:
+        if self._browse_folder is not None:
+            return self._browse_folder
+        return self._folder
+
     def _update_downloads_folder_display(self) -> None:
         path = self._youtube_downloads_path()
+        current = self._active_library_folder()
         self._startup_downloads_folder_row.set_folder(path)
+        self._startup_downloads_folder_row.set_current_library_folder(current)
         if hasattr(self, "_library_panel"):
-            self._library_panel.set_downloads_folder(path)
+            self._library_panel.set_downloads_folder(
+                path, current_library_folder=current
+            )
+
+    def _update_media_type_library_folder_display(self) -> None:
+        if not hasattr(self, "_startup_library_folder_row"):
+            return
+        profile = self._settings.get_active_video_type()
+        folder = self._settings.resolved_video_type_default_folder(profile.id)
+        self._startup_library_folder_row.set_media_type_name(profile.name)
+        self._startup_library_folder_row.set_folder(folder)
+
+    def _open_active_media_type_default_folder(self) -> None:
+        folder = self._settings.resolved_video_type_default_folder()
+        if folder is None:
+            return
+        if not folder.is_dir():
+            QMessageBox.warning(
+                self,
+                "Folder Not Found",
+                f"The folder no longer exists:\n{folder}",
+            )
+            self._update_media_type_library_folder_display()
+            return
+        allow_empty = folder.resolve() == self._youtube_downloads_path().resolve()
+        self._on_start_menu_folder_selected(folder, allow_empty=allow_empty)
 
     def _browse_youtube_downloads_folder(self) -> None:
         current = self._youtube_downloads_path()
@@ -364,23 +416,49 @@ class MainWindow(QWidget):
         )
         if not folder:
             return
-        self._settings.set_youtube_downloads_dir(Path(folder))
+        path = Path(folder)
+        self._settings.set_youtube_downloads_dir(path)
+        self._folder_history.add(path)
         self._update_downloads_folder_display()
         self._refresh_recent_folders()
 
-    def _refresh_recent_folders(self) -> None:
-        downloads = self._youtube_downloads_path()
-        recent = [
-            folder
-            for folder in self._folder_history.folders()
-            if folder.resolve() != downloads.resolve()
-        ]
-        self._recent_folders.set_folders(recent, pinned=[downloads])
-        if hasattr(self, "_library_panel"):
-            self._library_panel.set_recent_folders(recent, pinned=[downloads])
+    def _use_current_folder_as_downloads(self) -> None:
+        folder = self._active_library_folder()
+        if folder is None:
+            return
+        self._settings.set_youtube_downloads_dir(folder)
+        self._folder_history.add(folder)
+        self._update_downloads_folder_display()
+        self._refresh_recent_folders()
 
-    def _on_start_menu_folder_selected(self, folder: Path) -> None:
-        allow_empty = folder.resolve() == self._youtube_downloads_path().resolve()
+    def _ensure_custom_downloads_folder_in_history(self) -> None:
+        downloads = self._youtube_downloads_path()
+        if is_default_downloads_dir(downloads):
+            return
+        resolved = downloads.resolve()
+        if resolved not in {path.resolve() for path in self._folder_history.folders()}:
+            self._folder_history.add(downloads)
+
+    def _refresh_recent_folders(self) -> None:
+        self._ensure_custom_downloads_folder_in_history()
+        folders = startup_folder_lists(self._folder_history.folders(), self._youtube_downloads_path())
+        self._recent_folders.set_folders(
+            folders.recent,
+            pinned=folders.pinned,
+            pinned_label=folders.pinned_label,
+        )
+        if hasattr(self, "_library_panel"):
+            self._library_panel.set_recent_folders(
+                folders.recent,
+                pinned=folders.pinned,
+                pinned_label=folders.pinned_label,
+            )
+
+    def _on_start_menu_folder_selected(
+        self, folder: Path, *, allow_empty: bool | None = None
+    ) -> None:
+        if allow_empty is None:
+            allow_empty = folder.resolve() == self._youtube_downloads_path().resolve()
         self._load_folder(folder, allow_empty=allow_empty)
 
     def _on_recent_folder_remove_requested(self, folder: Path) -> None:
@@ -405,7 +483,9 @@ class MainWindow(QWidget):
             backend_name=self._settings.youtube_search_backend,
             api_key=self._settings.youtube_api_key,
         )
-        self._library_panel.set_append_karaoke(self._settings.youtube_append_karaoke)
+        self._library_panel.set_append_karaoke(
+            self._settings.get_active_video_type().youtube_append_karaoke
+        )
         self._library_panel.append_karaoke_changed.connect(self._on_append_karaoke_changed)
         self._library_panel.song_selected.connect(self._on_song_selected)
         self._library_panel.play_next_requested.connect(self._on_play_next_requested)
@@ -424,6 +504,7 @@ class MainWindow(QWidget):
         self._library_panel.history_remove_requested.connect(self._on_history_remove_requested)
         self._library_panel.history_clear_requested.connect(self._on_history_clear_requested)
         self._library_panel.rename_requested.connect(self._on_rename_requested)
+        self._library_panel.move_to_trash_requested.connect(self._on_move_to_trash_requested)
         self._library_panel.edit_metadata_requested.connect(self._on_edit_metadata_requested)
         self._library_panel.folder_selected.connect(self._on_start_menu_folder_selected)
         self._library_panel.browse_folder_requested.connect(self._open_folder_dialog)
@@ -446,13 +527,17 @@ class MainWindow(QWidget):
         self._library_panel.browse_downloads_folder_requested.connect(
             self._browse_youtube_downloads_folder
         )
+        self._library_panel.use_current_folder_for_downloads_requested.connect(
+            self._use_current_folder_as_downloads
+        )
         self._library_panel.video_types_settings_requested.connect(
             self._open_video_types_manager
         )
+        self._library_panel.video_type_changed.connect(self._on_active_video_type_changed)
         self._library_panel.set_downloads_folder(self._youtube_downloads_path())
         self._library_panel.set_display_mode(self._settings.song_display_mode)
         self._sync_library_display_format()
-        self._sync_library_video_type_label()
+        self._sync_library_video_type_selector()
         self._sync_library_list_count_labels()
 
         self._video_container = QWidget()
@@ -556,6 +641,7 @@ class MainWindow(QWidget):
         self._apply_launch_window_geometry()
         self._sync_fullscreen_control()
         self._sync_controls_reveal_polling()
+        self._update_media_type_library_folder_display()
 
     def eventFilter(self, obj, event) -> bool:
         if (
@@ -655,6 +741,9 @@ class MainWindow(QWidget):
         self._resort_by_display_name()
 
     def _on_append_karaoke_changed(self, checked: bool) -> None:
+        profile = self._settings.get_active_video_type().copy()
+        profile.youtube_append_karaoke = checked
+        self._settings.update_video_type(profile)
         self._settings.youtube_append_karaoke = checked
         self._settings.save()
 
@@ -901,6 +990,9 @@ class MainWindow(QWidget):
         self._folder = folder
         self._browse_folder = folder
         self._recursive_list_mode = False
+        self._settings.set_video_type_library_folder(
+            self._settings.active_video_type_id, folder
+        )
         self._folder_history.add(folder)
         self._refresh_recent_folders()
         self._library_panel.set_folder(folder)
@@ -941,6 +1033,8 @@ class MainWindow(QWidget):
         )
         self._update_queue_display()
         self._update_history_display()
+        self._update_downloads_folder_display()
+        self._update_media_type_library_folder_display()
         if not youtube_active:
             self._library_panel.set_active_tab("local")
         self._show_side_panel()
@@ -1045,6 +1139,7 @@ class MainWindow(QWidget):
             label_root=self._browse_folder if self._recursive_list_mode else None,
         )
         self._update_queue_display()
+        self._update_downloads_folder_display()
 
     def _on_folder_entered(self, folder: Path) -> None:
         folder = folder.resolve()
@@ -1571,6 +1666,7 @@ class MainWindow(QWidget):
         output_dir.mkdir(parents=True, exist_ok=True)
         existing = downloaded_file_for(video.video_id, output_dir)
         if existing is not None:
+            self._sync_library_after_download(existing.parent)
             self._library_panel.show_download_success(
                 video.title,
                 message=f"Already downloaded: {existing.name}",
@@ -1585,7 +1681,7 @@ class MainWindow(QWidget):
         self._downloading_video_id = video.video_id
         self._downloading_video = video
         self._library_panel.show_downloading(video.title)
-        self._download_thread, _worker = start_download(
+        self._download_thread, self._download_worker = start_download(
             video=video,
             output_dir=output_dir,
             on_progress=self._on_youtube_download_progress,
@@ -1601,6 +1697,7 @@ class MainWindow(QWidget):
     def _on_youtube_download_finished(self, path: Path, video: YouTubeVideo) -> None:
         self._folder_history.add(self._youtube_downloads_path())
         self._refresh_recent_folders()
+        self._sync_library_after_download(path.parent)
         self._library_panel.show_download_success(
             video.title,
             message=f"Saved: {path.name}",
@@ -1611,6 +1708,53 @@ class MainWindow(QWidget):
             corner="top-right",
         )
 
+    def _sync_library_after_download(self, output_dir: Path) -> None:
+        """Refresh the local song list when a download lands in the open folder."""
+        target = output_dir.resolve()
+        if self._browse_folder is not None and self._browse_folder.resolve() == target:
+            self._apply_browse_contents(clear_search=False, keep_playback=True)
+            self._update_idle_local_prompt()
+            return
+
+        if self._folder is not None:
+            return
+
+        paths = scan_videos(target)
+        if not paths:
+            return
+
+        subfolders = child_folders_with_videos(target)
+        self._folder = target
+        self._browse_folder = target
+        self._recursive_list_mode = False
+        self._library_paths = scan_videos(target, recursive=True)
+        self._raw_paths = paths
+        sorted_paths = self._sort_paths(paths)
+        self._playlist = Playlist(paths=sorted_paths, index=0)
+        self._library_panel.set_folder(target)
+        self._library_panel.set_library_root(target)
+        self._library_panel.set_songs(
+            sorted_paths,
+            current_index=None,
+            subfolders=subfolders,
+            can_navigate_up=False,
+            recursive_list_mode=False,
+        )
+        self._update_queue_display()
+
+    def _update_idle_local_prompt(self) -> None:
+        if not self._is_idle() or self._media_mode != MediaSourceMode.LOCAL:
+            return
+        if self._playlist.paths:
+            self._show_ready_to_play()
+            return
+        if self._browse_folder is None:
+            return
+        if self._browse_folder.resolve() == self._youtube_downloads_path().resolve():
+            self._show_status_message(
+                "No downloads yet — use YouTube mode to download videos"
+            )
+
     def _on_youtube_download_failed(self, video_id: str, message: str) -> None:
         title = self._downloading_video.title if self._downloading_video else video_id
         self._library_panel.show_download_error(title, message)
@@ -1618,6 +1762,7 @@ class MainWindow(QWidget):
 
     def _on_youtube_download_thread_finished(self) -> None:
         self._download_thread = None
+        self._download_worker = None
         self._downloading_video_id = None
         self._downloading_video = None
 
@@ -1628,14 +1773,7 @@ class MainWindow(QWidget):
         self._play_current(interrupt=True)
 
     def _on_startup_video_type_changed(self, profile: object) -> None:
-        if not isinstance(profile, VideoTypeProfile):
-            return
-        self._settings.set_active_video_type_id(profile.id)
-        self._settings.save()
-        self._sync_library_video_type_label()
-        self._sync_library_list_count_labels()
-        self._sync_library_display_format()
-        self._sync_ready_to_play_prompt()
+        self._on_active_video_type_changed(profile)
 
     def _on_startup_video_types_changed(self, profiles: object) -> None:
         if not isinstance(profiles, list):
@@ -1648,16 +1786,48 @@ class MainWindow(QWidget):
             self._startup_video_type_selector.active_id()
         )
         self._settings.save()
-        self._sync_library_video_type_label()
+        self._on_active_video_type_changed(
+            self._settings.get_active_video_type()
+        )
+
+    def _on_active_video_type_changed(self, profile: object) -> None:
+        if not isinstance(profile, VideoTypeProfile):
+            return
+        active_changed = profile.id != self._settings.active_video_type_id
+        self._settings.set_active_video_type_id(profile.id)
+        self._settings.save()
+        self._sync_library_video_type_selector()
+        self._sync_startup_video_type_selector()
         self._sync_library_list_count_labels()
         self._sync_library_display_format()
+        self._sync_library_append_karaoke()
         self._sync_ready_to_play_prompt()
+        self._update_downloads_folder_display()
+        self._update_media_type_library_folder_display()
+        self._refresh_recent_folders()
+        if active_changed:
+            self._restore_library_folder_for_active_video_type()
 
-    def _sync_library_video_type_label(self) -> None:
+    def _restore_library_folder_for_active_video_type(self) -> None:
+        """Open the last library folder used for the active media type."""
+        if self._stack.currentWidget() != self._player_page:
+            return
+        folder = self._settings.get_video_type_library_folder(
+            self._settings.active_video_type_id
+        )
+        if folder is None:
+            return
+        if self._folder is not None and self._folder.resolve() == folder.resolve():
+            return
+        allow_empty = folder.resolve() == self._youtube_downloads_path().resolve()
+        self._load_folder(folder, allow_empty=allow_empty)
+
+    def _sync_library_video_type_selector(self) -> None:
         if not hasattr(self, "_library_panel"):
             return
-        self._library_panel.set_active_video_type(
-            self._settings.get_active_video_type().name
+        self._library_panel.set_video_types(
+            self._settings.video_types,
+            active_id=self._settings.active_video_type_id,
         )
 
     def _sync_library_display_format(self) -> None:
@@ -1679,6 +1849,12 @@ class MainWindow(QWidget):
         self._library_panel.set_use_song_count_label(
             self._settings.active_video_type_id == BUILTIN_SONGS_ID
         )
+
+    def _sync_library_append_karaoke(self) -> None:
+        if not hasattr(self, "_library_panel"):
+            return
+        profile = self._settings.get_active_video_type()
+        self._library_panel.set_append_karaoke(profile.youtube_append_karaoke)
 
     def _sync_startup_video_type_selector(self) -> None:
         if not hasattr(self, "_startup_video_type_selector"):
@@ -1707,11 +1883,16 @@ class MainWindow(QWidget):
             profile.metadata_comment_slot_indices = list(comment_slot_indices)
         self._settings.update_video_type(profile)
         self._sync_startup_video_type_selector()
-        self._sync_library_video_type_label()
+        self._sync_library_video_type_selector()
         self._sync_library_list_count_labels()
         self._sync_library_display_format()
+        self._sync_library_append_karaoke()
         self._sync_ready_to_play_prompt()
         self._settings.save()
+        self._update_downloads_folder_display()
+        self._update_media_type_library_folder_display()
+        self._refresh_recent_folders()
+        self._restore_library_folder_for_active_video_type()
 
     def _open_video_types_manager(self) -> None:
         dialog = VideoTypesManagerDialog(
@@ -1747,16 +1928,13 @@ class MainWindow(QWidget):
             self._settings.save()
 
     def _open_batch_metadata_dialog(self) -> None:
-        downloads = self._youtube_downloads_path()
-        recent = [
-            folder
-            for folder in self._folder_history.folders()
-            if folder.resolve() != downloads.resolve()
-        ]
+        self._ensure_custom_downloads_folder_in_history()
+        folders = startup_folder_lists(self._folder_history.folders(), self._youtube_downloads_path())
         dialog = BatchMetadataDialog(
-            initial_folder=downloads,
-            recent_folders=recent,
-            pinned_folders=[downloads],
+            initial_folder=self._youtube_downloads_path(),
+            recent_folders=folders.recent,
+            pinned_folders=folders.pinned,
+            pinned_folder_label=folders.pinned_label,
             video_types=self._settings.video_types,
             active_video_type_id=self._settings.active_video_type_id,
             skip_tagged=self._settings.metadata_skip_tagged,
@@ -1817,6 +1995,134 @@ class MainWindow(QWidget):
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._library_panel.refresh_display_labels()
+
+    def _on_move_to_trash_requested(self, path: object) -> None:
+        if not isinstance(path, Path):
+            return
+        try:
+            resolved = path.resolve()
+        except OSError:
+            QMessageBox.warning(
+                self,
+                trash_action_label(),
+                f"File not found:\n{path}",
+            )
+            return
+        if not resolved.is_file():
+            QMessageBox.warning(
+                self,
+                trash_action_label(),
+                f"File not found:\n{path}",
+            )
+            return
+
+        action = trash_action_label()
+        destination = "the recycle bin" if sys.platform == "win32" else "the trash"
+        confirm = QMessageBox.question(
+            self,
+            action,
+            f'Move "{display_name(path)}" to {destination}?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+
+        if not move_path_to_trash(resolved):
+            QMessageBox.warning(
+                self,
+                action,
+                f"Could not move to trash:\n{resolved}",
+            )
+            return
+
+        self._remove_local_file(resolved)
+
+    def _remove_local_file(self, path: Path) -> None:
+        resolved = _resolved_path(path)
+
+        def matches(candidate: Path) -> bool:
+            return _resolved_path(candidate) == resolved
+
+        was_playing = False
+        if self._media_mode == MediaSourceMode.LOCAL and not self._stopped:
+            playing = self._external_path or self._playlist.current()
+            if playing is not None and matches(playing):
+                was_playing = True
+
+        self._raw_paths = [candidate for candidate in self._raw_paths if not matches(candidate)]
+        self._library_paths = [
+            candidate for candidate in self._library_paths if not matches(candidate)
+        ]
+        self._mixed_queue.remove_local(path)
+        self._play_history.remove_local(path)
+
+        if self._external_path is not None and matches(self._external_path):
+            self._external_path = None
+
+        if (
+            self._current_queue_item is not None
+            and self._current_queue_item.kind == "local"
+            and self._current_queue_item.path is not None
+            and matches(self._current_queue_item.path)
+        ):
+            self._current_queue_item = None
+
+        if self._folder is not None:
+            queue = self._folder_queues.get_queue(self._folder)
+            current = self._folder_queues.get_current(self._folder)
+            self._folder_queues.set(
+                self._folder,
+                queue=[candidate for candidate in queue if not matches(candidate)],
+                current=None if current is not None and matches(current) else current,
+            )
+
+        keep_path = self._external_path or self._playlist.current()
+        if keep_path is not None and matches(keep_path):
+            keep_path = None
+
+        sorted_paths = self._sort_paths(self._raw_paths)
+        self._playlist.reorder(sorted_paths, keep_path=keep_path)
+
+        subfolders = (
+            []
+            if self._recursive_list_mode or self._browse_folder is None
+            else child_folders_with_videos(self._browse_folder)
+        )
+        highlight: int | None = None
+        if not self._stopped and not was_playing:
+            if self._external_path is not None:
+                highlight = self._playlist_index_for_path(self._external_path)
+            else:
+                highlight = self._playlist.index
+
+        self._library_panel.set_songs(
+            self._playlist.paths,
+            current_index=highlight,
+            clear_search=False,
+            subfolders=subfolders,
+            can_navigate_up=self._can_navigate_up(),
+            recursive_list_mode=self._recursive_list_mode,
+            label_root=self._browse_folder if self._recursive_list_mode else None,
+        )
+
+        search_text = self._library_panel.local_search_text().strip()
+        if search_text:
+            self._on_local_search_changed(search_text)
+
+        self._update_queue_display()
+        self._update_history_display()
+
+        if was_playing:
+            next_item = self._mixed_queue.dequeue()
+            if next_item is not None:
+                self._play_queue_item(next_item)
+            elif self._playlist.paths:
+                index = min(self._playlist.index, len(self._playlist.paths) - 1)
+                self._playlist.go_to(index)
+                self._play_current(interrupt=False)
+            else:
+                self._on_stop()
 
     def _on_file_renamed(self, old_path: Path, new_path: Path) -> None:
         old_resolved = _resolved_path(old_path)
@@ -1965,7 +2271,10 @@ class MainWindow(QWidget):
 
     def _refresh_song_list(self) -> None:
         if self._browse_folder is None:
-            return
+            if self._folder is not None:
+                self._browse_folder = self._folder
+            else:
+                return
 
         keep_path = self._external_path or self._playlist.current()
         if self._recursive_list_mode:

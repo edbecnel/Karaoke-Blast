@@ -19,10 +19,11 @@ def _configure_qt_plugin_path() -> None:
 
 _configure_qt_plugin_path()
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QApplication
 
 from karaoke_blast.main_window import MainWindow
+from karaoke_blast.utils.macos_dock_icon import clear_macos_dock_icon_override
 from karaoke_blast.utils.resources import app_icon
 from karaoke_blast.utils.runtime_deps import configure_runtime_dependencies
 
@@ -83,19 +84,35 @@ def _configure_windows_app_id() -> None:
         logging.getLogger(__name__).warning("Could not set Windows AppUserModelID: %s", exc)
 
 
+def _install_macos_dock_icon_guard(app: QApplication) -> None:
+    """Undo Qt replacing the bundle Dock icon when windows map or focus changes."""
+    clear_macos_dock_icon_override()
+    for delay_ms in (0, 100, 500):
+        QTimer.singleShot(delay_ms, clear_macos_dock_icon_override)
+    app.focusWindowChanged.connect(lambda _window: clear_macos_dock_icon_override())
+
+
 def run(initial_folder: Path | None = None) -> int:
     configure_runtime_dependencies()
     _configure_windows_app_id()
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     app = QApplication(sys.argv)
     app.setApplicationName("Karaoke Blast")
-    icon = app_icon()
-    app.setWindowIcon(icon)
+    if sys.platform == "darwin":
+        clear_macos_dock_icon_override()
 
     window = MainWindow(initial_folder=initial_folder)
-    window.setWindowIcon(icon)
+    if sys.platform != "darwin":
+        icon = app_icon()
+        app.setWindowIcon(icon)
+        window.setWindowIcon(icon)
+    else:
+        _install_macos_dock_icon_guard(app)
+
     window.show()
     _macos_activate_foreground()
+    if sys.platform == "darwin":
+        clear_macos_dock_icon_override()
     window.raise_()
     window.activateWindow()
     return app.exec()

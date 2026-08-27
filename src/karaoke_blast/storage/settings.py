@@ -136,6 +136,8 @@ class Settings:
                 self.active_video_type_id = active_id.strip()
             if find_video_type(self.video_types, self.active_video_type_id) is None:
                 self.active_video_type_id = BUILTIN_SONGS_ID
+            self._migrate_legacy_youtube_append_karaoke(data)
+            self._migrate_legacy_youtube_downloads_dir(data)
             self._migrate_legacy_display_formats()
             self._sync_legacy_fields_from_active_type()
         except (OSError, json.JSONDecodeError) as exc:
@@ -177,22 +179,34 @@ class Settings:
             logger.warning("Could not save settings: %s", exc)
 
     def resolved_youtube_downloads_dir(self) -> Path:
-        """Return the configured YouTube downloads folder, or the default."""
-        if self.youtube_downloads_dir:
-            path = Path(self.youtube_downloads_dir)
+        """Return the YouTube downloads folder for the active media type."""
+        return self._resolve_profile_downloads_dir(self.get_active_video_type())
+
+    def _resolve_profile_downloads_dir(self, profile: VideoTypeProfile) -> Path:
+        if profile.youtube_downloads_dir:
+            path = Path(profile.youtube_downloads_dir)
             if path.is_dir():
-                return path
+                return path.resolve()
             logger.warning(
-                "Configured YouTube downloads folder is unavailable, using default: %s",
-                self.youtube_downloads_dir,
+                "Configured YouTube downloads folder is unavailable for %s: %s",
+                profile.name,
+                profile.youtube_downloads_dir,
             )
+        if profile.last_library_folder:
+            path = Path(profile.last_library_folder)
+            if path.is_dir():
+                return path.resolve()
         return default_downloads_dir()
 
     def set_youtube_downloads_dir(self, path: Path) -> None:
-        """Persist a custom YouTube downloads folder."""
+        """Persist a custom YouTube downloads folder for the active media type."""
         resolved = path.resolve()
         resolved.mkdir(parents=True, exist_ok=True)
-        self.youtube_downloads_dir = str(resolved)
+        profile = self.get_active_video_type()
+        updated = profile.copy()
+        updated.youtube_downloads_dir = str(resolved)
+        self.update_video_type(updated)
+        self.youtube_downloads_dir = updated.youtube_downloads_dir
         self.save()
 
     def get_active_video_type(self) -> VideoTypeProfile:
@@ -205,6 +219,40 @@ class Settings:
             return
         self.active_video_type_id = profile_id
         self._sync_legacy_fields_from_active_type()
+
+    def get_video_type_library_folder(self, profile_id: str) -> Path | None:
+        """Return the last opened library folder for a media type, if it still exists."""
+        profile = find_video_type(self.video_types, profile_id)
+        if profile is None or not profile.last_library_folder:
+            return None
+        path = Path(profile.last_library_folder)
+        if not path.is_dir():
+            return None
+        return path.resolve()
+
+    def resolved_video_type_default_folder(self, profile_id: str | None = None) -> Path | None:
+        """Return the default folder for a media type (library, else downloads)."""
+        resolved_id = profile_id or self.active_video_type_id
+        library = self.get_video_type_library_folder(resolved_id)
+        if library is not None:
+            return library
+        profile = find_video_type(self.video_types, resolved_id)
+        if profile is None:
+            return None
+        return self._resolve_profile_downloads_dir(profile)
+
+    def set_video_type_library_folder(self, profile_id: str, folder: Path) -> None:
+        """Remember the latest library folder opened for a media type."""
+        profile = find_video_type(self.video_types, profile_id)
+        if profile is None:
+            return
+        resolved = str(folder.resolve())
+        if profile.last_library_folder == resolved:
+            return
+        updated = profile.copy()
+        updated.last_library_folder = resolved
+        self.update_video_type(updated)
+        self.save()
 
     def update_video_type(self, profile: VideoTypeProfile) -> None:
         """Replace a video type profile in the stored list."""
@@ -235,6 +283,31 @@ class Settings:
             self.active_video_type_id = BUILTIN_SONGS_ID
             self._sync_legacy_fields_from_active_type()
 
+    def _migrate_legacy_youtube_append_karaoke(self, data: dict[str, object]) -> None:
+        """Move the legacy global append-karaoke preference onto the Songs profile."""
+        legacy = data.get("youtube_append_karaoke")
+        if not isinstance(legacy, bool):
+            return
+        raw_video_types = data.get("video_types")
+        if not isinstance(raw_video_types, list):
+            return
+        songs_entry = next(
+            (
+                entry
+                for entry in raw_video_types
+                if isinstance(entry, dict) and entry.get("id") == BUILTIN_SONGS_ID
+            ),
+            None,
+        )
+        if songs_entry is not None and "youtube_append_karaoke" in songs_entry:
+            return
+        songs = find_video_type(self.video_types, BUILTIN_SONGS_ID)
+        if songs is None:
+            return
+        updated = songs.copy()
+        updated.youtube_append_karaoke = legacy
+        self.update_video_type(updated)
+
     def _migrate_legacy_display_formats(self) -> None:
         """Move the legacy global display format onto the Songs profile once."""
         songs = find_video_type(self.video_types, BUILTIN_SONGS_ID)
@@ -252,3 +325,30 @@ class Settings:
         description_slots = list(mapping.description_slots)
         self.metadata_comment_slot_indices = description_slots or None
         self.song_display_format = profile.resolved_display_format().copy()
+        self.youtube_append_karaoke = profile.youtube_append_karaoke
+        self.youtube_downloads_dir = profile.youtube_downloads_dir
+
+    def _migrate_legacy_youtube_downloads_dir(self, data: dict[str, object]) -> None:
+        """Move the legacy global downloads folder onto the Songs profile."""
+        legacy = data.get("youtube_downloads_dir")
+        if not isinstance(legacy, str) or not legacy.strip():
+            return
+        raw_video_types = data.get("video_types")
+        if not isinstance(raw_video_types, list):
+            return
+        songs_entry = next(
+            (
+                entry
+                for entry in raw_video_types
+                if isinstance(entry, dict) and entry.get("id") == BUILTIN_SONGS_ID
+            ),
+            None,
+        )
+        if songs_entry is not None and "youtube_downloads_dir" in songs_entry:
+            return
+        songs = find_video_type(self.video_types, BUILTIN_SONGS_ID)
+        if songs is None:
+            return
+        updated = songs.copy()
+        updated.youtube_downloads_dir = legacy.strip()
+        self.update_video_type(updated)

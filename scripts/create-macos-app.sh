@@ -44,6 +44,8 @@ mkdir -p "$MACOS" "$RESOURCES"
 
 cat >"$MACOS/launcher" <<EOF
 #!/bin/zsh
+export KARAOKE_BLAST_APP_BUNDLE="\$(cd "\$(dirname "\$0")/../.." && pwd)"
+export KARAOKE_BLAST_APP_RESOURCES="\$(cd "\$(dirname "\$0")/../Resources" && pwd)"
 exec "$PYTHON" -m karaoke_blast "\$@"
 EOF
 chmod +x "$MACOS/launcher"

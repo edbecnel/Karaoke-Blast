@@ -126,6 +126,8 @@ RESOURCES="$APP_DIR/Contents/Resources"
 MARKER="$HOME/Library/Application Support/Karaoke Blast/.optional-deps-checked"
 PYTHON_BIN="$RESOURCES/python/bin"
 
+export KARAOKE_BLAST_APP_BUNDLE="$APP_DIR"
+export KARAOKE_BLAST_APP_RESOURCES="$RESOURCES"
 export PATH="$RESOURCES/ffmpeg:$PATH"
 
 if [[ ! -f "$MARKER" ]]; then
