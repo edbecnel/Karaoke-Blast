@@ -22,6 +22,7 @@ from karaoke_blast.models.play_history_entry import PlayHistoryEntry
 from karaoke_blast.models.queue_item import QueueItem
 from karaoke_blast.models.youtube_video import YouTubeVideo
 from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
+from karaoke_blast.ui.library_folder_menu import HistoryFolderMenu
 from karaoke_blast.ui.list_style import SIDEBAR_LIST_STYLE
 from karaoke_blast.ui.mixed_queue_list_widget import (
     QUEUE_PANEL_LIST_STYLE,
@@ -112,15 +113,15 @@ TAB_STYLE = (
     "QTabBar::tab:selected { background: #e94560; color: white; }"
 )
 
-FOLDER_BTN_STYLE = """
+FOLDER_PATH_BTN_STYLE = """
 QPushButton {
     background: transparent;
-    color: white;
+    color: #ccc;
     border: none;
-    font-size: 16px;
-    font-weight: bold;
+    font-size: 12px;
+    font-weight: normal;
     text-align: left;
-    padding: 2px 22px 2px 4px;
+    padding: 0 22px 0 0;
     border-radius: 4px;
 }
 QPushButton:hover {
@@ -132,10 +133,12 @@ QPushButton::menu-indicator {
     width: 12px;
     border-left: 4px solid transparent;
     border-right: 4px solid transparent;
-    border-top: 6px solid #ffffff;
+    border-top: 5px solid #ccc;
     margin-right: 4px;
 }
 """
+
+FOLDER_LABEL_STYLE = "color: #aaa; font-size: 12px;"
 
 _DISMISS_BTN_STYLE = (
     "QPushButton { background: transparent; color: #aaa; border: none;"
@@ -166,6 +169,7 @@ class LibraryPanel(QWidget):
     move_to_trash_requested = pyqtSignal(object)
     edit_metadata_requested = pyqtSignal(object)
     folder_selected = pyqtSignal(object)
+    folder_remove_requested = pyqtSignal(object)
     browse_folder_requested = pyqtSignal()
     folder_entered = pyqtSignal(object)
     navigate_up_requested = pyqtSignal()
@@ -195,6 +199,8 @@ class LibraryPanel(QWidget):
     youtube_append_changed = pyqtSignal(object)
     browse_downloads_folder_requested = pyqtSignal()
     use_current_folder_for_downloads_requested = pyqtSignal()
+    downloads_folder_selected = pyqtSignal(object)
+    downloads_folder_remove_requested = pyqtSignal(object)
     youtube_search_requested = pyqtSignal(str)
     video_types_settings_requested = pyqtSignal()
     video_type_changed = pyqtSignal(object)
@@ -212,24 +218,54 @@ class LibraryPanel(QWidget):
         self._song_list = SongListPanel(embedded=True)
 
         header_row = QHBoxLayout()
+        header_row.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        header_left = QVBoxLayout()
+        header_left.setContentsMargins(0, 0, 0, 0)
+        header_left.setSpacing(2)
+
+        self._video_type_switch = VideoTypeSwitchWidget(
+            video_types=[],
+            active_id=BUILTIN_SONGS_ID,
+        )
+        self._video_type_switch.type_changed.connect(self.video_type_changed.emit)
+        header_left.addWidget(self._video_type_switch)
+
+        folder_row = QHBoxLayout()
+        folder_row.setContentsMargins(0, 0, 0, 0)
+        folder_row.setSpacing(4)
+
+        folder_label = QLabel("Folder:")
+        folder_label.setStyleSheet(FOLDER_LABEL_STYLE)
+        folder_row.addWidget(folder_label)
+
         self._folder_btn = QPushButton("Library")
-        self._folder_btn.setStyleSheet(FOLDER_BTN_STYLE)
+        self._folder_btn.setStyleSheet(FOLDER_PATH_BTN_STYLE)
         self._folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._folder_btn.setToolTip("Switch folder")
         self._folder_btn.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        self._folder_menu = QMenu(self)
+        self._folder_menu = HistoryFolderMenu(self)
         self._folder_menu.setStyleSheet(CONTEXT_MENU_STYLE)
+        self._folder_menu.folder_remove_requested.connect(
+            self.folder_remove_requested.emit
+        )
         self._folder_menu.aboutToShow.connect(
-            lambda: self._song_list.populate_folder_menu(self._folder_menu)
+            lambda: self._song_list.populate_folder_menu(
+                self._folder_menu,
+                on_folder_remove=self.folder_remove_requested.emit,
+            )
         )
         self._folder_btn.setMenu(self._folder_menu)
         self._folder_btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._folder_btn.customContextMenuRequested.connect(
             lambda pos: self._song_list.show_folder_path_context_menu(self._folder_btn, pos)
         )
-        header_row.addWidget(self._folder_btn, 1)
+        folder_row.addWidget(self._folder_btn, 1)
+        header_left.addLayout(folder_row)
+
+        header_row.addLayout(header_left, 1)
 
         refresh_btn = QPushButton("↻")
         refresh_btn.setToolTip("Refresh song list")
@@ -256,13 +292,6 @@ class LibraryPanel(QWidget):
         close_btn.clicked.connect(self.close_requested.emit)
         header_row.addWidget(close_btn)
         layout.addLayout(header_row)
-
-        self._video_type_switch = VideoTypeSwitchWidget(
-            video_types=[],
-            active_id=BUILTIN_SONGS_ID,
-        )
-        self._video_type_switch.type_changed.connect(self.video_type_changed.emit)
-        layout.addWidget(self._video_type_switch)
 
         self._search = VisibleSpaceLineEdit()
         self._search.setPlaceholderText("Search songs or YouTube…")
@@ -356,6 +385,12 @@ class LibraryPanel(QWidget):
         )
         self._downloads_folder_row.use_current_folder_clicked.connect(
             self.use_current_folder_for_downloads_requested.emit
+        )
+        self._downloads_folder_row.downloads_folder_selected.connect(
+            self.downloads_folder_selected.emit
+        )
+        self._downloads_folder_row.downloads_folder_remove_requested.connect(
+            self.downloads_folder_remove_requested.emit
         )
         lower_layout.addWidget(self._downloads_folder_row)
 
@@ -619,6 +654,9 @@ class LibraryPanel(QWidget):
     ) -> None:
         self._downloads_folder_row.set_folder(path)
         self._downloads_folder_row.set_current_library_folder(current_library_folder)
+
+    def set_downloads_folder_history(self, folders: list[Path]) -> None:
+        self._downloads_folder_row.set_downloads_history(folders)
 
     def set_folder(self, folder: Path | None) -> None:
         self._song_list.set_folder(folder)

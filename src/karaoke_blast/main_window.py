@@ -33,6 +33,7 @@ from karaoke_blast.player.youtube_player import YouTubePlayer
 from karaoke_blast.player.youtube_widget import YouTubeWidget
 from karaoke_blast.services.youtube_download_worker import downloaded_file_for
 from karaoke_blast.services.youtube_download import start_download
+from karaoke_blast.storage.downloads_folder_history import DownloadsFolderHistory
 from karaoke_blast.storage.folder_history import FolderHistory
 from karaoke_blast.storage.folder_queues import FolderQueues
 from karaoke_blast.storage.paths import is_default_downloads_dir
@@ -133,6 +134,8 @@ class MainWindow(QWidget):
         self._folder_history = FolderHistory()
         self._folder_queues = FolderQueues()
         self._settings = Settings()
+        self._downloads_folder_history = DownloadsFolderHistory()
+        self._seed_downloads_folder_history()
         self._flat_browse_mode = self._settings.library_flat_browse
         self._download_thread: QThread | None = None
         self._download_worker = None
@@ -143,6 +146,7 @@ class MainWindow(QWidget):
         self._empty_state = self._build_empty_state()
         self._player_page = self._build_player_page()
         self._refresh_recent_folders()
+        self._refresh_downloads_folder_history()
 
         self._stack.addWidget(self._empty_state)
         self._stack.addWidget(self._player_page)
@@ -341,6 +345,34 @@ class MainWindow(QWidget):
             self._library_panel.set_downloads_folder(
                 path, current_library_folder=current
             )
+        self._refresh_downloads_folder_history()
+
+    def _seed_downloads_folder_history(self) -> None:
+        for profile in self._settings.video_types:
+            if not profile.youtube_downloads_dir:
+                continue
+            path = Path(profile.youtube_downloads_dir)
+            if path.is_dir():
+                self._downloads_folder_history.add(path)
+
+    def _refresh_downloads_folder_history(self) -> None:
+        if hasattr(self, "_library_panel"):
+            self._library_panel.set_downloads_folder_history(
+                self._downloads_folder_history.folders()
+            )
+
+    def _on_folder_history_remove_requested(self, folder: Path) -> None:
+        self._folder_history.remove(folder)
+        self._refresh_recent_folders()
+
+    def _on_downloads_folder_history_remove_requested(self, folder: Path) -> None:
+        self._downloads_folder_history.remove(folder)
+        self._refresh_downloads_folder_history()
+
+    def _on_downloads_folder_selected(self, folder: Path) -> None:
+        self._settings.set_youtube_downloads_dir(folder)
+        self._downloads_folder_history.add(folder)
+        self._update_downloads_folder_display()
 
     def _update_media_type_library_folder_display(self) -> None:
         if not hasattr(self, "_startup_folder_section"):
@@ -387,6 +419,7 @@ class MainWindow(QWidget):
             return
         path = Path(folder)
         self._settings.set_youtube_downloads_dir(path)
+        self._downloads_folder_history.add(path)
         self._folder_history.add(path)
         self._update_downloads_folder_display()
         self._refresh_recent_folders()
@@ -396,6 +429,7 @@ class MainWindow(QWidget):
         if folder is None:
             return
         self._settings.set_youtube_downloads_dir(folder)
+        self._downloads_folder_history.add(folder)
         self._folder_history.add(folder)
         self._update_downloads_folder_display()
         self._refresh_recent_folders()
@@ -486,6 +520,9 @@ class MainWindow(QWidget):
         self._library_panel.move_to_trash_requested.connect(self._on_move_to_trash_requested)
         self._library_panel.edit_metadata_requested.connect(self._on_edit_metadata_requested)
         self._library_panel.folder_selected.connect(self._on_start_menu_folder_selected)
+        self._library_panel.folder_remove_requested.connect(
+            self._on_folder_history_remove_requested
+        )
         self._library_panel.browse_folder_requested.connect(self._open_folder_dialog)
         self._library_panel.folder_entered.connect(self._on_folder_entered)
         self._library_panel.navigate_up_requested.connect(self._on_navigate_up)
@@ -512,6 +549,12 @@ class MainWindow(QWidget):
         )
         self._library_panel.use_current_folder_for_downloads_requested.connect(
             self._use_current_folder_as_downloads
+        )
+        self._library_panel.downloads_folder_selected.connect(
+            self._on_downloads_folder_selected
+        )
+        self._library_panel.downloads_folder_remove_requested.connect(
+            self._on_downloads_folder_history_remove_requested
         )
         self._library_panel.video_types_settings_requested.connect(
             self._open_video_types_manager

@@ -1,5 +1,6 @@
 """Sidebar song list with sort controls."""
 
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -780,7 +781,12 @@ class SongListPanel(QWidget):
             )
         )
 
-    def populate_folder_menu(self, menu: QMenu) -> None:
+    def populate_folder_menu(
+        self,
+        menu: QMenu,
+        *,
+        on_folder_remove: Callable[[Path], None] | None = None,
+    ) -> None:
         """Fill *menu* with pinned and recent folders from the start-screen list."""
         current = self._current_folder
         populate_library_folder_menu(
@@ -792,6 +798,7 @@ class SongListPanel(QWidget):
             on_folder_selected=self.folder_selected.emit,
             on_browse=self.browse_folder_requested.emit,
             include_browse=False,
+            on_folder_remove=on_folder_remove,
         )
 
         menu.addSeparator()

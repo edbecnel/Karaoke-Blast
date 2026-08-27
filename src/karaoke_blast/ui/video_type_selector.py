@@ -63,8 +63,8 @@ QComboBox {
     background-color: transparent;
     color: #ffb3c1;
     border: none;
-    padding: 0 8px 0 4px;
-    font-size: 12px;
+    padding: 2px 22px 2px 4px;
+    font-size: 16px;
     font-weight: bold;
 }
 QComboBox:hover {
@@ -77,9 +77,9 @@ QComboBox::drop-down {
 }
 QComboBox::down-arrow {
     image: none;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid #ffb3c1;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid #ffb3c1;
     margin-right: 4px;
 }
 QComboBox QAbstractItemView {
@@ -89,6 +89,7 @@ QComboBox QAbstractItemView {
     selection-background-color: #e94560;
     selection-color: #ffffff;
     outline: none;
+    font-size: 14px;
 }
 """
 
