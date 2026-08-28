@@ -6,16 +6,19 @@ from enum import Enum
 from pathlib import Path
 
 from PyQt6.QtCore import QEvent, Qt, QTimer
-from PyQt6.QtGui import QKeyEvent
+from PyQt6.QtGui import QKeyEvent, QShowEvent
 from PyQt6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QDialog,
     QDialogButtonBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
     QRadioButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -50,7 +53,7 @@ QLineEdit {
     color: #ffffff;
     border: 1px solid #5a5a72;
     border-radius: 4px;
-    padding: 6px 10px;
+    padding: 4px 8px;
     font-size: 13px;
 }
 """
@@ -99,7 +102,7 @@ QLineEdit {
     color: #ffffff;
     border: 1px solid #e94560;
     border-radius: 4px;
-    padding: 6px 10px;
+    padding: 4px 8px;
     font-size: 13px;
 }
 """
@@ -110,8 +113,15 @@ QLineEdit {
     color: #b8b8c8;
     border: 1px solid #4a4a62;
     border-radius: 4px;
-    padding: 6px 10px;
+    padding: 4px 8px;
     font-size: 13px;
+}
+"""
+
+_SCROLL_STYLE = """
+QScrollArea {
+    background-color: transparent;
+    border: none;
 }
 """
 
@@ -238,7 +248,7 @@ class RenameFileDialog(QDialog):
         self.setStyleSheet(_DIALOG_STYLE)
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
+        layout.setSpacing(8)
 
         if progress_label:
             progress = QLabel(progress_label)
@@ -250,6 +260,11 @@ class RenameFileDialog(QDialog):
         original.setWordWrap(True)
         layout.addWidget(original)
 
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(8)
+
         if show_format_config:
             if self._video_types is not None and self._active_video_type_id is not None:
                 self._type_selector = VideoTypeSelectorWidget(
@@ -258,30 +273,39 @@ class RenameFileDialog(QDialog):
                 )
                 self._type_selector.type_changed.connect(self._on_video_type_changed)
                 self._type_selector.types_changed.connect(self._on_video_types_changed)
-                layout.addWidget(self._type_selector)
+                scroll_layout.addWidget(self._type_selector)
             self._format_widget = FormatConfigWidget()
             self._format_widget.set_format(self._fmt)
             self._format_widget.format_changed.connect(self._on_format_changed)
-            layout.addWidget(self._format_widget)
+            scroll_layout.addWidget(self._format_widget)
         else:
             self._format_widget = None
 
         parts_label = QLabel("Parts — click a part to append to the selected target")
         parts_label.setStyleSheet(_LABEL_STYLE)
-        layout.addWidget(parts_label)
+        scroll_layout.addWidget(parts_label)
 
         self._parts_row = QHBoxLayout()
         self._parts_row.setSpacing(6)
-        layout.addLayout(self._parts_row)
+        scroll_layout.addLayout(self._parts_row)
         self._rebuild_part_chips()
 
-        layout.addWidget(self._target_selector_widget)
+        scroll_layout.addWidget(self._target_selector_widget)
         self._rebuild_target_selector()
 
         self._slots_layout = QVBoxLayout()
-        self._slots_layout.setSpacing(8)
-        layout.addLayout(self._slots_layout)
+        self._slots_layout.setSpacing(6)
+        scroll_layout.addLayout(self._slots_layout)
         self._rebuild_slot_fields()
+        scroll_layout.addStretch()
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidget(scroll_content)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setStyleSheet(_SCROLL_STYLE)
+        layout.addWidget(scroll_area, 1)
 
         self._preview_label = QLabel()
         self._preview_label.setStyleSheet(_PREVIEW_STYLE)
@@ -304,6 +328,28 @@ class RenameFileDialog(QDialog):
         layout.addWidget(self._buttons)
 
         self._update_preview()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self._fit_to_available_screen()
+
+    def _fit_to_available_screen(self) -> None:
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        margin = 24
+        max_height = max(360, available.height() - margin)
+        width = max(self.minimumWidth(), self.width())
+        height = min(self.sizeHint().height(), max_height)
+        self.resize(width, height)
+        frame = self.frameGeometry()
+        frame.moveCenter(available.center())
+        if frame.bottom() > available.bottom():
+            frame.moveBottom(available.bottom())
+        if frame.top() < available.top():
+            frame.moveTop(available.top())
+        self.move(frame.topLeft())
 
     def result_value(self) -> RenameResult:
         return self._result
