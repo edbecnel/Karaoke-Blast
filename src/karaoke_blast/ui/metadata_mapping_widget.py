@@ -17,6 +17,7 @@ from karaoke_blast.utils.metadata_field_mapping import (
     VLC_FIELD_ALBUM,
     VLC_FIELD_ARTIST,
     VLC_FIELD_DESCRIPTION,
+    VLC_FIELD_GENRE,
     VLC_FIELD_TITLE,
     VLC_METADATA_FIELD_LABELS,
     MetadataFieldMapping,
@@ -62,7 +63,7 @@ class MetadataMappingWidget(QWidget):
 
         hint = QLabel(
             "Choose which filename slot is written to each VLC field "
-            "(Title, Artist, Description, Album)."
+            "(Title, Artist, Genre, Description, Album)."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet(_HINT_STYLE)
@@ -79,6 +80,7 @@ class MetadataMappingWidget(QWidget):
         for field_key in (
             VLC_FIELD_TITLE,
             VLC_FIELD_ARTIST,
+            VLC_FIELD_GENRE,
             VLC_FIELD_DESCRIPTION,
             VLC_FIELD_ALBUM,
         ):
@@ -128,6 +130,8 @@ class MetadataMappingWidget(QWidget):
             return self._mapping.title_slot
         if field_key == VLC_FIELD_ARTIST:
             return self._mapping.artist_slot
+        if field_key == VLC_FIELD_GENRE:
+            return self._mapping.genre_slot
         if field_key == VLC_FIELD_ALBUM:
             return self._mapping.album_slot
         return None
@@ -183,6 +187,7 @@ class MetadataMappingWidget(QWidget):
             title_slot=self._combo_slot(self._combo_for_field(VLC_FIELD_TITLE)),
             artist_slot=self._combo_slot(self._combo_for_field(VLC_FIELD_ARTIST)),
             description_slots=[description_slot] if description_slot is not None else [],
+            genre_slot=self._combo_slot(self._combo_for_field(VLC_FIELD_GENRE)),
             album_slot=self._combo_slot(self._combo_for_field(VLC_FIELD_ALBUM)),
         )
 

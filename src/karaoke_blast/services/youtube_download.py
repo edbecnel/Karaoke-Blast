@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import logging
-import subprocess
-import sys
-import tempfile
 import time
 from importlib.util import find_spec
 from pathlib import Path
@@ -15,8 +11,10 @@ from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal, pyqtSlot
 
 from karaoke_blast.models.youtube_video import YouTubeVideo
 from karaoke_blast.services.youtube_download_worker import (
+    DownloadCancelled,
     cleanup_partial_download,
     downloaded_file_for,
+    run_download_in_process,
 )
 from karaoke_blast.utils.runtime_deps import resolve_ffmpeg_location
 
@@ -47,8 +45,6 @@ class YouTubeDownloadWorker(QObject):
         self._last_progress_emit = 0.0
         self._last_percent = -1.0
         self._cancel_requested = False
-        self._process: subprocess.Popen[str] | None = None
-        self._config_path: Path | None = None
 
     def prepare(self, video: YouTubeVideo, output_dir: Path) -> None:
         self._video = video
@@ -56,15 +52,10 @@ class YouTubeDownloadWorker(QObject):
         self._last_progress_emit = 0.0
         self._last_percent = -1.0
         self._cancel_requested = False
-        self._process = None
-        self._config_path = None
 
     @pyqtSlot()
     def request_cancel(self) -> None:
         self._cancel_requested = True
-        process = self._process
-        if process is not None and process.poll() is None:
-            process.terminate()
 
     @pyqtSlot()
     def run(self) -> None:
@@ -108,103 +99,24 @@ class YouTubeDownloadWorker(QObject):
                 self.download_finished.emit(existing, video)
                 return
 
-            self._run_download_subprocess(video, output_dir)
+            path = run_download_in_process(
+                video_id=video.video_id,
+                title=video.title,
+                watch_url=video.watch_url,
+                output_dir=output_dir,
+                on_progress=self._emit_progress,
+                is_cancelled=lambda: self._cancel_requested,
+            )
+            self.download_finished.emit(path, video)
+        except DownloadCancelled:
+            cleanup_partial_download(video.video_id, output_dir)
+            self.download_cancelled.emit(video.video_id)
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
             logger.warning("YouTube download failed for %s: %s", video.video_id, exc)
             self.download_failed.emit(
                 video.video_id,
                 _friendly_download_error(exc, detail=str(exc)),
             )
-
-    def _run_download_subprocess(self, video: YouTubeVideo, output_dir: Path) -> None:
-        config = {
-            "video_id": video.video_id,
-            "title": video.title,
-            "watch_url": video.watch_url,
-            "output_dir": str(output_dir),
-        }
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            suffix=".json",
-            prefix="kb-yt-dl-",
-            delete=False,
-        ) as config_file:
-            json.dump(config, config_file)
-            config_path = Path(config_file.name)
-
-        self._config_path = config_path
-        process = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "karaoke_blast.services.youtube_download_worker",
-                str(config_path),
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-        )
-        self._process = process
-
-        finished = False
-        return_code = 1
-        try:
-            stdout = process.stdout
-            if stdout is not None:
-                for line in stdout:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        event = json.loads(line)
-                    except json.JSONDecodeError:
-                        logger.debug("Ignoring non-JSON download output: %s", line)
-                        continue
-
-                    event_type = event.get("event")
-                    if event_type == "progress":
-                        self._emit_progress(
-                            float(event.get("percent", 0.0)),
-                            str(event.get("status", "Downloading…")),
-                        )
-                    elif event_type == "finished":
-                        finished = True
-                        self.download_finished.emit(Path(str(event["path"])), video)
-                        return
-                    elif event_type == "cancelled":
-                        self.download_cancelled.emit(video.video_id)
-                        return
-                    elif event_type == "failed":
-                        if self._cancel_requested:
-                            cleanup_partial_download(video.video_id, output_dir)
-                            self.download_cancelled.emit(video.video_id)
-                        else:
-                            message = str(event.get("message", "Download failed."))
-                            self.download_failed.emit(video.video_id, message)
-                        return
-
-            return_code = process.wait()
-        finally:
-            if process.poll() is None:
-                process.kill()
-                return_code = process.wait()
-            self._process = None
-            config_path.unlink(missing_ok=True)
-            self._config_path = None
-
-        if self._cancel_requested or return_code == 2:
-            cleanup_partial_download(video.video_id, output_dir)
-            self.download_cancelled.emit(video.video_id)
-            return
-
-        if not finished:
-            stderr = ""
-            if process.stderr is not None:
-                stderr = process.stderr.read().strip()
-            message = stderr or f"Download failed (exit code {return_code})."
-            self.download_failed.emit(video.video_id, message)
 
 
 def start_download(
@@ -222,7 +134,7 @@ def start_download(
     worker = YouTubeDownloadWorker()
     worker.prepare(video, output_dir)
     worker.moveToThread(thread)
-    worker.cancel_triggered.connect(worker.request_cancel, Qt.ConnectionType.QueuedConnection)
+    worker.cancel_triggered.connect(worker.request_cancel, Qt.ConnectionType.DirectConnection)
     thread.started.connect(worker.run)
     worker.progress_updated.connect(on_progress, Qt.ConnectionType.QueuedConnection)
     worker.download_finished.connect(on_finished, Qt.ConnectionType.QueuedConnection)

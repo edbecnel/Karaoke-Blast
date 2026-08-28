@@ -36,6 +36,7 @@ from karaoke_blast.utils.metadata_field_mapping import (
     VLC_FIELD_ALBUM,
     VLC_FIELD_ARTIST,
     VLC_FIELD_DESCRIPTION,
+    VLC_FIELD_GENRE,
     VLC_FIELD_TITLE,
     default_metadata_mapping,
     metadata_field_display_labels,
@@ -214,6 +215,11 @@ class MetadataFileDialog(QDialog):
         self._artist_preview.setStyleSheet(_PREVIEW_STYLE)
         self._artist_preview.setWordWrap(True)
         layout.addWidget(self._artist_preview)
+
+        self._genre_preview = QLabel()
+        self._genre_preview.setStyleSheet(_PREVIEW_STYLE)
+        self._genre_preview.setWordWrap(True)
+        layout.addWidget(self._genre_preview)
 
         self._comment_preview = QLabel()
         self._comment_preview.setStyleSheet(_PREVIEW_STYLE)
@@ -511,6 +517,7 @@ class MetadataFileDialog(QDialog):
         title = metadata[VLC_FIELD_TITLE]
         artist = metadata[VLC_FIELD_ARTIST]
         description = metadata[VLC_FIELD_DESCRIPTION]
+        genre = metadata[VLC_FIELD_GENRE]
         album = metadata[VLC_FIELD_ALBUM]
         labels = self._metadata_labels()
         normalized = self._mapping.normalize_for_format(self._fmt)
@@ -518,6 +525,7 @@ class MetadataFileDialog(QDialog):
         self._title_preview.setStyleSheet(_PREVIEW_STYLE)
         self._artist_preview.setStyleSheet(_PREVIEW_STYLE)
         self._comment_preview.setStyleSheet(_PREVIEW_STYLE)
+        self._genre_preview.setStyleSheet(_PREVIEW_STYLE)
         self._album_preview.setStyleSheet(_PREVIEW_STYLE)
         self._title_preview.setText(
             f"{labels[VLC_FIELD_TITLE]}: {title or '(required)'}"
@@ -525,6 +533,13 @@ class MetadataFileDialog(QDialog):
         self._artist_preview.setText(
             f"{labels[VLC_FIELD_ARTIST]}: {artist or '(none)'}"
         )
+        if normalized.genre_slot is not None:
+            self._genre_preview.setText(
+                f"{labels[VLC_FIELD_GENRE]}: {genre or '(empty)'}"
+            )
+            self._genre_preview.show()
+        else:
+            self._genre_preview.hide()
         if normalized.description_slots:
             self._comment_preview.setText(
                 f"{labels[VLC_FIELD_DESCRIPTION]}: {description or '(empty)'}"
@@ -560,6 +575,11 @@ class MetadataFileDialog(QDialog):
                 description=(
                     metadata[VLC_FIELD_DESCRIPTION]
                     if normalized.description_slots
+                    else None
+                ),
+                genre=(
+                    metadata[VLC_FIELD_GENRE]
+                    if normalized.genre_slot is not None
                     else None
                 ),
                 album=(

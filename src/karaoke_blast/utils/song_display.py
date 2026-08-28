@@ -12,6 +12,7 @@ from karaoke_blast.utils.metadata_field_mapping import (
     VLC_FIELD_ALBUM,
     VLC_FIELD_ARTIST,
     VLC_FIELD_DESCRIPTION,
+    VLC_FIELD_GENRE,
     VLC_FIELD_TITLE,
     metadata_field_display_labels,
 )
@@ -22,6 +23,7 @@ DISPLAY_MODE_METADATA = "metadata"
 SLOT_KIND_TITLE = "title"
 SLOT_KIND_ARTIST = "artist"
 SLOT_KIND_DESCRIPTION = "description"
+SLOT_KIND_GENRE = "genre"
 SLOT_KIND_ALBUM = "album"
 # Legacy persisted value for the description slot.
 SLOT_KIND_COMMENT = "comment"
@@ -29,17 +31,19 @@ SLOT_KIND_COMMENT = "comment"
 SLOT_KINDS = (
     SLOT_KIND_TITLE,
     SLOT_KIND_ARTIST,
+    SLOT_KIND_GENRE,
     SLOT_KIND_DESCRIPTION,
     SLOT_KIND_ALBUM,
 )
-SLOT_COUNT = 4
-SEPARATOR_COUNT = 3
+SLOT_COUNT = 5
+SEPARATOR_COUNT = 4
 DEFAULT_SEPARATORS = (" - ", " - ", " - ")
 
 _DEFAULT_FIELD_LABELS = {
     SLOT_KIND_TITLE: "Title",
     SLOT_KIND_ARTIST: "Artist",
     SLOT_KIND_DESCRIPTION: "Description",
+    SLOT_KIND_GENRE: "Genre",
     SLOT_KIND_ALBUM: "Album",
 }
 
@@ -138,6 +142,7 @@ DEFAULT_DISPLAY_FORMAT = DisplayFormat(
     slots=[
         DisplaySlot(SLOT_KIND_TITLE, enabled=True),
         DisplaySlot(SLOT_KIND_ARTIST, enabled=True),
+        DisplaySlot(SLOT_KIND_GENRE, enabled=False),
         DisplaySlot(SLOT_KIND_DESCRIPTION, enabled=True),
         DisplaySlot(SLOT_KIND_ALBUM, enabled=False),
     ],
@@ -151,6 +156,7 @@ def default_display_format_for_mapping(mapping: MetadataFieldMapping) -> Display
         slots=[
             DisplaySlot(SLOT_KIND_TITLE, enabled=mapping.title_slot is not None),
             DisplaySlot(SLOT_KIND_ARTIST, enabled=mapping.artist_slot is not None),
+            DisplaySlot(SLOT_KIND_GENRE, enabled=mapping.genre_slot is not None),
             DisplaySlot(
                 SLOT_KIND_DESCRIPTION,
                 enabled=bool(mapping.description_slots),
@@ -159,6 +165,19 @@ def default_display_format_for_mapping(mapping: MetadataFieldMapping) -> Display
         ],
         separators=list(DEFAULT_SEPARATORS),
     )
+
+
+def display_format_has_enabled_kind_before(
+    fmt: DisplayFormat,
+    *,
+    before: str,
+    after: str,
+) -> bool:
+    """Return True when *before* appears before *after* among enabled slots."""
+    kinds = [slot.kind for slot in fmt.slots if slot.enabled]
+    if before not in kinds or after not in kinds:
+        return False
+    return kinds.index(before) < kinds.index(after)
 
 
 def display_field_labels_from_mapping(
@@ -176,6 +195,7 @@ def display_field_labels_from_mapping(
         SLOT_KIND_TITLE: vlc_labels[VLC_FIELD_TITLE],
         SLOT_KIND_ARTIST: vlc_labels[VLC_FIELD_ARTIST],
         SLOT_KIND_DESCRIPTION: vlc_labels[VLC_FIELD_DESCRIPTION],
+        SLOT_KIND_GENRE: vlc_labels[VLC_FIELD_GENRE],
         SLOT_KIND_ALBUM: vlc_labels[VLC_FIELD_ALBUM],
     }
 
@@ -195,6 +215,8 @@ def _slot_value(tags: MediaTags, kind: str) -> str:
         return tags.artist.strip()
     if normalized == SLOT_KIND_DESCRIPTION:
         return tags.comment.strip()
+    if normalized == SLOT_KIND_GENRE:
+        return tags.genre.strip()
     if normalized == SLOT_KIND_ALBUM:
         return tags.album.strip()
     return ""

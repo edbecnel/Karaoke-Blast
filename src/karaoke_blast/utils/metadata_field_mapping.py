@@ -15,11 +15,13 @@ from karaoke_blast.utils.filename_rename import (
 VLC_FIELD_TITLE = "title"
 VLC_FIELD_ARTIST = "artist"
 VLC_FIELD_DESCRIPTION = "description"
+VLC_FIELD_GENRE = "genre"
 VLC_FIELD_ALBUM = "album"
 
 VLC_METADATA_FIELDS = (
     VLC_FIELD_TITLE,
     VLC_FIELD_ARTIST,
+    VLC_FIELD_GENRE,
     VLC_FIELD_DESCRIPTION,
     VLC_FIELD_ALBUM,
 )
@@ -28,6 +30,7 @@ VLC_METADATA_FIELD_LABELS = {
     VLC_FIELD_TITLE: "Title",
     VLC_FIELD_ARTIST: "Artist",
     VLC_FIELD_DESCRIPTION: "Description",
+    VLC_FIELD_GENRE: "Genre",
     VLC_FIELD_ALBUM: "Album",
 }
 
@@ -41,6 +44,7 @@ class MetadataFieldMapping:
     title_slot: int | None = None
     artist_slot: int | None = None
     description_slots: list[int] = field(default_factory=list)
+    genre_slot: int | None = None
     album_slot: int | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -48,6 +52,7 @@ class MetadataFieldMapping:
             "title_slot": self.title_slot,
             "artist_slot": self.artist_slot,
             "description_slots": list(self.description_slots),
+            "genre_slot": self.genre_slot,
             "album_slot": self.album_slot,
         }
 
@@ -57,6 +62,7 @@ class MetadataFieldMapping:
             return cls()
         title_slot = data.get("title_slot")
         artist_slot = data.get("artist_slot")
+        genre_slot = data.get("genre_slot")
         album_slot = data.get("album_slot")
         raw_description = data.get("description_slots")
         description_slots: list[int] = []
@@ -68,6 +74,7 @@ class MetadataFieldMapping:
             title_slot=title_slot if isinstance(title_slot, int) and 0 <= title_slot < 4 else None,
             artist_slot=artist_slot if isinstance(artist_slot, int) and 0 <= artist_slot < 4 else None,
             description_slots=description_slots,
+            genre_slot=genre_slot if isinstance(genre_slot, int) and 0 <= genre_slot < 4 else None,
             album_slot=album_slot if isinstance(album_slot, int) and 0 <= album_slot < 4 else None,
         )
 
@@ -83,6 +90,7 @@ class MetadataFieldMapping:
             description_slots=[
                 index for index in self.description_slots if index in enabled
             ][:1],
+            genre_slot=self.genre_slot if self.genre_slot in enabled else None,
             album_slot=self.album_slot if self.album_slot in enabled else None,
         )
 
@@ -117,6 +125,7 @@ def resolve_vlc_metadata(
         VLC_FIELD_TITLE: _slot_text(fmt, slot_values, normalized.title_slot),
         VLC_FIELD_ARTIST: _slot_text(fmt, slot_values, normalized.artist_slot),
         VLC_FIELD_DESCRIPTION: _DESCRIPTION_JOIN.join(description_parts),
+        VLC_FIELD_GENRE: _slot_text(fmt, slot_values, normalized.genre_slot),
         VLC_FIELD_ALBUM: _slot_text(fmt, slot_values, normalized.album_slot),
     }
 
@@ -173,6 +182,8 @@ def metadata_field_display_labels(
         labels[VLC_FIELD_TITLE] = fmt.slots[normalized.title_slot].label
     if normalized.artist_slot is not None:
         labels[VLC_FIELD_ARTIST] = fmt.slots[normalized.artist_slot].label
+    if normalized.genre_slot is not None:
+        labels[VLC_FIELD_GENRE] = fmt.slots[normalized.genre_slot].label
     if normalized.album_slot is not None:
         labels[VLC_FIELD_ALBUM] = fmt.slots[normalized.album_slot].label
 
@@ -223,7 +234,8 @@ def builtin_metadata_mapping(profile_id: str, fmt: FilenameFormat) -> MetadataFi
         return MetadataFieldMapping(
             title_slot=0,
             artist_slot=1,
-            description_slots=[2] if len(fmt.slots) > 2 and fmt.slots[2].enabled else [],
+            description_slots=[3] if len(fmt.slots) > 3 and fmt.slots[3].enabled else [],
+            genre_slot=2 if len(fmt.slots) > 2 and fmt.slots[2].enabled else None,
             album_slot=None,
         )
     if profile_id == "personal_videos":

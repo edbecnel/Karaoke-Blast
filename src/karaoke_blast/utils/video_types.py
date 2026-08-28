@@ -22,7 +22,10 @@ from karaoke_blast.utils.metadata_field_mapping import (
 )
 from karaoke_blast.utils.song_display import (
     DisplayFormat,
+    SLOT_KIND_DESCRIPTION,
+    SLOT_KIND_GENRE,
     default_display_format_for_mapping,
+    display_format_has_enabled_kind_before,
 )
 
 YOUTUBE_APPEND_KARAOKE = "karaoke"
@@ -132,8 +135,8 @@ def _default_movies_format() -> FilenameFormat:
         slots=[
             FormatSlot(SLOT_KIND_SONG, "Movie Name", enabled=True),
             FormatSlot(SLOT_KIND_ARTIST, "Main Actor", enabled=True),
+            FormatSlot(SLOT_KIND_ADDITIONAL, "Genre", enabled=True, hint=""),
             FormatSlot(SLOT_KIND_ADDITIONAL, "Year", enabled=True, hint=""),
-            FormatSlot(SLOT_KIND_ADDITIONAL, "Additional", enabled=False, hint=""),
         ],
         separators=list(DEFAULT_SEPARATORS),
     )
@@ -462,6 +465,54 @@ def _is_legacy_tv_shows_format(fmt: FilenameFormat) -> bool:
     )
 
 
+def _is_legacy_movies_format(fmt: FilenameFormat) -> bool:
+    slots = fmt.slots
+    if len(slots) < 3:
+        return False
+    return (
+        slots[0].label == "Movie Name"
+        and slots[1].label == "Main Actor"
+        and slots[2].label == "Year"
+    )
+
+
+def _migrate_legacy_movies_format(profile: VideoTypeProfile) -> VideoTypeProfile:
+    if profile.id != BUILTIN_MOVIES_ID or not profile.builtin:
+        return profile
+    if not _is_legacy_movies_format(profile.rename_format):
+        return profile
+    updated = profile.copy()
+    updated.rename_format = _default_movies_format()
+    updated.metadata_field_mapping = builtin_metadata_mapping(
+        BUILTIN_MOVIES_ID,
+        updated.rename_format,
+    )
+    updated.display_format = default_display_format_for_mapping(
+        updated.metadata_field_mapping
+    )
+    return updated
+
+
+def _migrate_movies_display_format(profile: VideoTypeProfile) -> VideoTypeProfile:
+    if profile.id != BUILTIN_MOVIES_ID or not profile.builtin:
+        return profile
+    mapping = profile.resolved_metadata_mapping()
+    if mapping.genre_slot is None or not mapping.description_slots:
+        return profile
+    display = profile.display_format
+    if display is None:
+        return profile
+    if not display_format_has_enabled_kind_before(
+        display,
+        before=SLOT_KIND_DESCRIPTION,
+        after=SLOT_KIND_GENRE,
+    ):
+        return profile
+    updated = profile.copy()
+    updated.display_format = default_display_format_for_mapping(mapping)
+    return updated
+
+
 def _migrate_legacy_tv_shows_format(profile: VideoTypeProfile) -> VideoTypeProfile:
     if profile.id != BUILTIN_TV_SHOWS_ID or not profile.builtin:
         return profile
@@ -479,8 +530,12 @@ def normalize_video_types(profiles: list[VideoTypeProfile]) -> list[VideoTypePro
     customs: list[VideoTypeProfile] = []
 
     for profile in profiles:
-        copied = _migrate_legacy_tv_shows_format(
-            _migrate_legacy_separators(profile.copy())
+        copied = _migrate_movies_display_format(
+            _migrate_legacy_movies_format(
+                _migrate_legacy_tv_shows_format(
+                    _migrate_legacy_separators(profile.copy())
+                )
+            )
         )
         if copied.id in by_id:
             continue

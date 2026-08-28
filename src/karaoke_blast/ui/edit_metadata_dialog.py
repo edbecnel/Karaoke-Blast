@@ -30,6 +30,7 @@ from karaoke_blast.utils.metadata_field_mapping import (
     VLC_FIELD_ALBUM,
     VLC_FIELD_ARTIST,
     VLC_FIELD_DESCRIPTION,
+    VLC_FIELD_GENRE,
     VLC_FIELD_TITLE,
     default_metadata_mapping,
     metadata_field_display_labels,
@@ -125,6 +126,7 @@ class EditMetadataDialog(QDialog):
         self._title_label_text = labels[VLC_FIELD_TITLE]
         self._artist_label_text = labels[VLC_FIELD_ARTIST]
         self._description_label_text = labels[VLC_FIELD_DESCRIPTION]
+        self._genre_label_text = labels[VLC_FIELD_GENRE]
         self._album_label_text = labels[VLC_FIELD_ALBUM]
         self.setWindowTitle("Edit Metadata")
         self.setModal(True)
@@ -164,6 +166,12 @@ class EditMetadataDialog(QDialog):
         artist_label.setStyleSheet(_LABEL_STYLE)
         form.addRow(artist_label, self._artist_field)
 
+        self._genre_field = self._make_field()
+        self._genre_field.setPlaceholderText(self._genre_label_text)
+        self._genre_label = QLabel(self._genre_label_text)
+        self._genre_label.setStyleSheet(_LABEL_STYLE)
+        form.addRow(self._genre_label, self._genre_field)
+
         self._description_field = self._make_field()
         self._description_field.setPlaceholderText(self._description_label_text)
         description_label = QLabel(self._description_label_text)
@@ -177,6 +185,10 @@ class EditMetadataDialog(QDialog):
         form.addRow(self._album_label, self._album_field)
 
         layout.addLayout(form)
+
+        if self._mapping.genre_slot is None:
+            self._genre_label.hide()
+            self._genre_field.hide()
 
         self._status = QLabel()
         self._status.setStyleSheet(_STATUS_STYLE)
@@ -224,6 +236,7 @@ class EditMetadataDialog(QDialog):
             self._title_field.setEnabled(False)
             self._artist_field.setEnabled(False)
             self._description_field.setEnabled(False)
+            self._genre_field.setEnabled(False)
             self._album_field.setEnabled(False)
             if self._save_btn is not None:
                 self._save_btn.setEnabled(False)
@@ -239,6 +252,7 @@ class EditMetadataDialog(QDialog):
         self._title_field.setText(tags.title)
         self._artist_field.setText(tags.artist)
         self._description_field.setText(tags.comment)
+        self._genre_field.setText(tags.genre)
         self._album_field.setText(tags.album)
 
     def _on_save(self) -> None:
@@ -254,6 +268,11 @@ class EditMetadataDialog(QDialog):
                 title=title,
                 artist=self._artist_field.text().strip(),
                 description=self._description_field.text().strip(),
+                genre=(
+                    self._genre_field.text().strip()
+                    if self._mapping.genre_slot is not None
+                    else None
+                ),
                 album=self._album_field.text().strip(),
             )
         except MetadataError as exc:

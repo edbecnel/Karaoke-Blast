@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mutagen.flac import FLAC
-from mutagen.id3 import COMM, ID3, ID3NoHeaderError, TALB, TIT2, TPE1
+from mutagen.id3 import COMM, ID3, ID3NoHeaderError, TALB, TCON, TIT2, TPE1
 from mutagen.mp4 import MP4
 from mutagen.oggopus import OggOpus
 from mutagen.oggvorbis import OggVorbis
@@ -39,11 +39,12 @@ class MetadataError(Exception):
 
 @dataclass(frozen=True)
 class MediaTags:
-    """Embedded title, artist, description, and album values."""
+    """Embedded title, artist, description, genre, and album values."""
 
     title: str = ""
     artist: str = ""
     comment: str = ""
+    genre: str = ""
     album: str = ""
 
     def has_title_and_artist(self) -> bool:
@@ -153,6 +154,14 @@ def _read_ffmpeg_tags(path: Path) -> MediaTags:
             "50/comment",
         ),
         album=_tag_value(tags, "0/album", "album", "50/album"),
+        genre=_tag_value(
+            tags,
+            "0/genre",
+            "genre",
+            "50/genre",
+            "0/GENRE",
+            "GENRE",
+        ),
     )
 
 
@@ -162,6 +171,7 @@ def _ffmpeg_metadata_args(
     title: str,
     artist: str,
     comment: str,
+    genre: str,
     album: str,
 ) -> list[str]:
     """Build ffmpeg -metadata arguments in a form VLC can read."""
@@ -182,6 +192,8 @@ def _ffmpeg_metadata_args(
         )
         if album:
             pairs.extend([("0/ALBUM", album), ("ALBUM", album)])
+        if genre:
+            pairs.extend([("0/GENRE", genre), ("GENRE", genre), ("genre", genre)])
     elif suffix == ".webm":
         pairs.extend(
             [
@@ -193,6 +205,8 @@ def _ffmpeg_metadata_args(
         )
         if album:
             pairs.append(("album", album))
+        if genre:
+            pairs.append(("genre", genre))
     else:
         pairs.extend(
             [
@@ -207,6 +221,8 @@ def _ffmpeg_metadata_args(
         )
         if album:
             pairs.append(("album", album))
+        if genre:
+            pairs.extend([("genre", genre), ("IGNR", genre)])
     args: list[str] = []
     for key, value in pairs:
         args.extend(["-metadata", f"{key}={value}"])
@@ -219,16 +235,19 @@ def _write_ffmpeg_tags(
     artist: str,
     comment: str | None,
     album: str | None = None,
+    genre: str | None = None,
 ) -> None:
     ffmpeg = resolve_ffmpeg_location()
     if ffmpeg is None:
         raise MetadataError("ffmpeg is required to write metadata to video files.")
-    if comment is None or album is None:
+    if comment is None or album is None or genre is None:
         existing = _read_ffmpeg_tags(path)
         if comment is None:
             comment = existing.comment
         if album is None:
             album = existing.album
+        if genre is None:
+            genre = existing.genre
 
     temp_path = path.with_name(f".karaoke-blast-meta-{uuid.uuid4().hex}{path.suffix}")
     command = [
@@ -251,6 +270,7 @@ def _write_ffmpeg_tags(
             artist=artist,
             comment=comment,
             album=album,
+            genre=genre,
         ),
         str(temp_path),
     ]
@@ -293,6 +313,7 @@ def _read_mp3(path: Path) -> MediaTags:
             title=_first_text(tags.get("TIT2")),
             artist=_first_text(tags.get("TPE1")),
             comment=_id3_comment(tags),
+            genre=_first_text(tags.get("TCON")),
             album=_first_text(tags.get("TALB")),
         )
     except Exception as exc:  # noqa: BLE001
@@ -305,6 +326,7 @@ def _write_mp3(
     artist: str,
     comment: str | None,
     album: str | None = None,
+    genre: str | None = None,
 ) -> None:
     try:
         try:
@@ -323,6 +345,10 @@ def _write_mp3(
             tags.delall("TALB")
             if album:
                 tags.add(TALB(encoding=3, text=album))
+        if genre is not None:
+            tags.delall("TCON")
+            if genre:
+                tags.add(TCON(encoding=3, text=genre))
         tags.save(path)
     except Exception as exc:  # noqa: BLE001
         raise MetadataError(f"Could not write MP3 tags: {exc}") from exc
@@ -338,6 +364,7 @@ def _read_mp4(path: Path) -> MediaTags:
         title=_first_text(tags.get("\xa9nam")),
         artist=_first_text(tags.get("\xa9ART")) or _first_text(tags.get("\xa9aut")),
         comment=_first_text(tags.get("\xa9cmt")) or _first_text(tags.get("desc")),
+        genre=_first_text(tags.get("\xa9gen")),
         album=_first_text(tags.get("\xa9alb")),
     )
 
@@ -348,6 +375,7 @@ def _write_mp4(
     artist: str,
     comment: str | None,
     album: str | None = None,
+    genre: str | None = None,
 ) -> None:
     try:
         audio = MP4(path)
@@ -362,6 +390,8 @@ def _write_mp4(
             audio.tags["desc"] = [comment]
         if album is not None:
             audio.tags["\xa9alb"] = [album]
+        if genre is not None:
+            audio.tags["\xa9gen"] = [genre]
         audio.save()
     except Exception as exc:  # noqa: BLE001
         raise MetadataError(f"Could not write MP4 tags: {exc}") from exc
@@ -376,6 +406,7 @@ def _read_flac(path: Path) -> MediaTags:
         title=_first_text(audio.get("title")),
         artist=_first_text(audio.get("artist")),
         comment=_first_text(audio.get("comment")),
+        genre=_first_text(audio.get("genre")),
         album=_first_text(audio.get("album")),
     )
 
@@ -386,6 +417,7 @@ def _write_flac(
     artist: str,
     comment: str | None,
     album: str | None = None,
+    genre: str | None = None,
 ) -> None:
     try:
         audio = FLAC(path)
@@ -395,6 +427,8 @@ def _write_flac(
             audio["comment"] = [comment]
         if album is not None:
             audio["album"] = [album]
+        if genre is not None:
+            audio["genre"] = [genre]
         audio.save()
     except Exception as exc:  # noqa: BLE001
         raise MetadataError(f"Could not write FLAC tags: {exc}") from exc
@@ -412,6 +446,7 @@ def _read_ogg(path: Path) -> MediaTags:
         title=_first_text(audio.get("title")),
         artist=_first_text(audio.get("artist")),
         comment=_first_text(audio.get("comment")),
+        genre=_first_text(audio.get("genre")),
         album=_first_text(audio.get("album")),
     )
 
@@ -422,6 +457,7 @@ def _write_ogg(
     artist: str,
     comment: str | None,
     album: str | None = None,
+    genre: str | None = None,
 ) -> None:
     try:
         if path.suffix.lower() == ".opus":
@@ -434,6 +470,8 @@ def _write_ogg(
             audio["comment"] = [comment]
         if album is not None:
             audio["album"] = [album]
+        if genre is not None:
+            audio["genre"] = [genre]
         audio.save()
     except Exception as exc:  # noqa: BLE001
         raise MetadataError(f"Could not write Ogg tags: {exc}") from exc
@@ -450,7 +488,13 @@ def _read_wav(path: Path) -> MediaTags:
     title = _first_text(tags.get("TIT2"))
     artist = _first_text(tags.get("TPE1"))
     comment = _id3_comment(tags) if isinstance(tags, ID3) else ""
-    return MediaTags(title=title, artist=artist, comment=comment, album=_first_text(tags.get("TALB")))
+    return MediaTags(
+        title=title,
+        artist=artist,
+        comment=comment,
+        genre=_first_text(tags.get("TCON")),
+        album=_first_text(tags.get("TALB")),
+    )
 
 
 def _write_wav(
@@ -459,6 +503,7 @@ def _write_wav(
     artist: str,
     comment: str | None,
     album: str | None = None,
+    genre: str | None = None,
 ) -> None:
     try:
         audio = WAVE(path)
@@ -477,6 +522,10 @@ def _write_wav(
             audio.tags.delall("TALB")
             if album:
                 audio.tags.add(TALB(encoding=3, text=album))
+        if genre is not None:
+            audio.tags.delall("TCON")
+            if genre:
+                audio.tags.add(TCON(encoding=3, text=genre))
         audio.save()
     except Exception as exc:  # noqa: BLE001
         raise MetadataError(f"Could not write WAV tags: {exc}") from exc
@@ -510,11 +559,13 @@ def write_tags(
     comment: str | None = None,
     description: str | None = None,
     album: str | None = None,
+    genre: str | None = None,
 ) -> None:
-    """Write Title / Artist and optionally Description and Album to *path*.
+    """Write Title / Artist and optionally Description, Genre, and Album to *path*.
 
     Pass ``comment=None`` and ``description=None`` to leave description unchanged.
     Pass ``album=None`` to leave the existing album unchanged.
+    Pass ``genre=None`` to leave the existing genre unchanged.
     """
     title = title.strip()
     artist = artist.strip()
@@ -523,23 +574,25 @@ def write_tags(
         desc = desc.strip()
     if album is not None:
         album = album.strip()
+    if genre is not None:
+        genre = genre.strip()
     if not title:
         raise MetadataError("Title cannot be empty.")
 
     suffix = path.suffix.lower()
     if _uses_ffmpeg_metadata(path):
-        _write_ffmpeg_tags(path, title, artist, desc, album)
+        _write_ffmpeg_tags(path, title, artist, desc, album, genre)
         return
     if suffix == ".mp3":
-        _write_mp3(path, title, artist, desc, album)
+        _write_mp3(path, title, artist, desc, album, genre)
     elif suffix in _MP4_EXTENSIONS:
-        _write_mp4(path, title, artist, desc, album)
+        _write_mp4(path, title, artist, desc, album, genre)
     elif suffix == ".flac":
-        _write_flac(path, title, artist, desc, album)
+        _write_flac(path, title, artist, desc, album, genre)
     elif suffix == ".opus" or suffix in _OGG_EXTENSIONS:
-        _write_ogg(path, title, artist, desc, album)
+        _write_ogg(path, title, artist, desc, album, genre)
     elif suffix == ".wav":
-        _write_wav(path, title, artist, desc, album)
+        _write_wav(path, title, artist, desc, album, genre)
     else:
         raise MetadataError(
             f"Unsupported format for metadata: {suffix or '(no extension)'}"
