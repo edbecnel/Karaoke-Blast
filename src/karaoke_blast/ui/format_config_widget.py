@@ -108,8 +108,14 @@ class FormatConfigWidget(QWidget):
 
     format_changed = pyqtSignal(object)
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        external_options: bool = False,
+    ) -> None:
         super().__init__(parent)
+        self._external_options = external_options
         self._format = DEFAULT_KARAOKE_FORMAT.copy()
         self._building = False
         self._slot_rows_layout = QVBoxLayout()
@@ -131,9 +137,14 @@ class FormatConfigWidget(QWidget):
 
         layout.addLayout(self._slot_rows_layout)
 
+        self._options_section = QWidget()
+        options_layout = QVBoxLayout(self._options_section)
+        options_layout.setContentsMargins(0, 0, 0, 0)
+        options_layout.setSpacing(8)
+
         casing_title = QLabel("Casing")
         casing_title.setStyleSheet("color: white; font-size: 13px; font-weight: bold;")
-        layout.addWidget(casing_title)
+        options_layout.addWidget(casing_title)
 
         casing_row = QHBoxLayout()
         casing_row.setSpacing(12)
@@ -154,14 +165,21 @@ class FormatConfigWidget(QWidget):
             kind_col.addWidget(combo)
             casing_row.addLayout(kind_col)
         casing_row.addStretch()
-        layout.addLayout(casing_row)
+        options_layout.addLayout(casing_row)
 
         self._preview_label = QLabel()
         self._preview_label.setStyleSheet(_PREVIEW_STYLE)
         self._preview_label.setWordWrap(True)
-        layout.addWidget(self._preview_label)
+        options_layout.addWidget(self._preview_label)
+
+        if not external_options:
+            layout.addWidget(self._options_section)
 
         self.set_format(self._format)
+
+    def options_section(self) -> QWidget:
+        """Casing controls and preview, for embedding in a parent scroll area."""
+        return self._options_section
 
     def format(self) -> FilenameFormat:
         self._sync_from_fields()

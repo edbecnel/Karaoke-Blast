@@ -6,13 +6,17 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QShowEvent
 from PyQt6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFrame,
     QLabel,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -61,6 +65,13 @@ QLineEdit:disabled {
 
 _HINT_STYLE = "color: #888; font-size: 11px; background: transparent;"
 _ERROR_STYLE = "color: #ff6b81; font-size: 12px; background: transparent;"
+
+_SCROLL_STYLE = """
+QScrollArea {
+    background-color: transparent;
+    border: none;
+}
+"""
 
 _BUTTON_STYLE = """
 QPushButton {
@@ -224,7 +235,7 @@ class VideoTypeEditorDialog(QDialog):
         folder_row.addWidget(self._folder_picker)
         layout.addLayout(folder_row)
 
-        self._format_widget = FormatConfigWidget()
+        self._format_widget = FormatConfigWidget(external_options=True)
         initial_format = (
             profile.rename_format.copy()
             if profile is not None
@@ -234,6 +245,12 @@ class VideoTypeEditorDialog(QDialog):
         self._format_widget.format_changed.connect(self._on_format_changed)
         layout.addWidget(self._format_widget)
 
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(12)
+        scroll_layout.addWidget(self._format_widget.options_section())
+
         self._mapping_widget = MetadataMappingWidget()
         initial_mapping = (
             profile.resolved_metadata_mapping()
@@ -241,7 +258,7 @@ class VideoTypeEditorDialog(QDialog):
             else default_metadata_mapping(initial_format)
         )
         self._mapping_widget.set_format_and_mapping(initial_format, initial_mapping)
-        layout.addWidget(self._mapping_widget)
+        scroll_layout.addWidget(self._mapping_widget)
 
         if profile is not None and profile.builtin:
             reset_row = QVBoxLayout()
@@ -250,7 +267,17 @@ class VideoTypeEditorDialog(QDialog):
             reset_btn.setStyleSheet(_BUTTON_STYLE)
             reset_btn.clicked.connect(self._reset_builtin)
             reset_row.addWidget(reset_btn)
-            layout.addLayout(reset_row)
+            scroll_layout.addLayout(reset_row)
+
+        scroll_layout.addStretch()
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidget(scroll_content)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setStyleSheet(_SCROLL_STYLE)
+        layout.addWidget(scroll_area, 1)
 
         self._error_label = QLabel()
         self._error_label.setStyleSheet(_ERROR_STYLE)
@@ -264,6 +291,28 @@ class VideoTypeEditorDialog(QDialog):
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self._fit_to_available_screen()
+
+    def _fit_to_available_screen(self) -> None:
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        margin = 24
+        max_height = max(480, available.height() - margin)
+        width = max(self.minimumWidth(), min(self.width(), available.width() - margin))
+        height = min(self.sizeHint().height(), max_height)
+        self.resize(width, height)
+        frame = self.frameGeometry()
+        frame.moveCenter(available.center())
+        if frame.bottom() > available.bottom():
+            frame.moveBottom(available.bottom())
+        if frame.top() < available.top():
+            frame.moveTop(available.top())
+        self.move(frame.topLeft())
 
     def profile(self) -> VideoTypeProfile | None:
         return self._result_profile.copy() if self._result_profile is not None else None
