@@ -301,7 +301,7 @@ class LibraryPanel(QWidget):
         layout.addLayout(header_row)
 
         self._search = VisibleSpaceLineEdit()
-        self._search.setPlaceholderText("Search songs or YouTube…")
+        self._search.setPlaceholderText("Search local media...")
         self._search.setClearButtonEnabled(True)
         self._search.setStyleSheet(SEARCH_STYLE)
         search_palette = self._search.palette()
@@ -619,7 +619,7 @@ class LibraryPanel(QWidget):
     def _on_tab_changed(self, index: int) -> None:
         self._youtube_controls.setVisible(index == TAB_YOUTUBE)
         if index == TAB_LOCAL:
-            self._search.setPlaceholderText("Search local songs…")
+            self._search.setPlaceholderText("Search local media...")
             self._on_search_text_changed(self._search.text())
         elif index == TAB_YOUTUBE:
             self._search.setPlaceholderText("Search YouTube…")
