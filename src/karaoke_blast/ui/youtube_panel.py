@@ -308,8 +308,14 @@ class YouTubePanel(QWidget):
     def update_download_progress(self, title: str, percent: float, status: str) -> None:
         self._download_status.update_progress(title, percent, status)
 
-    def show_download_success(self, title: str, *, message: str = "Download complete") -> None:
-        self._download_status.show_success(title, message=message)
+    def show_download_success(
+        self,
+        title: str,
+        *,
+        message: str = "Download complete",
+        path: Path | None = None,
+    ) -> None:
+        self._download_status.show_success(title, message=message, path=path)
 
     def show_download_error(self, title: str, message: str) -> None:
         self._download_status.show_error(title, message)

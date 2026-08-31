@@ -151,7 +151,7 @@ class SongListPanel(QWidget):
     """Left sidebar listing songs and subfolders in the current browse folder."""
 
     song_selected = pyqtSignal(int)
-    play_next_requested = pyqtSignal(int)
+    play_next_requested = pyqtSignal(object)
     remove_from_queue_requested = pyqtSignal(int)
     remove_path_from_queue_requested = pyqtSignal(object)
     play_path_requested = pyqtSignal(object)
@@ -166,7 +166,7 @@ class SongListPanel(QWidget):
     history_queue_requested = pyqtSignal(object)
     history_remove_requested = pyqtSignal(object)
     history_clear_requested = pyqtSignal()
-    rename_requested = pyqtSignal(int)
+    rename_requested = pyqtSignal(object)
     move_to_trash_requested = pyqtSignal(object)
     edit_metadata_requested = pyqtSignal(object)
     folder_selected = pyqtSignal(object)
@@ -1053,7 +1053,13 @@ class SongListPanel(QWidget):
         menu.addAction(play_now)
 
         play_next = QAction("Play Next", self)
-        play_next.triggered.connect(lambda: self.play_next_requested.emit(index))
+        if 0 <= index < len(self._paths):
+            path = self._paths[index]
+            play_next.triggered.connect(
+                lambda _checked=False, p=path: self.play_next_requested.emit(p)
+            )
+        else:
+            play_next.setEnabled(False)
         menu.addAction(play_next)
 
         if 0 <= index < len(self._paths):
@@ -1078,7 +1084,13 @@ class SongListPanel(QWidget):
             menu.addAction(remove)
 
         rename = QAction("Rename…", self)
-        rename.triggered.connect(lambda: self.rename_requested.emit(index))
+        if 0 <= index < len(self._paths):
+            path = self._paths[index]
+            rename.triggered.connect(
+                lambda _checked=False, p=path: self.rename_requested.emit(p)
+            )
+        else:
+            rename.setEnabled(False)
         menu.addAction(rename)
 
         if 0 <= index < len(self._paths):
@@ -1419,6 +1431,14 @@ class SongListPanel(QWidget):
                 return
         self._list.clearSelection()
         self._list.setCurrentRow(-1)
+
+    def select_path(self, path: Path) -> bool:
+        for index, candidate in enumerate(self._paths):
+            if self._paths_equal(candidate, path):
+                self._selected_index = index
+                self._sync_list_selection()
+                return True
+        return False
 
     def show_panel(self) -> None:
         self.show()

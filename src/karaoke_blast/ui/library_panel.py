@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QPalette
+from PyQt6.QtGui import QColor, QPalette, QResizeEvent, QShowEvent
 from PyQt6.QtWidgets import (
+    QDialog,
     QHBoxLayout,
     QLabel,
     QMenu,
@@ -22,6 +23,7 @@ from karaoke_blast.models.play_history_entry import PlayHistoryEntry
 from karaoke_blast.models.queue_item import QueueItem
 from karaoke_blast.models.youtube_video import YouTubeVideo
 from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
+from karaoke_blast.ui.dialog_positioning import fit_dialog_to_anchor, schedule_fit_dialog_to_anchor
 from karaoke_blast.ui.library_folder_menu import HistoryFolderMenu
 from karaoke_blast.ui.list_style import SIDEBAR_LIST_STYLE
 from karaoke_blast.ui.mixed_queue_list_widget import (
@@ -158,14 +160,14 @@ class LibraryPanel(QWidget):
     """Unified sidebar for local files, YouTube, history, and the mixed queue."""
 
     song_selected = pyqtSignal(int)
-    play_next_requested = pyqtSignal(int)
+    play_next_requested = pyqtSignal(object)
     play_path_requested = pyqtSignal(object)
     sort_changed = pyqtSignal(object)
     refresh_requested = pyqtSignal()
     local_search_changed = pyqtSignal(str)
     display_mode_changed = pyqtSignal(str)
     display_format_changed = pyqtSignal(object)
-    rename_requested = pyqtSignal(int)
+    rename_requested = pyqtSignal(object)
     move_to_trash_requested = pyqtSignal(object)
     edit_metadata_requested = pyqtSignal(object)
     folder_selected = pyqtSignal(object)
@@ -191,6 +193,7 @@ class LibraryPanel(QWidget):
     youtube_queue_requested = pyqtSignal(object)
     download_requested = pyqtSignal(object)
     download_cancel_requested = pyqtSignal()
+    download_open_requested = pyqtSignal(object)
     history_play_requested = pyqtSignal(object)
     history_queue_requested = pyqtSignal(object)
     history_remove_requested = pyqtSignal(object)
@@ -210,6 +213,10 @@ class LibraryPanel(QWidget):
         self.setMinimumWidth(PANEL_MIN_WIDTH)
         self.setMaximumWidth(PANEL_MAX_WIDTH)
         self.setStyleSheet("background-color: rgba(15, 15, 25, 230);")
+
+        self._side_dialog_overlay = QWidget(self)
+        self._side_dialog_overlay.setStyleSheet("background-color: rgba(0, 0, 0, 0.45);")
+        self._side_dialog_overlay.hide()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, EDGE_GRIP_WIDTH + 8, 12)
@@ -377,6 +384,7 @@ class LibraryPanel(QWidget):
 
         self._download_status = YouTubeDownloadStatus()
         self._download_status.cancel_requested.connect(self.download_cancel_requested.emit)
+        self._download_status.open_saved_requested.connect(self.download_open_requested.emit)
         lower_layout.addWidget(self._download_status)
 
         self._downloads_folder_row = YouTubeDownloadsFolderRow()
@@ -478,7 +486,7 @@ class LibraryPanel(QWidget):
         super().showEvent(event)
         QTimer.singleShot(0, self._apply_queue_split_sizes)
 
-    def resizeEvent(self, event) -> None:
+    def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self._edge_grip.setGeometry(
             self.width() - EDGE_GRIP_WIDTH,
@@ -486,7 +494,27 @@ class LibraryPanel(QWidget):
             EDGE_GRIP_WIDTH,
             self.height(),
         )
+        if self._side_dialog_overlay.isVisible():
+            self._side_dialog_overlay.setGeometry(self.rect())
         QTimer.singleShot(0, self._apply_queue_split_sizes)
+
+    def exec_side_dialog(self, dialog: QDialog) -> int:
+        """Present a modal dialog over the sidebar without screen-centering."""
+        dialog._present_on_side_panel = True  # noqa: SLF001
+        dialog._position_anchor = self  # noqa: SLF001
+
+        self._side_dialog_overlay.setGeometry(self.rect())
+        self._side_dialog_overlay.show()
+        self._side_dialog_overlay.raise_()
+
+        dialog.setParent(None)
+        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+        dialog.adjustSize()
+        fit_dialog_to_anchor(dialog, self)
+
+        result = dialog.exec()
+        self._side_dialog_overlay.hide()
+        return result
 
     def _queue_list_min_height(self) -> int:
         line_height = self._queue_list.fontMetrics().height() + 13
@@ -755,6 +783,19 @@ class LibraryPanel(QWidget):
     def local_search_text(self) -> str:
         return self._search.text().strip()
 
+    def clear_local_search(self) -> None:
+        if not self._search.text():
+            self._song_list.set_search_query("")
+            return
+        self._search.blockSignals(True)
+        self._search.clear()
+        self._search.blockSignals(False)
+        self._song_list.set_search_query("")
+        self.local_search_changed.emit("")
+
+    def select_song_path(self, path: Path) -> bool:
+        return self._song_list.select_path(path)
+
     def set_sort_strategy(self, strategy) -> None:
         self._song_list.set_sort_strategy(strategy)
 
@@ -787,8 +828,14 @@ class LibraryPanel(QWidget):
     def show_download_cancelling(self) -> None:
         self._download_status.show_cancelling()
 
-    def show_download_success(self, title: str, *, message: str = "Download complete") -> None:
-        self._download_status.show_success(title, message=message)
+    def show_download_success(
+        self,
+        title: str,
+        *,
+        message: str = "Download complete",
+        path: Path | None = None,
+    ) -> None:
+        self._download_status.show_success(title, message=message, path=path)
 
     def show_download_error(self, title: str, message: str) -> None:
         self._download_status.show_error(title, message)

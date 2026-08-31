@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QShowEvent
 from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -16,6 +17,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from karaoke_blast.ui.dialog_positioning import fit_dialog_to_anchor, schedule_fit_dialog_to_anchor
 from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
 from karaoke_blast.utils.display import display_name
 from karaoke_blast.utils.filename_rename import DEFAULT_KARAOKE_FORMAT, FilenameFormat
@@ -111,9 +113,11 @@ class EditMetadataDialog(QDialog):
         metadata_field_mapping: MetadataFieldMapping | None = None,
         comment_slot_indices: list[int] | None = None,
         parent: QWidget | None = None,
+        anchor: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._path = path
+        self._position_anchor = anchor
         self._fmt = (fmt if fmt is not None else DEFAULT_KARAOKE_FORMAT).copy()
         if metadata_field_mapping is not None:
             self._mapping = metadata_field_mapping.copy().normalize_for_format(self._fmt)
@@ -130,6 +134,7 @@ class EditMetadataDialog(QDialog):
         self._album_label_text = labels[VLC_FIELD_ALBUM]
         self.setWindowTitle("Edit Metadata")
         self.setModal(True)
+        self.setWindowModality(Qt.WindowModality.WindowModal)
         self.setMinimumWidth(640)
         self.setStyleSheet(_DIALOG_STYLE)
 
@@ -215,6 +220,20 @@ class EditMetadataDialog(QDialog):
         layout.addWidget(buttons)
 
         self._load_tags()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        if getattr(self, "_present_on_side_panel", False):
+            if self._position_anchor is not None:
+                fit_dialog_to_anchor(self, self._position_anchor)
+            super().showEvent(event)
+            if self._position_anchor is not None:
+                fit_dialog_to_anchor(self, self._position_anchor)
+                schedule_fit_dialog_to_anchor(self, self._position_anchor)
+            return
+        super().showEvent(event)
+        if self._position_anchor is not None:
+            fit_dialog_to_anchor(self, self._position_anchor)
+            schedule_fit_dialog_to_anchor(self, self._position_anchor)
 
     def _make_field(self) -> VisibleSpaceLineEdit:
         field = VisibleSpaceLineEdit()

@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
 from karaoke_blast.ui.format_config_widget import FormatConfigWidget
 from karaoke_blast.ui.video_type_selector import VideoTypeSelectorWidget
 from karaoke_blast.ui.slot_field_casing import apply_casing_to_field, cased_slot_text
+from karaoke_blast.ui.dialog_positioning import fit_dialog_to_anchor, schedule_fit_dialog_to_anchor
 from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
 from karaoke_blast.utils.filename_rename import (
     FilenameFormat,
@@ -212,9 +213,11 @@ class RenameFileDialog(QDialog):
         video_types: list[VideoTypeProfile] | None = None,
         active_video_type_id: str | None = None,
         parent: QWidget | None = None,
+        anchor: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._path = path
+        self._position_anchor = anchor
         self._fmt = fmt.copy()
         self._video_types = (
             [profile.copy() for profile in video_types] if video_types is not None else None
@@ -330,7 +333,19 @@ class RenameFileDialog(QDialog):
         self._update_preview()
 
     def showEvent(self, event: QShowEvent) -> None:
+        if getattr(self, "_present_on_side_panel", False):
+            if self._position_anchor is not None:
+                fit_dialog_to_anchor(self, self._position_anchor)
+            super().showEvent(event)
+            if self._position_anchor is not None:
+                fit_dialog_to_anchor(self, self._position_anchor)
+                schedule_fit_dialog_to_anchor(self, self._position_anchor)
+            return
         super().showEvent(event)
+        if self._position_anchor is not None:
+            fit_dialog_to_anchor(self, self._position_anchor)
+            schedule_fit_dialog_to_anchor(self, self._position_anchor)
+            return
         self._fit_to_available_screen()
 
     def _fit_to_available_screen(self) -> None:

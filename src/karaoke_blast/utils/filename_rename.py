@@ -291,9 +291,16 @@ def strip_youtube_id(stem: str) -> str:
     return _YOUTUBE_ID_SUFFIX.sub("", stem).strip()
 
 
+def _normalize_contraction_underscores(text: str) -> str:
+    """Rewrite yt-dlp underscore encodings of apostrophes back before splitting."""
+    text = re.sub(r"(?<=[A-Za-z])_([d])(?=_)", r"'\1", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<=[A-Za-z])_([ts])(?=\s|_|$)", r"'\1", text, flags=re.IGNORECASE)
+    return text
+
+
 def split_title(stem: str) -> list[str]:
     """Split a title stem into non-empty parts using common karaoke delimiters."""
-    cleaned = strip_youtube_id(stem)
+    cleaned = _normalize_contraction_underscores(strip_youtube_id(stem))
     parts = [part.strip() for part in _SPLIT_DELIMITERS.split(cleaned)]
     return [part for part in parts if part]
 

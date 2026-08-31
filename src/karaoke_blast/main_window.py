@@ -544,6 +544,7 @@ class MainWindow(QWidget):
         self._library_panel.download_cancel_requested.connect(
             self._on_youtube_download_cancel_requested
         )
+        self._library_panel.download_open_requested.connect(self._on_download_open_requested)
         self._library_panel.browse_downloads_folder_requested.connect(
             self._browse_youtube_downloads_folder
         )
@@ -1397,10 +1398,7 @@ class MainWindow(QWidget):
         return self._stopped and self._external_path is None
 
     def _enqueue_interrupted_playback(self, incoming: QueueItem) -> None:
-        current = self._current_playing_queue_item()
-        if current is not None and current.key() != incoming.key():
-            if not self._mixed_queue.contains(current):
-                self._mixed_queue.prepend(current)
+        """Prepare to play *incoming* immediately; drop it from the queue if queued."""
         self._mixed_queue.remove(incoming)
 
     def _play_queue_item(self, item: QueueItem, *, interrupt: bool = False) -> None:
@@ -1685,10 +1683,7 @@ class MainWindow(QWidget):
         if entry.kind == "youtube" and entry.video is not None:
             self._queue_item(QueueItem(kind="youtube", video=entry.video))
 
-    def _on_play_next_requested(self, index: int) -> None:
-        if index < 0 or index >= self._playlist.count:
-            return
-        path = self._playlist.paths[index]
+    def _on_play_next_requested(self, path: Path) -> None:
         self._queue_item(QueueItem(kind="local", path=path))
 
     def _on_history_remove_requested(self, entry: PlayHistoryEntry) -> None:
@@ -1698,6 +1693,34 @@ class MainWindow(QWidget):
     def _on_history_clear_requested(self) -> None:
         self._play_history.clear()
         self._update_history_display()
+
+    def _side_panel_dialog_anchor(self) -> QWidget | None:
+        if self._current_playing_queue_item() is None:
+            return None
+        self._show_side_panel()
+        return self._library_panel
+
+    def _navigate_to_song_path(self, path: Path) -> None:
+        target_folder = path.parent.resolve()
+        if self._browse_folder is None or self._browse_folder.resolve() != target_folder:
+            self._browse_folder = target_folder
+            if self._folder is None:
+                self._folder = target_folder
+            library_root = self._folder if self._folder is not None else target_folder
+            self._library_paths = scan_videos(library_root, recursive=True)
+            self._library_panel.set_folder(self._browse_folder)
+            self._library_panel.set_library_root(library_root)
+        self._apply_browse_contents(clear_search=True, keep_playback=True)
+        self._library_panel.set_active_tab("local")
+        self._show_side_panel()
+        self._library_panel.select_song_path(path)
+
+    def _on_download_open_requested(self, path: object) -> None:
+        if not isinstance(path, Path):
+            return
+        self._library_panel.reset_download_status()
+        self._library_panel.clear_local_search()
+        self._navigate_to_song_path(path)
 
     def _on_youtube_download_requested(self, video: YouTubeVideo) -> None:
         if self._download_thread is not None and self._download_thread.isRunning():
@@ -1714,6 +1737,7 @@ class MainWindow(QWidget):
             self._library_panel.show_download_success(
                 video.title,
                 message=f"Already downloaded: {existing.name}",
+                path=existing,
             )
             self._show_toast(
                 f"Downloaded: {existing.name}",
@@ -1760,6 +1784,7 @@ class MainWindow(QWidget):
         self._library_panel.show_download_success(
             video.title,
             message=f"Saved: {path.name}",
+            path=path,
         )
         self._show_toast(
             f"Downloaded: {path.name}",
@@ -2004,10 +2029,8 @@ class MainWindow(QWidget):
             self._settings.metadata_auto_fill_slots = dialog.auto_fill_slots()
             self._settings.save()
 
-    def _on_rename_requested(self, index: int) -> None:
-        if index < 0 or index >= len(self._playlist.paths):
-            return
-        path = self._playlist.paths[index]
+    def _on_rename_requested(self, path: Path) -> None:
+        anchor = self._side_panel_dialog_anchor()
         dialog = RenameFileDialog(
             path,
             fmt=self._settings.filename_rename_format,
@@ -2016,10 +2039,15 @@ class MainWindow(QWidget):
             video_types=self._settings.video_types,
             active_video_type_id=self._settings.active_video_type_id,
             parent=self,
+            anchor=anchor,
         )
-        self.raise_()
-        self.activateWindow()
-        if dialog.exec() == QDialog.DialogCode.Accepted:
+        if anchor is not None:
+            accepted = self._library_panel.exec_side_dialog(dialog) == QDialog.DialogCode.Accepted
+        else:
+            self.raise_()
+            self.activateWindow()
+            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        if accepted:
             updated_types = dialog.video_types()
             active_id = dialog.active_video_type_id()
             if updated_types is not None and active_id is not None:
@@ -2040,13 +2068,19 @@ class MainWindow(QWidget):
         if not isinstance(path, Path):
             return
         profile = self._settings.get_active_video_type()
+        anchor = self._side_panel_dialog_anchor()
         dialog = EditMetadataDialog(
             path,
             fmt=profile.rename_format,
             metadata_field_mapping=profile.resolved_metadata_mapping(),
             parent=self,
+            anchor=anchor,
         )
-        if dialog.exec() == QDialog.DialogCode.Accepted:
+        if anchor is not None:
+            accepted = self._library_panel.exec_side_dialog(dialog) == QDialog.DialogCode.Accepted
+        else:
+            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        if accepted:
             self._library_panel.refresh_display_labels()
 
     def _on_move_to_trash_requested(self, path: object) -> None:
