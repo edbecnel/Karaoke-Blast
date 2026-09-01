@@ -516,7 +516,7 @@ class MainWindow(QWidget):
         }
 
     def _on_start_menu_folder_selected(self, folder: Path) -> None:
-        self._load_folder(folder)
+        self._load_folder(folder, keep_playback=self._folder is not None)
 
     def _build_player_page(self) -> QWidget:
         page = QWidget()
@@ -1055,9 +1055,9 @@ class MainWindow(QWidget):
             self, "Open Video Folder", start_dir
         )
         if folder:
-            self._load_folder(Path(folder))
+            self._load_folder(Path(folder), keep_playback=self._folder is not None)
 
-    def _load_folder(self, folder: Path) -> None:
+    def _load_folder(self, folder: Path, *, keep_playback: bool = False) -> None:
         folder = folder.resolve()
         if not folder.is_dir():
             QMessageBox.warning(self, "Invalid Folder", f"Not a directory:\n{folder}")
@@ -1069,6 +1069,9 @@ class MainWindow(QWidget):
             and not self._youtube_stopped
             and self._current_youtube is not None
         )
+        playing_path: Path | None = None
+        if keep_playback and not self._stopped:
+            playing_path = self._external_path or self._playlist.current()
         if not youtube_active:
             self._prepare_local_playback(stop_youtube=False)
 
@@ -1093,18 +1096,36 @@ class MainWindow(QWidget):
         self._library_paths = scan_videos(folder, recursive=True)
         self._raw_paths = paths
         sorted_paths = self._sort_paths(self._raw_paths)
-        restored_index = self._restore_folder_current(sorted_paths) if sorted_paths else None
-        self._playlist = Playlist(
-            paths=sorted_paths,
-            index=restored_index if restored_index is not None else 0,
-        )
-        if not youtube_active:
+        if keep_playback:
+            self._playlist.reorder(sorted_paths, keep_path=playing_path)
+            if self._playlist.current() is None and sorted_paths:
+                self._playlist.go_to(0)
+            current_index = self._playlist.index if sorted_paths else None
+            if playing_path is not None and not self._stopped:
+                playing_index = self._playlist_index_for_path(playing_path)
+                if playing_index is None:
+                    self._external_path = playing_path
+                    current_index = None
+                else:
+                    self._external_path = None
+                    current_index = playing_index
+                    self._playlist.go_to(playing_index)
+        else:
+            restored_index = (
+                self._restore_folder_current(sorted_paths) if sorted_paths else None
+            )
+            self._playlist = Playlist(
+                paths=sorted_paths,
+                index=restored_index if restored_index is not None else 0,
+            )
+            current_index = restored_index
+        if not youtube_active and not keep_playback:
             self._stopped = True
             self._current_queue_item = None
             self._overlay.hide()
             self._hide_status_message()
         self._enter_player_page(tab="local")
-        if not youtube_active:
+        if not youtube_active and not keep_playback:
             if not self._ensure_vlc():
                 self._stack.setCurrentWidget(self._empty_state)
                 self.showNormal()
@@ -1113,10 +1134,11 @@ class MainWindow(QWidget):
             self._controls.set_playing(False)
         self._library_panel.set_sort_strategy(self._sort_strategy)
         self._library_panel.set_flat_browse_enabled(self._flat_browse_mode)
-        self._restore_folder_queue(sorted_paths)
+        if not keep_playback:
+            self._restore_folder_queue(sorted_paths)
         self._library_panel.set_songs(
-            sorted_paths,
-            current_index=restored_index,
+            self._playlist.paths,
+            current_index=current_index if self._external_path is None else None,
             subfolders=subfolders,
             can_navigate_up=False,
             flat_list_mode=self._flat_browse_mode,
@@ -1133,6 +1155,8 @@ class MainWindow(QWidget):
         self._show_controls()
         self._reposition_video_ui()
         if youtube_active:
+            return
+        if keep_playback and not self._stopped:
             return
         if sorted_paths:
             QTimer.singleShot(0, self._show_ready_to_play)
@@ -1995,7 +2019,7 @@ class MainWindow(QWidget):
             return
         if self._folder is not None and self._folder.resolve() == folder.resolve():
             return
-        self._load_folder(folder)
+        self._load_folder(folder, keep_playback=True)
 
     def _sync_library_video_type_selector(self) -> None:
         if not hasattr(self, "_library_panel"):
