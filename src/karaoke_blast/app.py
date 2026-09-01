@@ -23,6 +23,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QApplication
 
 from karaoke_blast.main_window import MainWindow
+from karaoke_blast.utils.macos_app import activate_foreground
 from karaoke_blast.utils.macos_dock_icon import clear_macos_dock_icon_override
 from karaoke_blast.utils.resources import app_icon
 from karaoke_blast.utils.runtime_deps import configure_runtime_dependencies
@@ -30,46 +31,6 @@ from karaoke_blast.utils.runtime_deps import configure_runtime_dependencies
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 _APP_USER_MODEL_ID = "edbecnel.KaraokeBlast.1"
-
-
-def _macos_activate_foreground() -> None:
-    """Become a regular GUI app so Qt windows map on screen when launched from Finder."""
-    if sys.platform != "darwin":
-        return
-    try:
-        import ctypes
-        from ctypes import c_int, c_void_p
-
-        libobjc = ctypes.cdll.LoadLibrary("/usr/lib/libobjc.A.dylib")
-        libobjc.objc_getClass.restype = c_void_p
-        libobjc.sel_registerName.restype = c_void_p
-
-        def _msg(restype, *argtypes):
-            func = libobjc.objc_msgSend
-            func.restype = restype
-            func.argtypes = argtypes
-            return func
-
-        ns_app = _msg(c_void_p, c_void_p, c_void_p)(
-            libobjc.objc_getClass(b"NSApplication"),
-            libobjc.sel_registerName(b"sharedApplication"),
-        )
-        if not ns_app:
-            return
-
-        # NSApplicationActivationPolicyRegular = 0
-        _msg(c_int, c_void_p, c_void_p, c_int)(
-            ns_app,
-            libobjc.sel_registerName(b"setActivationPolicy:"),
-            0,
-        )
-        _msg(None, c_void_p, c_void_p, c_int)(
-            ns_app,
-            libobjc.sel_registerName(b"activateIgnoringOtherApps:"),
-            1,
-        )
-    except Exception as exc:
-        logging.getLogger(__name__).debug("Could not activate macOS foreground app: %s", exc)
 
 
 def _configure_windows_app_id() -> None:
@@ -110,7 +71,7 @@ def run(initial_folder: Path | None = None) -> int:
         _install_macos_dock_icon_guard(app)
 
     window.show()
-    _macos_activate_foreground()
+    activate_foreground()
     if sys.platform == "darwin":
         clear_macos_dock_icon_override()
     window.raise_()

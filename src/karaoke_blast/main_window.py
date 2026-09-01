@@ -58,6 +58,7 @@ from karaoke_blast.ui.library_panel import (
 )
 from karaoke_blast.utils.display import display_name
 from karaoke_blast.utils.file_manager import move_path_to_trash, trash_action_label
+from karaoke_blast.utils.macos_app import bring_widgets_forward, wait_until
 from karaoke_blast.utils.resources import logo_default_window_size
 from karaoke_blast.utils.song_display import (
     DisplayFormat,
@@ -1711,13 +1712,14 @@ class MainWindow(QWidget):
         if restore_fullscreen:
             self.showNormal()
             self._sync_fullscreen_control()
-            QApplication.processEvents()
+            wait_until(lambda: not self.isFullScreen(), timeout_ms=500)
+        for _ in range(3):
+            bring_widgets_forward(self)
         try:
             if anchor is not None:
                 result = self._library_panel.exec_side_dialog(dialog)
             else:
-                self.raise_()
-                self.activateWindow()
+                bring_widgets_forward(self, dialog)
                 result = dialog.exec()
             return result == QDialog.DialogCode.Accepted
         finally:

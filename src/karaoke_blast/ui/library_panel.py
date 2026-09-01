@@ -28,6 +28,7 @@ from karaoke_blast.ui.dialog_positioning import (
     macos_allow_fullscreen_auxiliary,
     schedule_fit_dialog_to_anchor,
 )
+from karaoke_blast.utils.macos_app import bring_widgets_forward
 from karaoke_blast.ui.library_folder_menu import HistoryFolderMenu
 from karaoke_blast.ui.list_style import SIDEBAR_LIST_STYLE
 from karaoke_blast.ui.mixed_queue_list_widget import (
@@ -517,6 +518,7 @@ class LibraryPanel(QWidget):
         fit_dialog_to_anchor(dialog, self)
         _ = dialog.winId()
         macos_allow_fullscreen_auxiliary(dialog)
+        bring_widgets_forward(self.window(), dialog)
 
         result = dialog.exec()
         self._side_dialog_overlay.hide()
