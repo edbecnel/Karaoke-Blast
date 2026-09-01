@@ -141,7 +141,7 @@ python -m karaoke_blast --folder /path/to/videos
 | `←` or `P` | Previous song |
 | `,` or `[` | Rewind 10 seconds |
 | `.` or `]` | Fast forward 10 seconds |
-| `M` | Mute / unmute (local and YouTube) |
+| `M` | Hide / show mouse cursor |
 | `+` / `↑` | Volume up (local and YouTube) |
 | `-` / `↓` | Volume down (local and YouTube) |
 | `O` | Open a different folder |

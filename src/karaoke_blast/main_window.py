@@ -56,6 +56,8 @@ from karaoke_blast.ui.library_panel import (
     PANEL_MIN_WIDTH,
     LibraryPanel,
 )
+from karaoke_blast.utils.cursor_toggle import ManualCursorToggle, primary_mouse_buttons_pressed
+from karaoke_blast.utils.sleep_inhibitor import SleepInhibitor
 from karaoke_blast.utils.display import display_name
 from karaoke_blast.utils.file_manager import move_path_to_trash, trash_action_label
 from karaoke_blast.utils.macos_app import bring_widgets_forward, wait_until
@@ -81,6 +83,7 @@ CONTROLS_HIDE_MS = 3000
 # need to reserve layout space under the video.
 CONTROLS_REVEAL_HIT_HEIGHT = 96
 CONTROLS_REVEAL_POLL_MS = 50
+CURSOR_CLICK_REVEAL_POLL_MS = 50
 LAUNCH_WINDOW_MIN = 480
 
 
@@ -144,6 +147,8 @@ class MainWindow(QWidget):
         self._downloading_video: YouTubeVideo | None = None
 
         self._stack = QStackedWidget()
+        self._cursor_toggle = ManualCursorToggle()
+        self._sleep_inhibitor = SleepInhibitor()
         self._empty_state = self._build_empty_state()
         self._player_page = self._build_player_page()
         self._refresh_recent_folders()
@@ -172,6 +177,10 @@ class MainWindow(QWidget):
         self._controls_reveal_timer.setInterval(CONTROLS_REVEAL_POLL_MS)
         self._controls_reveal_timer.timeout.connect(self._poll_controls_reveal)
 
+        self._cursor_click_reveal_timer = QTimer(self)
+        self._cursor_click_reveal_timer.setInterval(CURSOR_CLICK_REVEAL_POLL_MS)
+        self._cursor_click_reveal_timer.timeout.connect(self._poll_cursor_click_reveal)
+
         self._seek_timer = QTimer(self)
         self._seek_timer.setInterval(250)
         self._seek_timer.timeout.connect(self._update_seek_position)
@@ -184,6 +193,38 @@ class MainWindow(QWidget):
             QTimer.singleShot(0, lambda: self._load_folder(initial_folder))
         else:
             self._apply_launch_window_geometry()
+
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+
+    def _reveal_cursor(self) -> None:
+        self._cursor_toggle.show()
+        self._cursor_click_reveal_timer.stop()
+
+    def _sync_sleep_inhibition(self) -> None:
+        self._sleep_inhibitor.set_active(self._should_inhibit_sleep())
+
+    def _should_inhibit_sleep(self) -> bool:
+        if self._stack.currentWidget() != self._player_page:
+            return False
+        if self._media_mode == MediaSourceMode.YOUTUBE:
+            return not self._youtube_stopped and self._current_youtube is not None
+        return self._vlc is not None and not self._stopped
+
+    def _toggle_cursor_visibility(self) -> None:
+        self._cursor_toggle.toggle()
+        if self._cursor_toggle.hidden:
+            self._cursor_click_reveal_timer.start()
+        else:
+            self._cursor_click_reveal_timer.stop()
+
+    def _poll_cursor_click_reveal(self) -> None:
+        if not self._cursor_toggle.hidden:
+            self._cursor_click_reveal_timer.stop()
+            return
+        if primary_mouse_buttons_pressed():
+            self._reveal_cursor()
 
     def _ensure_youtube(self) -> bool:
         if self._youtube_player is not None:
@@ -631,6 +672,16 @@ class MainWindow(QWidget):
         layout.addWidget(self._splitter, 1)
         layout.addWidget(self._seek_bar)
         layout.addWidget(self._controls)
+        self._cursor_toggle.set_widgets(
+            (
+                self,
+                self._video_container,
+                self._canvas_stack,
+                self._video_widget,
+                self._youtube_widget,
+                self._message_page,
+            )
+        )
         return page
 
     def _wire_controls(self) -> None:
@@ -673,8 +724,19 @@ class MainWindow(QWidget):
         self._sync_fullscreen_control()
         self._sync_controls_reveal_polling()
         self._update_media_type_library_folder_display()
+        self._reveal_cursor()
+        self._sync_sleep_inhibition()
 
     def eventFilter(self, obj, event) -> bool:
+        if (
+            event.type() == QEvent.Type.MouseButtonPress
+            and self._cursor_toggle.hidden
+            and event.button()
+            in (Qt.MouseButton.LeftButton, Qt.MouseButton.RightButton)
+            and isinstance(obj, QWidget)
+            and obj.window() is self
+        ):
+            self._reveal_cursor()
         if (
             event.type() == QEvent.Type.Resize
             and obj is getattr(self, "_video_container", None)
@@ -1296,6 +1358,11 @@ class MainWindow(QWidget):
             self._vlc.bind_output()
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+        self._reveal_cursor()
+        self._sync_sleep_inhibition()
         self._save_launch_window_geometry()
         self._save_folder_state()
         super().closeEvent(event)
@@ -1323,6 +1390,7 @@ class MainWindow(QWidget):
         self._stop_seek_updates()
         self._seek_bar.reset()
         self._clear_audio_title()
+        self._sync_sleep_inhibition()
 
     def _enter_player_page(self, *, tab: str = "local") -> None:
         self._stack.setCurrentWidget(self._player_page)
@@ -1508,6 +1576,7 @@ class MainWindow(QWidget):
         self._show_youtube_overlay()
         self._show_controls()
         self._raise_ui_layers()
+        self._sync_sleep_inhibition()
 
     def _on_youtube_play_requested(self, video: YouTubeVideo) -> None:
         self._play_youtube(video)
@@ -1550,6 +1619,7 @@ class MainWindow(QWidget):
             self._update_queue_display()
             self._update_history_display()
             self._show_status_message("Search for another song")
+            self._sync_sleep_inhibition()
 
     def _on_youtube_end_reached(self) -> None:
         QTimer.singleShot(50, self._finish_youtube_playback)
@@ -1599,6 +1669,7 @@ class MainWindow(QWidget):
         self._save_folder_state()
         self._start_seek_updates()
         self._raise_ui_layers()
+        self._sync_sleep_inhibition()
 
     def _play_local_path(self, path: Path, *, interrupt: bool = True) -> None:
         if not self._ensure_vlc():
@@ -1635,6 +1706,7 @@ class MainWindow(QWidget):
         self._update_queue_display()
         self._start_seek_updates()
         self._raise_ui_layers()
+        self._sync_sleep_inhibition()
 
     def _handle_missing_local_path(self, path: Path) -> None:
         self._show_toast(
@@ -2467,6 +2539,7 @@ class MainWindow(QWidget):
         self._seek_bar.reset()
         self._show_status_message("End of playlist")
         self._show_controls()
+        self._sync_sleep_inhibition()
 
     def _on_end_reached(self) -> None:
         # Defer so libvlc can finish tearing down the previous media before set_media().
@@ -2590,6 +2663,7 @@ class MainWindow(QWidget):
             self._vlc.resume()
             self._controls.set_playing(True)
         self._show_overlay()
+        self._sync_sleep_inhibition()
 
     def _on_pause(self) -> None:
         if self._media_mode == MediaSourceMode.YOUTUBE:
@@ -2598,6 +2672,7 @@ class MainWindow(QWidget):
             self._vlc.pause()
         self._controls.set_playing(False)
         self._show_overlay()
+        self._sync_sleep_inhibition()
 
     def _toggle_play_pause(self) -> None:
         if self._media_mode == MediaSourceMode.YOUTUBE:
@@ -2608,10 +2683,14 @@ class MainWindow(QWidget):
             self._on_play()
 
     def _setup_shortcuts(self) -> None:
-        # Window-level so Space works even when a child (list/button) has focus.
+        # Window-level so Space/M work even when a child (list/button) has focus.
         space = QShortcut(QKeySequence(Qt.Key.Key_Space), self)
         space.setContext(Qt.ShortcutContext.WindowShortcut)
         space.activated.connect(self._on_space_shortcut)
+
+        cursor_toggle = QShortcut(QKeySequence(Qt.Key.Key_M), self)
+        cursor_toggle.setContext(Qt.ShortcutContext.WindowShortcut)
+        cursor_toggle.activated.connect(self._on_cursor_toggle_shortcut)
 
     def _on_space_shortcut(self) -> None:
         focus = QApplication.focusWidget()
@@ -2619,6 +2698,18 @@ class MainWindow(QWidget):
             focus.insert(" ")
             return
         self._toggle_play_pause()
+
+    def _on_cursor_toggle_shortcut(self) -> None:
+        focus = QApplication.focusWidget()
+        if isinstance(focus, QLineEdit):
+            letter = (
+                "M"
+                if QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier
+                else "m"
+            )
+            focus.insert(letter)
+            return
+        self._toggle_cursor_visibility()
 
     def _on_stop(self) -> None:
         if self._media_mode == MediaSourceMode.YOUTUBE:
@@ -2632,6 +2723,7 @@ class MainWindow(QWidget):
             self._update_history_display()
             self._show_status_message("Search for another song")
             self._show_controls()
+            self._sync_sleep_inhibition()
             return
         self._stopped = True
         self._external_path = None
@@ -2645,6 +2737,7 @@ class MainWindow(QWidget):
         self._update_queue_display()
         self._update_history_display()
         self._show_controls()
+        self._sync_sleep_inhibition()
 
     def _on_rewind(self) -> None:
         if self._media_mode == MediaSourceMode.YOUTUBE:
@@ -2722,10 +2815,6 @@ class MainWindow(QWidget):
 
         if key in (Qt.Key.Key_BracketRight, Qt.Key.Key_Period):
             self._on_forward()
-            return
-
-        if key == Qt.Key.Key_M:
-            self._on_mute_toggled()
             return
 
         if key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal, Qt.Key.Key_Up):
