@@ -2,8 +2,57 @@
 
 from __future__ import annotations
 
+import logging
+import sys
+from ctypes import c_ulong, c_void_p
+
 from PyQt6.QtCore import QPoint, QRect, QTimer
 from PyQt6.QtWidgets import QApplication, QDialog, QWidget
+
+logger = logging.getLogger(__name__)
+
+_NS_WINDOW_COLLECTION_BEHAVIOR_FULLSCREEN_AUXILIARY = 1 << 8
+
+
+def macos_allow_fullscreen_auxiliary(widget: QWidget) -> None:
+    """Let a detached dialog share the fullscreen Space with the main window."""
+    if sys.platform != "darwin":
+        return
+    try:
+        import ctypes
+
+        view = c_void_p(int(widget.winId()))
+        if not view.value:
+            return
+
+        libobjc = ctypes.cdll.LoadLibrary("/usr/lib/libobjc.A.dylib")
+        libobjc.objc_getClass.restype = c_void_p
+        libobjc.sel_registerName.restype = c_void_p
+
+        def _msg(restype, *argtypes):
+            func = libobjc.objc_msgSend
+            func.restype = restype
+            func.argtypes = argtypes
+            return func
+
+        window = _msg(c_void_p, c_void_p, c_void_p)(
+            view,
+            libobjc.sel_registerName(b"window"),
+        )
+        if not window:
+            return
+
+        current = _msg(c_ulong, c_void_p, c_void_p)(
+            window,
+            libobjc.sel_registerName(b"collectionBehavior"),
+        )
+        _msg(None, c_void_p, c_void_p, c_ulong)(
+            window,
+            libobjc.sel_registerName(b"setCollectionBehavior:"),
+            current | _NS_WINDOW_COLLECTION_BEHAVIOR_FULLSCREEN_AUXILIARY,
+        )
+    except Exception as exc:
+        logger.debug("Could not mark dialog as fullscreen auxiliary: %s", exc)
 
 
 def _move_dialog_global(dialog: QDialog, global_pos: QPoint) -> None:

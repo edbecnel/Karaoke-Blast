@@ -1700,6 +1700,34 @@ class MainWindow(QWidget):
         self._show_side_panel()
         return self._library_panel
 
+    def _exec_fullscreen_safe_dialog(
+        self,
+        dialog: QDialog,
+        *,
+        anchor: QWidget | None,
+    ) -> bool:
+        """Show a modal dialog, briefly leaving fullscreen so macOS keeps the app visible."""
+        restore_fullscreen = self.isFullScreen()
+        if restore_fullscreen:
+            self.showNormal()
+            self._sync_fullscreen_control()
+            QApplication.processEvents()
+        try:
+            if anchor is not None:
+                result = self._library_panel.exec_side_dialog(dialog)
+            else:
+                self.raise_()
+                self.activateWindow()
+                result = dialog.exec()
+            return result == QDialog.DialogCode.Accepted
+        finally:
+            if restore_fullscreen:
+                self.showFullScreen()
+                self._sync_fullscreen_control()
+                self._reposition_video_ui()
+                if self._vlc is not None and self._media_mode == MediaSourceMode.LOCAL:
+                    QTimer.singleShot(0, self._vlc.bind_output)
+
     def _navigate_to_song_path(self, path: Path) -> None:
         target_folder = path.parent.resolve()
         if self._browse_folder is None or self._browse_folder.resolve() != target_folder:
@@ -2041,12 +2069,7 @@ class MainWindow(QWidget):
             parent=self,
             anchor=anchor,
         )
-        if anchor is not None:
-            accepted = self._library_panel.exec_side_dialog(dialog) == QDialog.DialogCode.Accepted
-        else:
-            self.raise_()
-            self.activateWindow()
-            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        accepted = self._exec_fullscreen_safe_dialog(dialog, anchor=anchor)
         if accepted:
             updated_types = dialog.video_types()
             active_id = dialog.active_video_type_id()
@@ -2076,11 +2099,7 @@ class MainWindow(QWidget):
             parent=self,
             anchor=anchor,
         )
-        if anchor is not None:
-            accepted = self._library_panel.exec_side_dialog(dialog) == QDialog.DialogCode.Accepted
-        else:
-            accepted = dialog.exec() == QDialog.DialogCode.Accepted
-        if accepted:
+        if self._exec_fullscreen_safe_dialog(dialog, anchor=anchor):
             self._library_panel.refresh_display_labels()
 
     def _on_move_to_trash_requested(self, path: object) -> None:

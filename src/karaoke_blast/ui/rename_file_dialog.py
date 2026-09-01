@@ -26,7 +26,11 @@ from PyQt6.QtWidgets import (
 from karaoke_blast.ui.format_config_widget import FormatConfigWidget
 from karaoke_blast.ui.video_type_selector import VideoTypeSelectorWidget
 from karaoke_blast.ui.slot_field_casing import apply_casing_to_field, cased_slot_text
-from karaoke_blast.ui.dialog_positioning import fit_dialog_to_anchor, schedule_fit_dialog_to_anchor
+from karaoke_blast.ui.dialog_positioning import (
+    fit_dialog_to_anchor,
+    macos_allow_fullscreen_auxiliary,
+    schedule_fit_dialog_to_anchor,
+)
 from karaoke_blast.ui.visible_space_field import VisibleSpaceLineEdit
 from karaoke_blast.utils.filename_rename import (
     FilenameFormat,
@@ -337,6 +341,7 @@ class RenameFileDialog(QDialog):
             if self._position_anchor is not None:
                 fit_dialog_to_anchor(self, self._position_anchor)
             super().showEvent(event)
+            macos_allow_fullscreen_auxiliary(self)
             if self._position_anchor is not None:
                 fit_dialog_to_anchor(self, self._position_anchor)
                 schedule_fit_dialog_to_anchor(self, self._position_anchor)

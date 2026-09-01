@@ -23,7 +23,11 @@ from karaoke_blast.models.play_history_entry import PlayHistoryEntry
 from karaoke_blast.models.queue_item import QueueItem
 from karaoke_blast.models.youtube_video import YouTubeVideo
 from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
-from karaoke_blast.ui.dialog_positioning import fit_dialog_to_anchor, schedule_fit_dialog_to_anchor
+from karaoke_blast.ui.dialog_positioning import (
+    fit_dialog_to_anchor,
+    macos_allow_fullscreen_auxiliary,
+    schedule_fit_dialog_to_anchor,
+)
 from karaoke_blast.ui.library_folder_menu import HistoryFolderMenu
 from karaoke_blast.ui.list_style import SIDEBAR_LIST_STYLE
 from karaoke_blast.ui.mixed_queue_list_widget import (
@@ -511,6 +515,8 @@ class LibraryPanel(QWidget):
         dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
         dialog.adjustSize()
         fit_dialog_to_anchor(dialog, self)
+        _ = dialog.winId()
+        macos_allow_fullscreen_auxiliary(dialog)
 
         result = dialog.exec()
         self._side_dialog_overlay.hide()
