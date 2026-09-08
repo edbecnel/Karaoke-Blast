@@ -57,6 +57,7 @@ class Settings:
         self.video_types: list[VideoTypeProfile] = default_video_types()
         self.active_video_type_id: str = BUILTIN_ANY_ID
         self.library_flat_browse: bool = False
+        self.hide_appledouble_files: bool = True
         self.load()
 
     def load(self) -> None:
@@ -141,6 +142,8 @@ class Settings:
                 self.active_video_type_id = BUILTIN_SONGS_ID
             if isinstance(data.get("library_flat_browse"), bool):
                 self.library_flat_browse = data["library_flat_browse"]
+            if isinstance(data.get("hide_appledouble_files"), bool):
+                self.hide_appledouble_files = data["hide_appledouble_files"]
             self._migrate_legacy_youtube_append_karaoke(data)
             self._migrate_legacy_youtube_downloads_dir(data)
             self._migrate_legacy_display_formats()
@@ -176,6 +179,7 @@ class Settings:
             "video_types": [profile.to_dict() for profile in self.video_types],
             "active_video_type_id": self.active_video_type_id,
             "library_flat_browse": self.library_flat_browse,
+            "hide_appledouble_files": self.hide_appledouble_files,
         }
         try:
             _settings_file().write_text(

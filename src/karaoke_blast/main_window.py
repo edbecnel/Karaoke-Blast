@@ -48,8 +48,8 @@ from karaoke_blast.ui.panel_splitter import PanelSplitter
 from karaoke_blast.ui.rename_file_dialog import RenameFileDialog, RenameResult
 from karaoke_blast.ui.startup_folder_section import StartupFolderSection
 from karaoke_blast.ui.startup_media_type_selector import StartupMediaTypeSelector
+from karaoke_blast.ui.preferences_dialog import PreferencesDialog, PreferencesValues
 from karaoke_blast.ui.video_types_manager_dialog import VideoTypesManagerDialog
-from karaoke_blast.utils.video_types import BUILTIN_SONGS_ID, VideoTypeProfile
 from karaoke_blast.ui.library_panel import (
     PANEL_DEFAULT_WIDTH,
     PANEL_MAX_WIDTH,
@@ -67,6 +67,7 @@ from karaoke_blast.utils.song_display import (
     display_field_labels_from_mapping,
     song_matches_query,
 )
+from karaoke_blast.utils.video_types import BUILTIN_SONGS_ID, VideoTypeProfile
 from karaoke_blast.utils.video_scanner import (
     child_folders_with_videos,
     folder_has_videos,
@@ -336,6 +337,11 @@ class MainWindow(QWidget):
         metadata_btn.setStyleSheet(secondary_btn_style)
         metadata_btn.clicked.connect(self._open_batch_metadata_dialog)
 
+        preferences_btn = QPushButton("Preferences")
+        preferences_btn.setFixedSize(180, 48)
+        preferences_btn.setStyleSheet(secondary_btn_style)
+        preferences_btn.clicked.connect(self._open_preferences_dialog)
+
         layout.addWidget(subtitle)
 
         self._startup_video_type_selector = StartupMediaTypeSelector(
@@ -366,6 +372,7 @@ class MainWindow(QWidget):
 
         layout.addWidget(rename_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(metadata_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(preferences_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self._update_downloads_folder_display()
         self._update_media_type_library_folder_display()
@@ -602,6 +609,7 @@ class MainWindow(QWidget):
         self._library_panel.video_types_settings_requested.connect(
             self._open_video_types_manager
         )
+        self._library_panel.preferences_requested.connect(self._open_preferences_dialog)
         self._library_panel.video_type_changed.connect(self._on_active_video_type_changed)
         self._library_panel.set_downloads_folder(self._youtube_downloads_path())
         self._library_panel.set_display_mode(self._settings.song_display_mode)
@@ -994,10 +1002,17 @@ class MainWindow(QWidget):
     def _on_controls_pin_toggled(self, pinned: bool) -> None:
         self._settings.controls_auto_hide = not pinned
         self._settings.save()
+        self._sync_controls_auto_hide(self._settings.controls_auto_hide)
+
+    def _sync_controls_auto_hide(self, enabled: bool) -> None:
+        pinned = not enabled
+        if hasattr(self, "_controls"):
+            self._controls.set_pinned(pinned)
         if pinned:
-            self._controls_timer.stop()
+            if hasattr(self, "_controls_timer"):
+                self._controls_timer.stop()
             self._show_controls()
-        else:
+        elif hasattr(self, "_controls_timer"):
             self._controls_timer.start(CONTROLS_HIDE_MS)
 
     def _raise_ui_layers(self) -> None:
@@ -1088,12 +1103,24 @@ class MainWindow(QWidget):
         self._sort_strategy = SortStrategy.NAME_ASC
 
         if self._flat_browse_mode:
-            paths = scan_videos(folder, recursive=True)
+            paths = scan_videos(
+                folder,
+                recursive=True,
+                hide_appledouble_files=self._settings.hide_appledouble_files,
+            )
             subfolders: list[Path] = []
         else:
-            paths = scan_videos(folder)
-            subfolders = child_folders_with_videos(folder)
-        self._library_paths = scan_videos(folder, recursive=True)
+            paths = scan_videos(
+                folder, hide_appledouble_files=self._settings.hide_appledouble_files
+            )
+            subfolders = child_folders_with_videos(
+                folder, hide_appledouble_files=self._settings.hide_appledouble_files
+            )
+        self._library_paths = scan_videos(
+            folder,
+            recursive=True,
+            hide_appledouble_files=self._settings.hide_appledouble_files,
+        )
         self._raw_paths = paths
         sorted_paths = self._sort_paths(self._raw_paths)
         if keep_playback:
@@ -1190,7 +1217,10 @@ class MainWindow(QWidget):
     def _browse_subfolders(self) -> list[Path]:
         if self._flat_list_active() or self._browse_folder is None:
             return []
-        return child_folders_with_videos(self._browse_folder)
+        return child_folders_with_videos(
+            self._browse_folder,
+            hide_appledouble_files=self._settings.hide_appledouble_files,
+        )
 
     def _can_navigate_up(self) -> bool:
         if self._folder is None or self._browse_folder is None:
@@ -1214,11 +1244,22 @@ class MainWindow(QWidget):
             playing_path = self._external_path or self._playlist.current()
 
         if self._flat_list_active():
-            paths = scan_videos(self._browse_folder, recursive=True)
+            paths = scan_videos(
+                self._browse_folder,
+                recursive=True,
+                hide_appledouble_files=self._settings.hide_appledouble_files,
+            )
             subfolders: list[Path] = []
         else:
-            paths = scan_videos(self._browse_folder, recursive=False)
-            subfolders = child_folders_with_videos(self._browse_folder)
+            paths = scan_videos(
+                self._browse_folder,
+                recursive=False,
+                hide_appledouble_files=self._settings.hide_appledouble_files,
+            )
+            subfolders = child_folders_with_videos(
+                self._browse_folder,
+                hide_appledouble_files=self._settings.hide_appledouble_files,
+            )
         can_up = self._can_navigate_up()
 
         self._raw_paths = paths
@@ -1299,7 +1340,11 @@ class MainWindow(QWidget):
         self._play_all_under(folder)
 
     def _play_all_under(self, folder: Path) -> None:
-        paths = scan_videos(folder, recursive=True)
+        paths = scan_videos(
+            folder,
+            recursive=True,
+            hide_appledouble_files=self._settings.hide_appledouble_files,
+        )
         if not paths:
             self._show_toast("No videos under that folder")
             return
@@ -1335,7 +1380,13 @@ class MainWindow(QWidget):
         folder = folder.resolve()
         if not self._is_under_library_root(folder):
             return
-        paths = self._sort_paths(scan_videos(folder, recursive=True))
+        paths = self._sort_paths(
+            scan_videos(
+                folder,
+                recursive=True,
+                hide_appledouble_files=self._settings.hide_appledouble_files,
+            )
+        )
         if not paths:
             self._show_toast("No videos under that folder")
             return
@@ -1833,7 +1884,11 @@ class MainWindow(QWidget):
             if self._folder is None:
                 self._folder = target_folder
             library_root = self._folder if self._folder is not None else target_folder
-            self._library_paths = scan_videos(library_root, recursive=True)
+            self._library_paths = scan_videos(
+                library_root,
+                recursive=True,
+                hide_appledouble_files=self._settings.hide_appledouble_files,
+            )
             self._library_panel.set_folder(self._browse_folder)
             self._library_panel.set_library_root(library_root)
         self._apply_browse_contents(clear_search=True, keep_playback=True)
@@ -1932,13 +1987,25 @@ class MainWindow(QWidget):
         self._folder = target
         self._browse_folder = target
         self._recursive_list_mode = False
-        self._library_paths = scan_videos(target, recursive=True)
+        self._library_paths = scan_videos(
+            target,
+            recursive=True,
+            hide_appledouble_files=self._settings.hide_appledouble_files,
+        )
         if self._flat_browse_mode:
-            paths = scan_videos(target, recursive=True)
+            paths = scan_videos(
+                target,
+                recursive=True,
+                hide_appledouble_files=self._settings.hide_appledouble_files,
+            )
             subfolders: list[Path] = []
         else:
-            paths = scan_videos(target)
-            subfolders = child_folders_with_videos(target)
+            paths = scan_videos(
+                target, hide_appledouble_files=self._settings.hide_appledouble_files
+            )
+            subfolders = child_folders_with_videos(
+                target, hide_appledouble_files=self._settings.hide_appledouble_files
+            )
         if not paths and not subfolders:
             return
         self._raw_paths = paths
@@ -2111,6 +2178,48 @@ class MainWindow(QWidget):
         )
         self._refresh_recent_folders()
 
+    def _open_preferences_dialog(self) -> None:
+        dialog = PreferencesDialog(
+            hide_appledouble_files=self._settings.hide_appledouble_files,
+            library_flat_browse=self._settings.library_flat_browse,
+            controls_auto_hide=self._settings.controls_auto_hide,
+            filename_rename_skip_canonical=self._settings.filename_rename_skip_canonical,
+            filename_rename_auto_fill_slots=self._settings.filename_rename_auto_fill_slots,
+            metadata_skip_tagged=self._settings.metadata_skip_tagged,
+            metadata_auto_fill_slots=self._settings.metadata_auto_fill_slots,
+            parent=self,
+        )
+        anchor = self._library_panel if self._stack.currentWidget() == self._player_page else None
+        if not self._exec_fullscreen_safe_dialog(dialog, anchor=anchor):
+            return
+        self._apply_preferences(dialog.values())
+
+    def _apply_preferences(self, values: PreferencesValues) -> None:
+        previous_hide_appledouble = self._settings.hide_appledouble_files
+        previous_flat_browse = self._settings.library_flat_browse
+
+        self._settings.hide_appledouble_files = values.hide_appledouble_files
+        self._settings.library_flat_browse = values.library_flat_browse
+        self._settings.controls_auto_hide = values.controls_auto_hide
+        self._settings.filename_rename_skip_canonical = values.filename_rename_skip_canonical
+        self._settings.filename_rename_auto_fill_slots = values.filename_rename_auto_fill_slots
+        self._settings.metadata_skip_tagged = values.metadata_skip_tagged
+        self._settings.metadata_auto_fill_slots = values.metadata_auto_fill_slots
+        self._settings.save()
+
+        self._sync_controls_auto_hide(values.controls_auto_hide)
+
+        self._flat_browse_mode = values.library_flat_browse
+        if hasattr(self, "_library_panel"):
+            self._library_panel.set_flat_browse_enabled(values.library_flat_browse)
+
+        library_refresh_needed = (
+            values.hide_appledouble_files != previous_hide_appledouble
+            or values.library_flat_browse != previous_flat_browse
+        )
+        if library_refresh_needed and hasattr(self, "_library_panel"):
+            self._apply_browse_contents(clear_search=False, keep_playback=True)
+
     def _open_batch_rename_dialog(self) -> None:
         dialog = BatchRenameDialog(
             initial_folder=self._youtube_downloads_path(),
@@ -2118,6 +2227,7 @@ class MainWindow(QWidget):
             active_video_type_id=self._settings.active_video_type_id,
             skip_canonical=self._settings.filename_rename_skip_canonical,
             auto_fill_slots=self._settings.filename_rename_auto_fill_slots,
+            hide_appledouble_files=self._settings.hide_appledouble_files,
             parent=self,
         )
         dialog.file_renamed.connect(self._on_file_renamed)
@@ -2143,6 +2253,7 @@ class MainWindow(QWidget):
             active_video_type_id=self._settings.active_video_type_id,
             skip_tagged=self._settings.metadata_skip_tagged,
             auto_fill_slots=self._settings.metadata_auto_fill_slots,
+            hide_appledouble_files=self._settings.hide_appledouble_files,
             parent=self,
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
@@ -2474,11 +2585,22 @@ class MainWindow(QWidget):
 
         keep_path = self._external_path or self._playlist.current()
         if self._flat_list_active():
-            paths = scan_videos(self._browse_folder, recursive=True)
+            paths = scan_videos(
+                self._browse_folder,
+                recursive=True,
+                hide_appledouble_files=self._settings.hide_appledouble_files,
+            )
             subfolders: list[Path] = []
         else:
-            paths = scan_videos(self._browse_folder, recursive=False)
-            subfolders = child_folders_with_videos(self._browse_folder)
+            paths = scan_videos(
+                self._browse_folder,
+                recursive=False,
+                hide_appledouble_files=self._settings.hide_appledouble_files,
+            )
+            subfolders = child_folders_with_videos(
+                self._browse_folder,
+                hide_appledouble_files=self._settings.hide_appledouble_files,
+            )
 
         if not paths and not subfolders:
             QMessageBox.information(
@@ -2489,7 +2611,11 @@ class MainWindow(QWidget):
             return
 
         if self._folder is not None:
-            self._library_paths = scan_videos(self._folder, recursive=True)
+            self._library_paths = scan_videos(
+                self._folder,
+                recursive=True,
+                hide_appledouble_files=self._settings.hide_appledouble_files,
+            )
         self._raw_paths = paths
         sorted_paths = self._sort_paths(self._raw_paths)
         self._playlist.reorder(sorted_paths, keep_path=keep_path)

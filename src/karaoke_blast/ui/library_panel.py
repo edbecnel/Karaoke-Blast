@@ -211,6 +211,7 @@ class LibraryPanel(QWidget):
     downloads_folder_remove_requested = pyqtSignal(object)
     youtube_search_requested = pyqtSignal(str)
     video_types_settings_requested = pyqtSignal()
+    preferences_requested = pyqtSignal()
     video_type_changed = pyqtSignal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -289,11 +290,17 @@ class LibraryPanel(QWidget):
 
         video_types_btn = QPushButton("⚙")
         self._video_types_btn = video_types_btn
-        video_types_btn.setToolTip("Video types")
+        video_types_btn.setToolTip("Settings")
         video_types_btn.setFixedSize(28, 28)
         video_types_btn.setStyleSheet(_DISMISS_BTN_STYLE)
         video_types_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        video_types_btn.clicked.connect(self.video_types_settings_requested.emit)
+        self._settings_menu = QMenu(self)
+        self._settings_menu.setStyleSheet(CONTEXT_MENU_STYLE)
+        preferences_action = self._settings_menu.addAction("Preferences…")
+        preferences_action.triggered.connect(self.preferences_requested.emit)
+        video_types_action = self._settings_menu.addAction("Video Types…")
+        video_types_action.triggered.connect(self.video_types_settings_requested.emit)
+        video_types_btn.setMenu(self._settings_menu)
         header_row.addWidget(video_types_btn)
 
         close_btn = QPushButton("×")

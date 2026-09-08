@@ -90,6 +90,7 @@ class BatchRenameDialog(QDialog):
         active_video_type_id: str,
         skip_canonical: bool = True,
         auto_fill_slots: bool = False,
+        hide_appledouble_files: bool = True,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -103,6 +104,7 @@ class BatchRenameDialog(QDialog):
         )
         self._skip_canonical = skip_canonical
         self._auto_fill_slots = auto_fill_slots
+        self._hide_appledouble_files = hide_appledouble_files
         self._folder = initial_folder
         self._renamed_count = 0
         self._skipped_count = 0
@@ -239,7 +241,13 @@ class BatchRenameDialog(QDialog):
 
     def _run_batch(self) -> None:
         assert self._folder is not None
-        files = sorted(scan_videos(self._folder), key=lambda path: path.name.lower())
+        files = sorted(
+            scan_videos(
+                self._folder,
+                hide_appledouble_files=self._hide_appledouble_files,
+            ),
+            key=lambda path: path.name.lower(),
+        )
         if self._skip_canonical:
             files = [path for path in files if not looks_canonical(path, self._fmt)]
 

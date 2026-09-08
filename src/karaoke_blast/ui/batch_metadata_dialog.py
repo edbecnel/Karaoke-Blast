@@ -95,6 +95,7 @@ class BatchMetadataDialog(QDialog):
         active_video_type_id: str,
         skip_tagged: bool = True,
         auto_fill_slots: bool = False,
+        hide_appledouble_files: bool = True,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -106,6 +107,7 @@ class BatchMetadataDialog(QDialog):
         self._fmt = active_profile.rename_format.copy()
         self._skip_tagged = skip_tagged
         self._auto_fill_slots = auto_fill_slots
+        self._hide_appledouble_files = hide_appledouble_files
         self._folder = initial_folder
         self._recent_folders = list(recent_folders or [])
         self._pinned_folders = list(pinned_folders or [])
@@ -295,7 +297,13 @@ class BatchMetadataDialog(QDialog):
 
     def _run_batch(self) -> None:
         assert self._folder is not None
-        files = sorted(scan_videos(self._folder), key=lambda path: path.name.lower())
+        files = sorted(
+            scan_videos(
+                self._folder,
+                hide_appledouble_files=self._hide_appledouble_files,
+            ),
+            key=lambda path: path.name.lower(),
+        )
 
         unsupported = [path for path in files if not supports_metadata(path)]
         files = [path for path in files if supports_metadata(path)]
