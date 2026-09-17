@@ -6,3 +6,4 @@ from enum import Enum
 class MediaSourceMode(Enum):
     LOCAL = "local"
     YOUTUBE = "youtube"
+    RUMBLE = "rumble"

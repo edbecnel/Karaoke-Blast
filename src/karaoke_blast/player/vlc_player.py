@@ -20,6 +20,15 @@ _AUDIO_VERIFY_MAX_ATTEMPTS = 30
 _TRACK_CHANGE_DEFER_MS = 50
 
 
+def path_to_vlc_media_mrl(path: Path) -> str:
+    """Return a libvlc-safe MRL for a local file.
+
+    Plain paths break when the filename contains square brackets (VLC treats them
+    as access-module syntax). ``file://`` URIs encode those characters.
+    """
+    return path.resolve().as_uri()
+
+
 class VlcPlayer(QObject):
     """Thin wrapper around python-vlc with Qt signals."""
 
@@ -89,8 +98,13 @@ class VlcPlayer(QObject):
         """Re-attach VLC to the video widget (required after show/resize on macOS)."""
         self._widget.bind_player(self._player)
 
-    def play(self, path: Path) -> None:
-        path = Path(path)
+    def play(
+        self,
+        path: Path | str,
+        *,
+        http_headers: dict[str, str] | None = None,
+    ) -> None:
+        target = path if isinstance(path, str) else Path(path)
         self._play_generation += 1
         generation = self._play_generation
 
@@ -101,33 +115,50 @@ class VlcPlayer(QObject):
             self._player.stop()
             QTimer.singleShot(
                 _TRACK_CHANGE_DEFER_MS,
-                lambda: self._start_media(path, generation),
+                lambda: self._start_media(target, generation, http_headers=http_headers),
             )
             return
 
-        self._start_media(path, generation)
+        self._start_media(target, generation, http_headers=http_headers)
 
-    def _start_media(self, path: Path, generation: int) -> None:
+    def _start_media(
+        self,
+        path: Path | str,
+        generation: int,
+        *,
+        http_headers: dict[str, str] | None = None,
+    ) -> None:
         if generation != self._play_generation:
             return
 
         self._suppress_end_reached = False
-        try:
-            if not path.is_file():
-                self.playback_error.emit(f"File not found: {path.name}")
-                logger.error("VLC play skipped; file missing: %s", path)
+        if isinstance(path, str):
+            if not path.startswith(("http://", "https://")):
+                self.playback_error.emit("Invalid stream URL.")
+                logger.error("VLC play skipped; bad stream URL: %s", path)
                 return
-        except OSError as exc:
-            self.playback_error.emit(f"Cannot open: {path.name}")
-            logger.error("VLC play skipped; cannot access %s: %s", path, exc)
-            return
+            media_target = path
+            label = path
+        else:
+            try:
+                if not path.is_file():
+                    self.playback_error.emit(f"File not found: {path.name}")
+                    logger.error("VLC play skipped; file missing: %s", path)
+                    return
+            except OSError as exc:
+                self.playback_error.emit(f"Cannot open: {path.name}")
+                logger.error("VLC play skipped; cannot access %s: %s", path, exc)
+                return
+            media_target = path_to_vlc_media_mrl(path)
+            label = path.name
 
-        media = self._instance.media_new(str(path))
+        media = self._instance.media_new(media_target)
+        self._apply_http_headers(media, http_headers)
         self._player.set_media(media)
         self.bind_output()
         result = self._player.play()
         if result == -1:
-            self.playback_error.emit(f"Failed to play: {path.name}")
+            self.playback_error.emit(f"Failed to play: {label}")
             logger.error("VLC failed to start playback for %s", path)
             return
         if sys.platform in ("darwin", "win32"):
@@ -202,6 +233,22 @@ class VlcPlayer(QObject):
         self._apply_audio()
         return self._desired_mute
 
+    @staticmethod
+    def _apply_http_headers(media, http_headers: dict[str, str] | None) -> None:
+        if not http_headers:
+            return
+        extra_lines: list[str] = []
+        for key, value in http_headers.items():
+            lower = key.lower()
+            if lower == "user-agent":
+                media.add_option(f":http-user-agent={value}")
+            elif lower in ("referer", "referrer"):
+                media.add_option(f":http-referrer={value}")
+            else:
+                extra_lines.append(f"{key}: {value}")
+        if extra_lines:
+            media.add_option(":http-extra-headers=" + "\r\n".join(extra_lines))
+
     def _is_active(self) -> bool:
         return self.is_playing() or self.is_paused()
 
@@ -256,4 +303,14 @@ class VlcPlayer(QObject):
         self.end_reached.emit()
 
     def _on_error(self, _event) -> None:
+        target = self._player.get_media()
+        if target is not None:
+            location = target.get_mrl() or ""
+            if location.startswith(("http://", "https://")):
+                self.playback_error.emit(
+                    "Could not stream this video. YouTube may have blocked the link "
+                    "(try updating yt-dlp or use Download)."
+                )
+                logger.error("VLC stream playback failed for %s", location[:120])
+                return
         self.playback_error.emit("Playback error")

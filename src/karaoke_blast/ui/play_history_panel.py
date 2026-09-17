@@ -38,6 +38,7 @@ class PlayHistoryPanel(QListWidget):
         self._entries: list[PlayHistoryEntry] = []
         self._current_local: Path | None = None
         self._current_video_id: str | None = None
+        self._current_rumble_url: str | None = None
         self._display_resolver: Callable[[Path], str] = display_name
         self._library_root: Path | None = None
         self.itemDoubleClicked.connect(self._on_item_double_clicked)
@@ -47,7 +48,12 @@ class PlayHistoryPanel(QListWidget):
     def set_display_resolver(self, resolver: Callable[[Path], str] | None) -> None:
         self._display_resolver = resolver if resolver is not None else display_name
         if self._entries:
-            self.set_history(self._entries, current_local=self._current_local, current_video_id=self._current_video_id)
+            self.set_history(
+                self._entries,
+                current_local=self._current_local,
+                current_video_id=self._current_video_id,
+                current_rumble_url=self._current_rumble_url,
+            )
 
     def set_library_root(self, root: Path | None) -> None:
         self._library_root = root.resolve() if root is not None else None
@@ -58,10 +64,12 @@ class PlayHistoryPanel(QListWidget):
         *,
         current_local: Path | None = None,
         current_video_id: str | None = None,
+        current_rumble_url: str | None = None,
     ) -> None:
         self._entries = list(entries)
         self._current_local = _safe_resolve(current_local) if current_local is not None else None
         self._current_video_id = current_video_id
+        self._current_rumble_url = current_rumble_url
         self.clear()
         for entry in entries:
             is_current = False
@@ -81,6 +89,14 @@ class PlayHistoryPanel(QListWidget):
                 prefix = "▶ " if is_current else "▶︎ "
                 title = f"{prefix}{video.title}{suffix}\n{video.channel}"
                 tip = f"{video.title}\n{video.channel}\n{video.watch_url}"
+            elif entry.kind == "rumble" and entry.rumble is not None:
+                rumble = entry.rumble
+                is_current = rumble.page_url == self._current_rumble_url
+                duration = format_duration(rumble.duration_seconds)
+                suffix = f" ({duration})" if duration else ""
+                prefix = "▶ " if is_current else "▶︎ "
+                title = f"{prefix}{rumble.title}{suffix}\nRumble"
+                tip = f"{rumble.title}\nRumble\n{rumble.page_url}"
             else:
                 continue
 
@@ -147,6 +163,16 @@ class PlayHistoryPanel(QListWidget):
             menu.addAction(download)
             copy_url = QAction("Copy URL", self)
             copy_url.triggered.connect(lambda: copy_text_to_clipboard(video.watch_url))
+            menu.addAction(copy_url)
+        if entry.kind == "rumble" and entry.rumble is not None:
+            rumble = entry.rumble
+            download = QAction("Download", self)
+            download.triggered.connect(
+                lambda: self._defer(self.download_requested, rumble)
+            )
+            menu.addAction(download)
+            copy_url = QAction("Copy URL", self)
+            copy_url.triggered.connect(lambda: copy_text_to_clipboard(rumble.page_url))
             menu.addAction(copy_url)
 
         remove = QAction("Remove from History", self)

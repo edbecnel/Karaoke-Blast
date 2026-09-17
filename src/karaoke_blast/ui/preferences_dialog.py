@@ -4,15 +4,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
+    QHBoxLayout,
     QLabel,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
+
+from karaoke_blast.services.youtube_cookies import cookies_folder, youtube_cookies_setup_page
+from karaoke_blast.storage.paths import default_youtube_cookies_file
 
 from karaoke_blast.ui.checkbox_style import CHECKBOX_STYLE_WHITE_LABEL
 
@@ -114,6 +120,46 @@ class PreferencesDialog(QDialog):
         self._controls_auto_hide_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
         self._controls_auto_hide_checkbox.setChecked(controls_auto_hide)
         layout.addWidget(self._controls_auto_hide_checkbox)
+
+        layout.addWidget(self._section_label("YouTube"))
+
+        cookies_path = default_youtube_cookies_file()
+        cookies_help = QLabel(
+            "For YouTube or Rumble downloads that fail with HTTP 403, export a Netscape "
+            "cookies.txt while signed in (visit each site, or combine domains in one file) "
+            "and save it as:"
+        )
+        cookies_help.setWordWrap(True)
+        cookies_help.setStyleSheet("color: #ccc; font-size: 12px; background: transparent;")
+        layout.addWidget(cookies_help)
+
+        cookies_path_label = QLabel(str(cookies_path))
+        cookies_path_label.setWordWrap(True)
+        cookies_path_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        cookies_path_label.setStyleSheet(
+            "color: #aaa; font-size: 11px; font-family: monospace; background: transparent;"
+        )
+        layout.addWidget(cookies_path_label)
+
+        cookies_buttons = QHBoxLayout()
+        open_folder_btn = QPushButton("Open folder…")
+        open_folder_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(cookies_folder())))
+        )
+        cookies_buttons.addWidget(open_folder_btn)
+
+        setup_page = youtube_cookies_setup_page()
+        setup_btn = QPushButton("Cookies setup (bookmarklet)…")
+        setup_btn.setEnabled(setup_page.is_file())
+        if setup_page.is_file():
+            setup_btn.clicked.connect(
+                lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(setup_page)))
+            )
+        cookies_buttons.addWidget(setup_btn)
+        cookies_buttons.addStretch()
+        layout.addLayout(cookies_buttons)
 
         layout.addWidget(self._section_label("Batch tools"))
 

@@ -6,15 +6,18 @@ import json
 import logging
 import signal
 import sys
-from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
+from karaoke_blast.services.youtube_extractor import (
+    YOUTUBE_PLAYER_CLIENT_FALLBACKS,
+    apply_yt_dlp_runtime_opts,
+    youtube_extractor_args,
+)
 from karaoke_blast.storage.paths import default_downloads_dir
 from karaoke_blast.utils.runtime_deps import (
     configure_runtime_dependencies,
     resolve_ffmpeg_location,
-    resolve_js_runtimes,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,6 +29,14 @@ VLC_FORMAT = (
     "bestvideo[vcodec^=avc1]+bestaudio/"
     "bestvideo+bestaudio/"
     "best"
+)
+
+DOWNLOAD_FORMAT_FALLBACKS: tuple[str, ...] = (
+    VLC_FORMAT,
+    "bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best",
+    "bestvideo+bestaudio/best",
+    "bv*+ba/b",
+    "best",
 )
 
 
@@ -67,37 +78,41 @@ def downloaded_file_for(video_id: str, folder: Path | None = None) -> Path | Non
     return None
 
 
-def _yt_dlp_ejs_available() -> bool:
-    return find_spec("yt_dlp_ejs") is not None
+def _is_retryable_format_error(exc: BaseException) -> bool:
+    """Return True when another format selector may succeed."""
+    text = str(exc).lower()
+    return any(
+        phrase in text
+        for phrase in (
+            "not available",
+            "no video formats",
+            "requested format",
+        )
+    )
 
 
 def _build_ydl_opts(
     output_dir: Path,
     *,
     progress_callback,
+    format: str,
+    player_client: list[str],
 ) -> dict[str, Any]:
     opts: dict[str, Any] = {
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
         "restrictfilenames": True,
-        "format": VLC_FORMAT,
+        "format": format,
         "merge_output_format": "mp4",
         "outtmpl": str(output_dir / "%(title).200B [%(id)s].%(ext)s"),
         "progress_hooks": [progress_callback],
-        "check_formats": "selected",
-        "extractor_args": {
-            "youtube": {"player_client": ["default", "-android_vr", "-web_safari"]},
-        },
+        "extractor_args": youtube_extractor_args(player_client),
     }
     ffmpeg = resolve_ffmpeg_location()
     if ffmpeg is not None:
         opts["ffmpeg_location"] = ffmpeg
-    js_runtimes = resolve_js_runtimes()
-    if js_runtimes:
-        opts["js_runtimes"] = js_runtimes
-    if not _yt_dlp_ejs_available():
-        opts["remote_components"] = ["ejs:github"]
+    apply_yt_dlp_runtime_opts(opts)
     return opts
 
 
@@ -122,8 +137,12 @@ def _resolve_downloaded_path(
 
 def _friendly_download_error(exc: BaseException) -> str:
     text = str(exc).strip() or exc.__class__.__name__
+    if _is_retryable_format_error(exc):
+        return "Could not find a downloadable format for this video."
     if "403" not in text and "forbidden" not in text.lower():
         return text
+    from karaoke_blast.utils.runtime_deps import resolve_js_runtimes
+
     if resolve_js_runtimes():
         return text
     return (
@@ -184,19 +203,56 @@ def run_download_in_process(
         elif status == "finished":
             on_progress(100.0, "Merging…")
 
+    info: dict[str, Any] | None = None
     try:
-        ydl_opts = _build_ydl_opts(output_dir, progress_callback=on_ytdl_progress)
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            check_cancelled()
-            info = ydl.extract_info(watch_url, download=True)
-            check_cancelled()
+        last_error: DownloadError | None = None
+        for player_client in YOUTUBE_PLAYER_CLIENT_FALLBACKS:
+            for index, format_selector in enumerate(DOWNLOAD_FORMAT_FALLBACKS):
+                try:
+                    ydl_opts = _build_ydl_opts(
+                        output_dir,
+                        progress_callback=on_ytdl_progress,
+                        format=format_selector,
+                        player_client=player_client,
+                    )
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        check_cancelled()
+                        extracted = ydl.extract_info(watch_url, download=True)
+                        check_cancelled()
+                    info = extracted if isinstance(extracted, dict) else None
+                    logger.debug(
+                        "YouTube download for %s succeeded with client %s format %r",
+                        video_id,
+                        player_client,
+                        format_selector,
+                    )
+                    last_error = None
+                    break
+                except DownloadError as exc:
+                    last_error = exc
+                    if (
+                        index < len(DOWNLOAD_FORMAT_FALLBACKS) - 1
+                        and _is_retryable_format_error(exc)
+                    ):
+                        cleanup_partial_download(video_id, output_dir)
+                        logger.info(
+                            "Client %s format %r failed for %s, trying next fallback: %s",
+                            player_client,
+                            format_selector,
+                            video_id,
+                            exc,
+                        )
+                        continue
+                    break
+            if info is not None:
+                break
+        if info is None and last_error is not None:
+            raise RuntimeError(_friendly_download_error(last_error)) from last_error
     except (DownloadCancelled, YtDlpDownloadCancelled):
         cleanup_partial_download(video_id, output_dir)
         raise DownloadCancelled() from None
-    except DownloadError as exc:
-        raise RuntimeError(str(exc)) from exc
 
-    path = _resolve_downloaded_path(video_id, output_dir, info if isinstance(info, dict) else None)
+    path = _resolve_downloaded_path(video_id, output_dir, info)
     if path is None:
         raise RuntimeError("Download completed but output file was not found.")
     return path

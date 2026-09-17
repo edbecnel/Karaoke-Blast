@@ -4,16 +4,65 @@ import json
 
 from PyQt6.QtCore import QObject, QUrl, pyqtSignal, pyqtSlot
 from PyQt6.QtWebChannel import QWebChannel
+from PyQt6.QtWebEngineCore import (
+    QWebEnginePage,
+    QWebEngineProfile,
+    QWebEngineSettings,
+    QWebEngineUrlRequestInterceptor,
+)
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import QWidget
+
+YOUTUBE_EMBED_ORIGIN = "https://karaoke-blast.local"
+YOUTUBE_EMBED_REFERER = f"{YOUTUBE_EMBED_ORIGIN}/"
+
+
+class _YouTubeRefererInterceptor(QWebEngineUrlRequestInterceptor):
+    """Attach Referer on YouTube CDN requests (required for embedded playback)."""
+
+    def __init__(self, referer: str = YOUTUBE_EMBED_REFERER) -> None:
+        super().__init__()
+        self._referer = referer.encode("ascii")
+
+    def interceptRequest(self, info) -> None:
+        host = info.requestUrl().host().lower()
+        if not any(
+            token in host
+            for token in (
+                "youtube.com",
+                "youtube-nocookie.com",
+                "googlevideo.com",
+                "ytimg.com",
+                "ggpht.com",
+            )
+        ):
+            return
+        info.setHttpHeader(b"Referer", self._referer)
 
 
 class _YouTubeBridge(QObject):
     video_ended = pyqtSignal()
+    player_error = pyqtSignal(int)
 
     @pyqtSlot()
     def videoEnded(self) -> None:
         self.video_ended.emit()
+
+    @pyqtSlot(int)
+    def playerError(self, code: int) -> None:
+        self.player_error.emit(code)
+
+
+def _youtube_player_error_message(code: int) -> str:
+    messages = {
+        2: "Invalid YouTube video ID.",
+        5: "This video cannot be played in the embedded player.",
+        100: "Video not found or removed.",
+        101: "Embedding disabled by the video owner.",
+        150: "Embedding disabled by the video owner.",
+        153: "YouTube player configuration error.",
+    }
+    return messages.get(code, f"YouTube playback error ({code}).")
 
 
 class YouTubeWidget(QWebEngineView):
@@ -23,11 +72,24 @@ class YouTubeWidget(QWebEngineView):
     playback_error = pyqtSignal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
+        profile = QWebEngineProfile("karaoke-blast-youtube", parent)
+        profile.setUrlRequestInterceptor(_YouTubeRefererInterceptor())
+        page = QWebEnginePage(profile, parent)
         super().__init__(parent)
+        self.setPage(page)
         self.setStyleSheet("background-color: black;")
         self.page().setBackgroundColor(self.palette().color(self.backgroundRole()))
+        settings = self.page().settings()
+        settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
+        settings.setAttribute(
+            QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True
+        )
+        settings.setAttribute(
+            QWebEngineSettings.WebAttribute.PlaybackRequiresUserGesture, False
+        )
         self._bridge = _YouTubeBridge(self)
         self._bridge.video_ended.connect(self.playback_ended)
+        self._bridge.player_error.connect(self._on_player_error)
         self._channel = QWebChannel(self.page())
         self._channel.registerObject("bridge", self._bridge)
         self.page().setWebChannel(self._channel)
@@ -42,7 +104,7 @@ class YouTubeWidget(QWebEngineView):
         self._muted = muted
         self.setHtml(
             _player_html(video_id, volume=self._volume, muted=self._muted),
-            QUrl("https://karaoke-blast.local/"),
+            QUrl(YOUTUBE_EMBED_REFERER),
         )
 
     def clear(self) -> None:
@@ -67,13 +129,15 @@ class YouTubeWidget(QWebEngineView):
             return
         self.page().runJavaScript(script)
 
+    def _on_player_error(self, code: int) -> None:
+        self.playback_error.emit(_youtube_player_error_message(code))
+
     def _on_load_finished(self, ok: bool) -> None:
         if not ok and self._current_video_id is not None:
             self.playback_error.emit("Could not load the YouTube player.")
 
 
 def _player_html(video_id: str, *, volume: int, muted: bool) -> str:
-    origin = "https://karaoke-blast.local"
     config = json.dumps(
         {
             "videoId": video_id,
@@ -85,7 +149,7 @@ def _player_html(video_id: str, *, volume: int, muted: bool) -> str:
                 "modestbranding": 1,
                 "enablejsapi": 1,
                 "playsinline": 1,
-                "origin": origin,
+                "origin": YOUTUBE_EMBED_ORIGIN,
             },
         }
     )
@@ -93,6 +157,7 @@ def _player_html(video_id: str, *, volume: int, muted: bool) -> str:
 <html>
 <head>
   <meta charset="utf-8">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
   <style>
     html, body {{
       margin: 0;
@@ -149,6 +214,11 @@ def _player_html(video_id: str, *, volume: int, muted: bool) -> str:
           onStateChange: function(event) {{
             if (event.data === YT.PlayerState.ENDED && bridge) {{
               bridge.videoEnded();
+            }}
+          }},
+          onError: function(event) {{
+            if (bridge) {{
+              bridge.playerError(event.data);
             }}
           }}
         }}

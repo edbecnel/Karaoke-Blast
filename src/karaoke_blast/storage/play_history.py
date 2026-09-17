@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from karaoke_blast.models.play_history_entry import PlayHistoryEntry
+from karaoke_blast.models.rumble_video import RumbleVideo
 from karaoke_blast.models.youtube_video import YouTubeVideo
 from karaoke_blast.storage.local_play_history import LocalPlayHistory
 from karaoke_blast.storage.paths import config_dir
@@ -42,6 +43,38 @@ def _parse_played_at(value: object) -> datetime | None:
     return parsed
 
 
+def _rumble_to_dict(video: RumbleVideo) -> dict:
+    return {
+        "page_url": video.page_url,
+        "page_video_id": video.page_video_id,
+        "title": video.title,
+        "embed_id": video.embed_id,
+        "duration_seconds": video.duration_seconds,
+    }
+
+
+def _rumble_from_dict(data: dict) -> RumbleVideo | None:
+    page_url = data.get("page_url")
+    page_video_id = data.get("page_video_id")
+    title = data.get("title")
+    if not isinstance(page_url, str) or not isinstance(page_video_id, str):
+        return None
+    if not isinstance(title, str):
+        title = page_video_id
+    embed_id = data.get("embed_id")
+    if embed_id is not None and not isinstance(embed_id, str):
+        embed_id = None
+    duration = data.get("duration_seconds")
+    duration_seconds = duration if isinstance(duration, int) else None
+    return RumbleVideo(
+        page_url=page_url,
+        page_video_id=page_video_id,
+        title=title,
+        embed_id=embed_id,
+        duration_seconds=duration_seconds,
+    )
+
+
 def _entry_to_dict(entry: PlayHistoryEntry) -> dict:
     data: dict[str, object] = {
         "kind": entry.kind,
@@ -51,26 +84,40 @@ def _entry_to_dict(entry: PlayHistoryEntry) -> dict:
         data["path"] = str(entry.path)
     elif entry.kind == "youtube" and entry.video is not None:
         data["video"] = _video_to_dict(entry.video)
+    elif entry.kind == "rumble" and entry.rumble is not None:
+        data["rumble"] = _rumble_to_dict(entry.rumble)
     return data
+
+
+def _rumble_entry_from_dict(data: dict, played_at: datetime) -> PlayHistoryEntry | None:
+    rumble_data = data.get("rumble")
+    if not isinstance(rumble_data, dict):
+        return None
+    rumble = _rumble_from_dict(rumble_data)
+    if rumble is None:
+        return None
+    return PlayHistoryEntry(kind="rumble", played_at=played_at, rumble=rumble)
 
 
 def _entry_from_dict(data: dict) -> PlayHistoryEntry | None:
     kind = data.get("kind")
     played_at = _parse_played_at(data.get("played_at"))
-    if kind not in ("local", "youtube") or played_at is None:
+    if kind not in ("local", "youtube", "rumble") or played_at is None:
         return None
     if kind == "local":
         path_value = data.get("path")
         if not isinstance(path_value, str) or not path_value:
             return None
         return PlayHistoryEntry(kind="local", played_at=played_at, path=Path(path_value))
-    video_data = data.get("video")
-    if not isinstance(video_data, dict):
-        return None
-    video = _video_from_dict(video_data)
-    if video is None:
-        return None
-    return PlayHistoryEntry(kind="youtube", played_at=played_at, video=video)
+    if kind == "youtube":
+        video_data = data.get("video")
+        if not isinstance(video_data, dict):
+            return None
+        video = _video_from_dict(video_data)
+        if video is None:
+            return None
+        return PlayHistoryEntry(kind="youtube", played_at=played_at, video=video)
+    return _rumble_entry_from_dict(data, played_at)
 
 
 class PlayHistory:
@@ -147,6 +194,9 @@ class PlayHistory:
     def add_youtube(self, video: YouTubeVideo) -> None:
         self._add(PlayHistoryEntry(kind="youtube", played_at=_utc_now(), video=video))
 
+    def add_rumble(self, video: RumbleVideo) -> None:
+        self._add(PlayHistoryEntry(kind="rumble", played_at=_utc_now(), rumble=video))
+
     def _add(self, entry: PlayHistoryEntry) -> None:
         key = entry.key()
         kept = [existing for existing in self._entries if existing.key() != key]
@@ -168,6 +218,11 @@ class PlayHistory:
 
     def remove_youtube(self, video_id: str) -> None:
         key = f"youtube:{video_id}"
+        self._entries = [entry for entry in self._entries if entry.key() != key]
+        self.save()
+
+    def remove_rumble(self, page_url: str) -> None:
+        key = f"rumble:{page_url}"
         self._entries = [entry for entry in self._entries if entry.key() != key]
         self.save()
 

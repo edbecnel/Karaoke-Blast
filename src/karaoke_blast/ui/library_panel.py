@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 
 from karaoke_blast.models.play_history_entry import PlayHistoryEntry
 from karaoke_blast.models.queue_item import QueueItem
+from karaoke_blast.models.rumble_video import RumbleVideo
 from karaoke_blast.models.youtube_video import YouTubeVideo
 from karaoke_blast.ui.context_menu_style import CONTEXT_MENU_STYLE
 from karaoke_blast.ui.dialog_positioning import (
@@ -56,6 +57,7 @@ from karaoke_blast.utils.video_types import (
     VideoTypeProfile,
     find_video_type,
 )
+from karaoke_blast.utils.online_url import parse_pasted_online_url
 from karaoke_blast.utils.youtube_url import extract_video_id
 
 PANEL_DEFAULT_WIDTH = 320
@@ -196,6 +198,8 @@ class LibraryPanel(QWidget):
     queue_requested = pyqtSignal(object)
     youtube_play_requested = pyqtSignal(object)
     youtube_queue_requested = pyqtSignal(object)
+    rumble_play_requested = pyqtSignal(object)
+    rumble_queue_requested = pyqtSignal(object)
     download_requested = pyqtSignal(object)
     download_cancel_requested = pyqtSignal()
     download_open_requested = pyqtSignal(object)
@@ -598,18 +602,24 @@ class LibraryPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        header = QLabel("Paste YouTube URL")
+        header = QLabel("Paste YouTube or Rumble URL")
         header.setStyleSheet("color: white; font-size: 14px; font-weight: bold;")
         layout.addWidget(header)
 
+        hint = QLabel("Rumble plays in the embed player; download may need cookies.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #b8b8c8; font-size: 12px;")
+        layout.addWidget(hint)
+
         self._url_input = VisibleSpaceLineEdit()
-        self._url_input.setPlaceholderText("https://www.youtube.com/watch?v=…")
+        self._url_input.setPlaceholderText("YouTube or Rumble URL…")
         self._url_input.setClearButtonEnabled(True)
         self._url_input.setStyleSheet(INPUT_STYLE)
         palette = self._url_input.palette()
         palette.setColor(QPalette.ColorRole.Text, QColor("#ffffff"))
         palette.setColor(QPalette.ColorRole.PlaceholderText, QColor("#b8b8c8"))
         self._url_input.setPalette(palette)
+        self._url_input.returnPressed.connect(self._play_from_url)
         layout.addWidget(self._url_input)
 
         button_row = QHBoxLayout()
@@ -657,6 +667,17 @@ class LibraryPanel(QWidget):
     def _trigger_youtube_search(self) -> None:
         query = self._search.text().strip()
         if not query:
+            return
+        online = parse_pasted_online_url(query)
+        if online is not None:
+            if online.source == "youtube" and online.youtube is not None:
+                self.youtube_play_requested.emit(online.youtube)
+            elif online.source == "rumble" and online.rumble is not None:
+                self.rumble_play_requested.emit(online.rumble)
+            return
+        video = self._video_from_youtube_text(query)
+        if video is not None:
+            self.youtube_play_requested.emit(video)
             return
         self._search_panel.search_with_query(
             query,
@@ -758,11 +779,13 @@ class LibraryPanel(QWidget):
         *,
         current_local: Path | None = None,
         current_video_id: str | None = None,
+        current_rumble_url: str | None = None,
     ) -> None:
         self._history_list.set_history(
             entries,
             current_local=current_local,
             current_video_id=current_video_id,
+            current_rumble_url=current_rumble_url,
         )
 
     def set_library_root(self, root: Path | None) -> None:
@@ -867,30 +890,58 @@ class LibraryPanel(QWidget):
         self._edge_grip.raise_()
         self._edge_grip.setCursor(Qt.CursorShape.SizeHorCursor)
 
-    def _video_from_url_field(self) -> YouTubeVideo | None:
-        video_id = extract_video_id(self._url_input.text())
+    def _youtube_url_input_text(self) -> str:
+        text = self._url_input.text().strip()
+        if text:
+            return text
+        if self._tabs.currentIndex() == TAB_YOUTUBE:
+            return self._search.text().strip()
+        return ""
+
+    def _video_from_youtube_text(self, text: str) -> YouTubeVideo | None:
+        video_id = extract_video_id(text)
         if video_id is None:
-            self._url_status.setText("Enter a valid YouTube URL or video ID.")
+            return None
+        label = text.strip() or video_id
+        return YouTubeVideo(video_id=video_id, title=label, channel="YouTube")
+
+    def _online_from_url_field(self) -> tuple[str, YouTubeVideo | RumbleVideo] | None:
+        text = self._youtube_url_input_text()
+        online = parse_pasted_online_url(text)
+        if online is None:
+            self._url_status.setText("Enter a valid YouTube or Rumble URL.")
             self._url_status.setStyleSheet(_URL_ERROR_STYLE)
             return None
         self._url_status.clear()
-        return YouTubeVideo(
-            video_id=video_id,
-            title=self._url_input.text().strip() or video_id,
-            channel="YouTube",
-        )
+        if online.source == "youtube" and online.youtube is not None:
+            return ("youtube", online.youtube)
+        if online.source == "rumble" and online.rumble is not None:
+            return ("rumble", online.rumble)
+        return None
 
     def _play_from_url(self) -> None:
-        video = self._video_from_url_field()
-        if video is not None:
+        parsed = self._online_from_url_field()
+        if parsed is None:
+            return
+        kind, video = parsed
+        if kind == "youtube":
             self.youtube_play_requested.emit(video)
+        else:
+            self.rumble_play_requested.emit(video)
 
     def _queue_from_url(self) -> None:
-        video = self._video_from_url_field()
-        if video is not None:
+        parsed = self._online_from_url_field()
+        if parsed is None:
+            return
+        kind, video = parsed
+        if kind == "youtube":
             self.youtube_queue_requested.emit(video)
+        else:
+            self.rumble_queue_requested.emit(video)
 
     def _download_from_url(self) -> None:
-        video = self._video_from_url_field()
-        if video is not None:
-            self.download_requested.emit(video)
+        parsed = self._online_from_url_field()
+        if parsed is None:
+            return
+        _, video = parsed
+        self.download_requested.emit(video)

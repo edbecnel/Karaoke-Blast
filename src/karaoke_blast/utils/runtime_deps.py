@@ -287,6 +287,38 @@ def resolve_js_runtime(name: str) -> str | None:
     return None
 
 
+def _yt_dlp_search_dirs() -> list[str]:
+    if sys.platform == "darwin":
+        return ["/opt/homebrew/bin", "/usr/local/bin"]
+    return []
+
+
+def resolve_yt_dlp_binary() -> str | None:
+    """Return yt-dlp on PATH or in common install locations (GUI apps often lack Homebrew PATH)."""
+    found = shutil.which("yt-dlp")
+    if found:
+        return found
+    extra_dirs = _yt_dlp_search_dirs()
+    if extra_dirs:
+        found = shutil.which("yt-dlp", path=os.pathsep.join(extra_dirs))
+        if found:
+            return found
+    for directory in extra_dirs:
+        candidate = Path(directory) / "yt-dlp"
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def subprocess_path_env() -> dict[str, str]:
+    """Environment for subprocess tools so Homebrew binaries are visible."""
+    env = os.environ.copy()
+    extra = os.pathsep.join(_yt_dlp_search_dirs())
+    if extra:
+        env["PATH"] = extra + os.pathsep + env.get("PATH", "")
+    return env
+
+
 def resolve_js_runtimes() -> dict[str, dict[str, str]]:
     """Return yt-dlp js_runtimes config for Deno (preferred) and Node if found."""
     runtimes: dict[str, dict[str, str]] = {}

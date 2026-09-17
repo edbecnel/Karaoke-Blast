@@ -1,4 +1,4 @@
-"""Mixed play-queue entries for local files and YouTube videos."""
+"""Mixed play-queue entries for local files and online videos."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from karaoke_blast.models.rumble_video import RumbleVideo
 from karaoke_blast.models.youtube_video import YouTubeVideo
 
 
@@ -18,15 +19,18 @@ def _resolve_path(path: Path) -> Path:
 
 @dataclass(frozen=True)
 class QueueItem:
-    kind: Literal["local", "youtube"]
+    kind: Literal["local", "youtube", "rumble"]
     path: Path | None = None
     video: YouTubeVideo | None = None
+    rumble: RumbleVideo | None = None
 
     def key(self) -> str:
         if self.kind == "local" and self.path is not None:
             return f"local:{_resolve_path(self.path)}"
         if self.kind == "youtube" and self.video is not None:
             return f"youtube:{self.video.video_id}"
+        if self.kind == "rumble" and self.rumble is not None:
+            return f"rumble:{self.rumble.page_url}"
         raise ValueError("Invalid queue item")
 
 
@@ -55,6 +59,9 @@ class MixedQueue:
 
     def enqueue_youtube(self, video: YouTubeVideo) -> bool:
         return self.enqueue(QueueItem(kind="youtube", video=video))
+
+    def enqueue_rumble(self, video: RumbleVideo) -> bool:
+        return self.enqueue(QueueItem(kind="rumble", rumble=video))
 
     def dequeue(self) -> QueueItem | None:
         if not self._items:
@@ -87,6 +94,10 @@ class MixedQueue:
         key = f"youtube:{video_id}"
         self._items = [item for item in self._items if item.key() != key]
 
+    def remove_rumble(self, page_url: str) -> None:
+        key = f"rumble:{page_url}"
+        self._items = [item for item in self._items if item.key() != key]
+
     def clear(self) -> None:
         self._items.clear()
 
@@ -113,4 +124,8 @@ class MixedQueue:
 
     def contains_youtube(self, video_id: str) -> bool:
         key = f"youtube:{video_id}"
+        return any(item.key() == key for item in self._items)
+
+    def contains_rumble(self, page_url: str) -> bool:
+        key = f"rumble:{page_url}"
         return any(item.key() == key for item in self._items)

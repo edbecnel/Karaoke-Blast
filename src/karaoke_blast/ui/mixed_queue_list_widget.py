@@ -72,6 +72,10 @@ class MixedQueueListWidget(QListWidget):
             duration = format_duration(item.video.duration_seconds)
             suffix = f" ({duration})" if duration else ""
             return f"▶︎ {item.video.title}{suffix}"
+        if item.kind == "rumble" and item.rumble is not None:
+            duration = format_duration(item.rumble.duration_seconds)
+            suffix = f" ({duration})" if duration else ""
+            return f"▶︎ {item.rumble.title}{suffix}"
         return "Unknown"
 
     def _secondary_line(self, item: QueueItem) -> str:
@@ -79,6 +83,8 @@ class MixedQueueListWidget(QListWidget):
             return str(item.path)
         if item.kind == "youtube" and item.video is not None:
             return item.video.channel
+        if item.kind == "rumble" and item.rumble is not None:
+            return "Rumble"
         return ""
 
     def _add_row(
@@ -149,6 +155,14 @@ class MixedQueueListWidget(QListWidget):
             menu.addAction(download)
             copy_url = QAction("Copy URL", self)
             copy_url.triggered.connect(lambda: copy_text_to_clipboard(video.watch_url))
+            menu.addAction(copy_url)
+        if item.kind == "rumble" and item.rumble is not None:
+            rumble = item.rumble
+            download = QAction("Download", self)
+            download.triggered.connect(lambda: self.download_requested.emit(rumble))
+            menu.addAction(download)
+            copy_url = QAction("Copy URL", self)
+            copy_url.triggered.connect(lambda: copy_text_to_clipboard(rumble.page_url))
             menu.addAction(copy_url)
 
         menu.exec(self.mapToGlobal(pos))

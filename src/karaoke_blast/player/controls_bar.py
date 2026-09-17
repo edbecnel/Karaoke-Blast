@@ -266,18 +266,19 @@ class ControlsBar(QWidget):
         return value
 
     def set_media_mode(self, mode: MediaSourceMode) -> None:
-        youtube = mode == MediaSourceMode.YOUTUBE
+        youtube_embed = mode == MediaSourceMode.YOUTUBE
+        rumble = mode == MediaSourceMode.RUMBLE
+        self._play_pause_btn.setVisible(not youtube_embed)
         for widget in (
-            self._play_pause_btn,
             self._prev_btn,
             self._rewind_btn,
             self._forward_btn,
         ):
-            widget.setVisible(not youtube)
+            widget.setVisible(not youtube_embed and not rumble)
         self._next_btn.setEnabled(True)
         self._stop_btn.setEnabled(True)
         self._list_btn.setToolTip(
-            "YouTube panel (L)" if youtube else "Song list (L)"
+            "YouTube panel (L)" if mode == MediaSourceMode.YOUTUBE else "Song list (L)"
         )
 
     def show_bar(self) -> None:

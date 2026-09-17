@@ -24,15 +24,25 @@ from karaoke_blast.models.playlist import Playlist
 from karaoke_blast.models.play_history_entry import PlayHistoryEntry
 from karaoke_blast.models.queue_item import MixedQueue, QueueItem
 from karaoke_blast.models.sort_strategy import SortStrategy, sort_paths
+from karaoke_blast.models.rumble_video import RumbleVideo
 from karaoke_blast.models.youtube_video import YouTubeVideo
 from karaoke_blast.player.controls_bar import ControlsBar
 from karaoke_blast.player.seek_bar import SeekBar
 from karaoke_blast.player.video_widget import VideoWidget
 from karaoke_blast.player.vlc_player import SEEK_STEP_MS, VlcPlayer
+from karaoke_blast.player.rumble_player import RumblePlayer
+from karaoke_blast.player.rumble_widget import RumbleWidget
 from karaoke_blast.player.youtube_player import YouTubePlayer
 from karaoke_blast.player.youtube_widget import YouTubeWidget
+from karaoke_blast.services.rumble_download import start_rumble_download
+from karaoke_blast.services.rumble_download_worker import downloaded_file_for as rumble_downloaded_file_for
+from karaoke_blast.services.rumble_play import start_rumble_prepare
 from karaoke_blast.services.youtube_download_worker import downloaded_file_for
 from karaoke_blast.services.youtube_download import start_download
+from karaoke_blast.services.youtube_stream import (
+    YouTubeStreamPlayback,
+    start_youtube_stream,
+)
 from karaoke_blast.storage.downloads_folder_history import DownloadsFolderHistory
 from karaoke_blast.storage.folder_history import FolderHistory
 from karaoke_blast.storage.folder_queues import FolderQueues
@@ -133,8 +143,10 @@ class MainWindow(QWidget):
         self._play_history = PlayHistory()
         self._media_mode = MediaSourceMode.LOCAL
         self._current_youtube: YouTubeVideo | None = None
+        self._current_rumble: RumbleVideo | None = None
         self._current_queue_item: QueueItem | None = None
         self._youtube_stopped = True
+        self._rumble_stopped = True
         self._external_path: Path | None = None
         self._folder_history = FolderHistory()
         self._folder_queues = FolderQueues()
@@ -146,6 +158,13 @@ class MainWindow(QWidget):
         self._download_worker = None
         self._downloading_video_id: str | None = None
         self._downloading_video: YouTubeVideo | None = None
+        self._downloading_rumble_url: str | None = None
+        self._downloading_rumble: RumbleVideo | None = None
+        self._stream_thread: QThread | None = None
+        self._stream_worker = None
+        self._rumble_prepare_thread: QThread | None = None
+        self._rumble_prepare_worker = None
+        self._youtube_vlc_active = False
 
         self._stack = QStackedWidget()
         self._cursor_toggle = ManualCursorToggle()
@@ -164,6 +183,7 @@ class MainWindow(QWidget):
 
         self._vlc: VlcPlayer | None = None
         self._youtube_player: YouTubePlayer | None = None
+        self._rumble_player: RumblePlayer | None = None
         self._setup_shortcuts()
 
         self._overlay_timer = QTimer(self)
@@ -211,6 +231,8 @@ class MainWindow(QWidget):
             return False
         if self._media_mode == MediaSourceMode.YOUTUBE:
             return not self._youtube_stopped and self._current_youtube is not None
+        if self._media_mode == MediaSourceMode.RUMBLE:
+            return not self._rumble_stopped and self._current_rumble is not None
         return self._vlc is not None and not self._stopped
 
     def _toggle_cursor_visibility(self) -> None:
@@ -236,6 +258,15 @@ class MainWindow(QWidget):
         )
         self._youtube_player.playback_error.connect(
             self._on_youtube_playback_error, Qt.ConnectionType.QueuedConnection
+        )
+        return True
+
+    def _ensure_rumble(self) -> bool:
+        if self._rumble_player is not None:
+            return True
+        self._rumble_player = RumblePlayer(self._rumble_widget)
+        self._rumble_player.playback_error.connect(
+            self._on_rumble_playback_error, Qt.ConnectionType.QueuedConnection
         )
         return True
 
@@ -585,11 +616,13 @@ class MainWindow(QWidget):
         self._library_panel.queue_requested.connect(self._on_queue_item_queue_requested)
         self._library_panel.youtube_play_requested.connect(self._on_youtube_play_requested)
         self._library_panel.youtube_queue_requested.connect(self._on_youtube_queue_requested)
+        self._library_panel.rumble_play_requested.connect(self._on_rumble_play_requested)
+        self._library_panel.rumble_queue_requested.connect(self._on_rumble_queue_requested)
         self._library_panel.remove_from_queue_requested.connect(self._on_remove_queue_item)
         self._library_panel.clear_queue_requested.connect(self._on_clear_queue)
         self._library_panel.queue_reordered.connect(self._on_queue_reordered)
         self._library_panel.search_backend_fallback.connect(self._show_toast)
-        self._library_panel.download_requested.connect(self._on_youtube_download_requested)
+        self._library_panel.download_requested.connect(self._on_online_download_requested)
         self._library_panel.download_cancel_requested.connect(
             self._on_youtube_download_cancel_requested
         )
@@ -628,6 +661,7 @@ class MainWindow(QWidget):
         self._canvas_stack = QStackedWidget(self._video_container)
         self._video_widget = VideoWidget(self._canvas_stack)
         self._youtube_widget = YouTubeWidget(self._canvas_stack)
+        self._rumble_widget = RumbleWidget(self._canvas_stack)
         self._message_page = QWidget(self._canvas_stack)
         self._message_page.setStyleSheet("background-color: #000000;")
         self._message_page.setMouseTracking(True)
@@ -642,6 +676,7 @@ class MainWindow(QWidget):
         message_layout.addWidget(self._message_label)
         self._canvas_stack.addWidget(self._video_widget)
         self._canvas_stack.addWidget(self._youtube_widget)
+        self._canvas_stack.addWidget(self._rumble_widget)
         self._canvas_stack.addWidget(self._message_page)
         self._canvas_stack.setCurrentWidget(self._video_widget)
 
@@ -687,6 +722,7 @@ class MainWindow(QWidget):
                 self._canvas_stack,
                 self._video_widget,
                 self._youtube_widget,
+                self._rumble_widget,
                 self._message_page,
             )
         )
@@ -713,12 +749,24 @@ class MainWindow(QWidget):
         if self._media_mode == MediaSourceMode.LOCAL:
             self._freeze_local_playback()
         elif self._media_mode == MediaSourceMode.YOUTUBE:
+            self._cancel_youtube_stream()
             if self._youtube_player is not None:
                 self._youtube_player.stop()
+            if self._vlc is not None:
+                self._vlc.stop()
+            self._youtube_vlc_active = False
             self._current_youtube = None
             self._current_queue_item = None
             self._youtube_stopped = True
             self._controls.set_playing(False)
+            self._stop_seek_updates()
+            self._update_queue_display()
+            self._library_panel.clear_messages()
+        elif self._media_mode == MediaSourceMode.RUMBLE:
+            self._stop_rumble_playback()
+            self._current_queue_item = None
+            self._controls.set_playing(False)
+            self._stop_seek_updates()
             self._update_queue_display()
             self._library_panel.clear_messages()
         self._hide_side_panel()
@@ -890,6 +938,7 @@ class MainWindow(QWidget):
         self._canvas_stack.setGeometry(left, 0, width, h)
         self._video_widget.setGeometry(0, 0, width, h)
         self._youtube_widget.setGeometry(0, 0, width, h)
+        self._rumble_widget.setGeometry(0, 0, width, h)
         self._message_page.setGeometry(0, 0, width, h)
         self._reposition_overlay()
         if self._list_visible:
@@ -903,15 +952,21 @@ class MainWindow(QWidget):
 
     def _hide_status_message(self) -> None:
         self._message_label.clear()
-        if self._media_mode == MediaSourceMode.YOUTUBE:
-            self._canvas_stack.setCurrentWidget(self._youtube_widget)
-        else:
-            self._canvas_stack.setCurrentWidget(self._video_widget)
-            if (
-                self._vlc is not None
-                and self._stack.currentWidget() == self._player_page
-            ):
-                QTimer.singleShot(0, self._vlc.bind_output)
+        if (
+            self._media_mode == MediaSourceMode.RUMBLE
+            and not self._rumble_stopped
+            and self._current_rumble is not None
+        ):
+            self._canvas_stack.setCurrentWidget(self._rumble_widget)
+            return
+        # YouTube playback streams through VLC on the native video widget, not WebEngine.
+        self._canvas_stack.setCurrentWidget(self._video_widget)
+        if (
+            self._vlc is not None
+            and self._stack.currentWidget() == self._player_page
+        ):
+            QTimer.singleShot(0, self._vlc.bind_output)
+            QTimer.singleShot(100, self._vlc.bind_output)
 
     def _show_audio_title(self, path: Path) -> None:
         """Show a persistent centered title while an audio file plays."""
@@ -1022,14 +1077,18 @@ class MainWindow(QWidget):
     def _show_controls(self) -> None:
         if self._stack.currentWidget() != self._player_page:
             return
-        if self._media_mode == MediaSourceMode.YOUTUBE:
+        if self._media_mode == MediaSourceMode.RUMBLE or (
+            self._media_mode == MediaSourceMode.YOUTUBE and not self._youtube_vlc_active
+        ):
             self._seek_bar.hide()
         else:
             self._seek_bar.show()
         self._controls.show()
         self._sync_controls_reveal_polling()
         self._reposition_video_ui()
-        if self._vlc is not None and self._media_mode == MediaSourceMode.LOCAL:
+        if self._vlc is not None and (
+            self._media_mode == MediaSourceMode.LOCAL or self._youtube_vlc_active
+        ):
             QTimer.singleShot(0, self._vlc.bind_output)
         if self._settings.controls_auto_hide:
             self._controls_timer.start(CONTROLS_HIDE_MS)
@@ -1044,7 +1103,11 @@ class MainWindow(QWidget):
         self._seek_timer.stop()
 
     def _update_seek_position(self) -> None:
-        if self._vlc is None or self._stopped or self._seek_bar.is_scrubbing():
+        if self._vlc is None or self._seek_bar.is_scrubbing():
+            return
+        if self._media_mode == MediaSourceMode.LOCAL and self._stopped:
+            return
+        if self._media_mode == MediaSourceMode.YOUTUBE and not self._youtube_vlc_playback_active():
             return
         length = self._vlc.get_length()
         if length > 0:
@@ -1054,7 +1117,11 @@ class MainWindow(QWidget):
                 self._seek_bar.set_position(position)
 
     def _on_seek_requested(self, position_ms: int) -> None:
-        if self._vlc is None or self._stopped:
+        if self._vlc is None:
+            return
+        if self._media_mode == MediaSourceMode.LOCAL and self._stopped:
+            return
+        if self._media_mode == MediaSourceMode.YOUTUBE and not self._youtube_vlc_playback_active():
             return
         self._vlc.set_time(position_ms)
         self._seek_bar.set_position(position_ms)
@@ -1475,11 +1542,16 @@ class MainWindow(QWidget):
         self._library_panel.set_active_tab(tab)
 
     def _prepare_local_playback(self, *, stop_youtube: bool) -> None:
-        if stop_youtube and self._youtube_player is not None:
-            self._youtube_player.stop()
+        if stop_youtube:
+            self._cancel_youtube_stream()
+            if self._youtube_player is not None:
+                self._youtube_player.stop()
             self._current_youtube = None
             self._youtube_stopped = True
+            self._youtube_vlc_active = False
+            self._stop_rumble_playback()
         self._media_mode = MediaSourceMode.LOCAL
+        self._video_widget.show()
         self._canvas_stack.setCurrentWidget(self._video_widget)
         self._controls.set_media_mode(MediaSourceMode.LOCAL)
         self._stack.setCurrentWidget(self._player_page)
@@ -1490,13 +1562,70 @@ class MainWindow(QWidget):
         self._reposition_video_ui()
 
     def _prepare_youtube_playback(self) -> None:
+        if self._youtube_player is not None:
+            self._youtube_player.stop()
+        self._stop_rumble_playback()
         self._freeze_local_playback()
+        self._youtube_vlc_active = False
         self._media_mode = MediaSourceMode.YOUTUBE
-        self._canvas_stack.setCurrentWidget(self._youtube_widget)
+        self._video_widget.show()
+        self._canvas_stack.setCurrentWidget(self._video_widget)
         self._controls.set_media_mode(MediaSourceMode.YOUTUBE)
         self._stack.setCurrentWidget(self._player_page)
         self.showFullScreen()
         self._sync_fullscreen_control()
+        if self._vlc is not None:
+            self._vlc.bind_output()
+
+    def _cancel_youtube_stream(self) -> None:
+        worker = self._stream_worker
+        if worker is not None:
+            worker.request_cancel()
+        thread = self._stream_thread
+        if thread is not None and thread.isRunning():
+            thread.quit()
+        self._stream_worker = None
+        self._stream_thread = None
+
+    def _cancel_rumble_prepare(self) -> None:
+        thread = self._rumble_prepare_thread
+        if thread is not None and thread.isRunning():
+            thread.quit()
+        self._rumble_prepare_worker = None
+        self._rumble_prepare_thread = None
+
+    def _stop_rumble_playback(self) -> None:
+        self._cancel_rumble_prepare()
+        if self._rumble_player is not None:
+            self._rumble_player.stop()
+        self._current_rumble = None
+        self._rumble_stopped = True
+        self._video_widget.show()
+
+    def _prepare_rumble_playback(self) -> None:
+        self._cancel_youtube_stream()
+        if self._youtube_player is not None:
+            self._youtube_player.stop()
+        self._youtube_vlc_active = False
+        self._current_youtube = None
+        self._youtube_stopped = True
+        if self._vlc is not None:
+            self._vlc.stop()
+        self._freeze_local_playback()
+        self._media_mode = MediaSourceMode.RUMBLE
+        self._controls.set_media_mode(MediaSourceMode.RUMBLE)
+        # macOS: native VLC view can steal clicks from WebEngine while still in the stack.
+        self._video_widget.hide()
+        self._stack.setCurrentWidget(self._player_page)
+        self.showFullScreen()
+        self._sync_fullscreen_control()
+
+    def _youtube_vlc_playback_active(self) -> bool:
+        return (
+            self._media_mode == MediaSourceMode.YOUTUBE
+            and not self._youtube_stopped
+            and self._youtube_vlc_active
+        )
 
     def _enter_youtube_mode(self) -> None:
         self._prepare_youtube_playback()
@@ -1517,6 +1646,10 @@ class MainWindow(QWidget):
             if not self._youtube_stopped and self._current_youtube is not None:
                 return QueueItem(kind="youtube", video=self._current_youtube)
             return None
+        if self._media_mode == MediaSourceMode.RUMBLE:
+            if not self._rumble_stopped and self._current_rumble is not None:
+                return QueueItem(kind="rumble", rumble=self._current_rumble)
+            return None
         if not self._stopped:
             path = self._external_path or self._playlist.current()
             if path is not None:
@@ -1530,15 +1663,21 @@ class MainWindow(QWidget):
             current_local = self._external_path or self._playlist.current()
         elif not self._youtube_stopped and self._current_youtube is not None:
             current_video_id = self._current_youtube.video_id
+        current_rumble_url = None
+        if not self._rumble_stopped and self._current_rumble is not None:
+            current_rumble_url = self._current_rumble.page_url
         self._library_panel.set_history(
             self._play_history.entries(),
             current_local=current_local,
             current_video_id=current_video_id,
+            current_rumble_url=current_rumble_url,
         )
 
     def _is_idle(self) -> bool:
         if self._media_mode == MediaSourceMode.YOUTUBE:
             return self._youtube_stopped and self._current_youtube is None
+        if self._media_mode == MediaSourceMode.RUMBLE:
+            return self._rumble_stopped and self._current_rumble is None
         return self._stopped and self._external_path is None
 
     def _enqueue_interrupted_playback(self, incoming: QueueItem) -> None:
@@ -1550,6 +1689,9 @@ class MainWindow(QWidget):
             self._enqueue_interrupted_playback(item)
         if item.kind == "youtube" and item.video is not None:
             self._play_youtube(item.video, interrupt=False)
+            return
+        if item.kind == "rumble" and item.rumble is not None:
+            self._play_rumble(item.rumble, interrupt=False)
             return
         if item.kind == "local" and item.path is not None:
             self._play_local_path(item.path, interrupt=False)
@@ -1573,6 +1715,8 @@ class MainWindow(QWidget):
     def _queue_item_label(self, item: QueueItem) -> str:
         if item.kind == "youtube" and item.video is not None:
             return item.video.title
+        if item.kind == "rumble" and item.rumble is not None:
+            return item.rumble.title
         if item.kind == "local" and item.path is not None:
             return display_name(item.path)
         return "item"
@@ -1625,39 +1769,187 @@ class MainWindow(QWidget):
         )
 
     def _play_youtube(self, video: YouTubeVideo, *, interrupt: bool = True) -> None:
-        if not self._ensure_youtube():
+        if not self._ensure_vlc():
             return
         incoming = QueueItem(kind="youtube", video=video)
         if interrupt:
             self._enqueue_interrupted_playback(incoming)
+        self._cancel_youtube_stream()
         self._prepare_youtube_playback()
         self._show_side_panel()
         self._current_youtube = video
         self._current_queue_item = QueueItem(kind="youtube", video=video)
         self._youtube_stopped = False
+        self._stopped = False
+        self._youtube_vlc_active = False
         self._message_label.clear()
         if self._mixed_queue.contains(self._current_queue_item):
             self._mixed_queue.remove(self._current_queue_item)
-        self._youtube_player.play(
-            video,
-            volume=self._settings.volume,
-            muted=self._settings.muted,
+        self._clear_audio_title()
+        self._show_status_message("Loading YouTube stream…")
+        self._controls.set_playing(False)
+        self._stop_seek_updates()
+        self._seek_bar.reset()
+        self._update_queue_display()
+        self._show_controls()
+        self._raise_ui_layers()
+        self._sync_sleep_inhibition()
+        self._stream_thread, self._stream_worker = start_youtube_stream(
+            video=video,
+            on_ready=self._on_youtube_stream_ready,
+            on_failed=self._on_youtube_stream_failed,
+            parent=self,
         )
+
+    def _on_youtube_stream_ready(self, playback: object, video: object) -> None:
+        self._stream_worker = None
+        self._stream_thread = None
+        if not isinstance(video, YouTubeVideo):
+            return
+        if not isinstance(playback, YouTubeStreamPlayback):
+            return
+        if self._youtube_stopped or self._current_youtube is None:
+            return
+        if self._current_youtube.video_id != video.video_id:
+            return
+        if self._vlc is None:
+            return
+        self._youtube_vlc_active = True
+        self._hide_status_message()
+        self._vlc.play(playback.url, http_headers=playback.http_headers)
+        self._apply_saved_audio()
         self._play_history.add_youtube(video)
         self._update_history_display()
         self._controls.set_playing(True)
-        self._stop_seek_updates()
-        self._update_queue_display()
+        self._start_seek_updates()
         self._show_youtube_overlay()
         self._show_controls()
         self._raise_ui_layers()
         self._sync_sleep_inhibition()
+
+    def _on_youtube_stream_failed(self, video_id: str, message: str) -> None:
+        self._stream_worker = None
+        self._stream_thread = None
+        if self._current_youtube is not None and self._current_youtube.video_id != video_id:
+            return
+        logger.warning("YouTube stream failed for %s: %s", video_id, message)
+        self._youtube_vlc_active = False
+        self._hide_status_message()
+        self._show_toast(message, duration_ms=6000)
+        self._finish_youtube_playback()
 
     def _on_youtube_play_requested(self, video: YouTubeVideo) -> None:
         self._play_youtube(video)
 
     def _on_youtube_queue_requested(self, video: YouTubeVideo) -> None:
         self._queue_item(QueueItem(kind="youtube", video=video))
+
+    def _play_rumble(self, video: RumbleVideo, *, interrupt: bool = True) -> None:
+        if not self._ensure_rumble():
+            return
+        incoming = QueueItem(kind="rumble", rumble=video)
+        if interrupt:
+            self._enqueue_interrupted_playback(incoming)
+        self._prepare_rumble_playback()
+        self._show_side_panel()
+        self._current_rumble = video
+        self._current_queue_item = QueueItem(kind="rumble", rumble=video)
+        self._rumble_stopped = False
+        self._stopped = False
+        self._message_label.clear()
+        if self._mixed_queue.contains(self._current_queue_item):
+            self._mixed_queue.remove(self._current_queue_item)
+        self._clear_audio_title()
+        self._show_status_message(
+            "Loading Rumble video… (may take up to 30 seconds while Rumble is contacted)"
+        )
+        self._controls.set_playing(False)
+        self._stop_seek_updates()
+        self._seek_bar.reset()
+        self._update_queue_display()
+        self._show_controls()
+        self._raise_ui_layers()
+        self._sync_sleep_inhibition()
+        self._cancel_rumble_prepare()
+        self._rumble_prepare_thread, self._rumble_prepare_worker = start_rumble_prepare(
+            video=video,
+            on_ready=self._on_rumble_prepare_ready,
+            on_failed=self._on_rumble_prepare_failed,
+            parent=self,
+        )
+
+    def _on_rumble_prepare_ready(self, enriched: object, original: object) -> None:
+        self._rumble_prepare_worker = None
+        self._rumble_prepare_thread = None
+        if not isinstance(enriched, RumbleVideo) or not isinstance(original, RumbleVideo):
+            return
+        if self._rumble_stopped or self._current_rumble is None:
+            return
+        if self._current_rumble.page_url != original.page_url:
+            return
+        if self._rumble_player is None:
+            return
+        self._current_rumble = enriched
+        self._current_queue_item = QueueItem(kind="rumble", rumble=enriched)
+        self._rumble_player.play(enriched)
+        self._play_history.add_rumble(enriched)
+        self._update_history_display()
+        self._hide_status_message()
+        self._canvas_stack.setCurrentWidget(self._rumble_widget)
+        self._rumble_widget.show()
+        self._rumble_widget.raise_()
+        self._controls.set_playing(True)
+        self._overlay.hide()
+        self._show_controls()
+        QTimer.singleShot(0, self._rumble_widget.setFocus)
+        self._sync_sleep_inhibition()
+
+    def _on_rumble_prepare_failed(self, page_url: str, message: str) -> None:
+        self._rumble_prepare_worker = None
+        self._rumble_prepare_thread = None
+        if self._current_rumble is not None and self._current_rumble.page_url != page_url:
+            return
+        logger.warning("Rumble prepare failed for %s: %s", page_url, message)
+        self._show_toast(message, duration_ms=6000)
+        self._finish_rumble_playback()
+
+    def _on_rumble_play_requested(self, video: RumbleVideo) -> None:
+        self._play_rumble(video)
+
+    def _on_rumble_queue_requested(self, video: RumbleVideo) -> None:
+        self._queue_item(QueueItem(kind="rumble", rumble=video))
+
+    def _finish_rumble_playback(self) -> None:
+        if self._rumble_stopped:
+            return
+        if not self._advance_playback():
+            self._stop_rumble_playback()
+            self._current_queue_item = None
+            self._controls.set_playing(False)
+            self._stop_seek_updates()
+            self._seek_bar.reset()
+            self._update_queue_display()
+            self._update_history_display()
+            self._hide_status_message()
+            self._show_status_message("Paste another YouTube or Rumble URL")
+            self._sync_sleep_inhibition()
+
+    def _on_rumble_playback_error(self, message: str) -> None:
+        logger.warning("Rumble playback error: %s", message)
+        self._show_toast(message, duration_ms=5000)
+
+    def _show_rumble_overlay(self) -> None:
+        if self._current_rumble is None:
+            return
+        text = self._current_rumble.title
+        if self._mixed_queue:
+            text += f"  ·  {len(self._mixed_queue)} queued"
+        self._overlay_corner = "bottom-center"
+        self._overlay.setText(text)
+        self._overlay.show()
+        self._overlay.raise_()
+        self._reposition_overlay()
+        self._overlay_timer.start(OVERLAY_HIDE_MS)
 
     def _show_youtube_overlay(self) -> None:
         if self._current_youtube is None:
@@ -1688,9 +1980,14 @@ class MainWindow(QWidget):
             return
         if not self._advance_playback():
             self._youtube_stopped = True
+            self._youtube_vlc_active = False
             self._current_youtube = None
             self._current_queue_item = None
+            if self._vlc is not None:
+                self._vlc.stop()
             self._controls.set_playing(False)
+            self._stop_seek_updates()
+            self._seek_bar.reset()
             self._update_queue_display()
             self._update_history_display()
             self._show_status_message("Search for another song")
@@ -1820,6 +2117,9 @@ class MainWindow(QWidget):
             return
         if entry.kind == "youtube" and entry.video is not None:
             self._play_youtube(entry.video)
+            return
+        if entry.kind == "rumble" and entry.rumble is not None:
+            self._play_rumble(entry.rumble)
 
     def _on_history_queue_requested(self, entry: PlayHistoryEntry) -> None:
         if entry.kind == "local" and entry.path is not None:
@@ -1830,6 +2130,9 @@ class MainWindow(QWidget):
             return
         if entry.kind == "youtube" and entry.video is not None:
             self._queue_item(QueueItem(kind="youtube", video=entry.video))
+            return
+        if entry.kind == "rumble" and entry.rumble is not None:
+            self._queue_item(QueueItem(kind="rumble", rumble=entry.rumble))
 
     def _on_play_next_requested(self, path: Path) -> None:
         self._queue_item(QueueItem(kind="local", path=path))
@@ -1903,6 +2206,12 @@ class MainWindow(QWidget):
         self._library_panel.clear_local_search()
         self._navigate_to_song_path(path)
 
+    def _on_online_download_requested(self, video: object) -> None:
+        if isinstance(video, YouTubeVideo):
+            self._on_youtube_download_requested(video)
+        elif isinstance(video, RumbleVideo):
+            self._on_rumble_download_requested(video)
+
     def _on_youtube_download_requested(self, video: YouTubeVideo) -> None:
         if self._download_thread is not None and self._download_thread.isRunning():
             if self._downloading_video_id == video.video_id:
@@ -1939,7 +2248,73 @@ class MainWindow(QWidget):
             on_cancelled=self._on_youtube_download_cancelled,
             parent=self,
         )
-        self._download_thread.finished.connect(self._on_youtube_download_thread_finished)
+        self._download_thread.finished.connect(self._on_online_download_thread_finished)
+
+    def _on_rumble_download_requested(self, video: RumbleVideo) -> None:
+        if self._download_thread is not None and self._download_thread.isRunning():
+            if self._downloading_rumble_url == video.page_url:
+                return
+            self._show_toast("A download is already in progress.", duration_ms=4000)
+            return
+
+        output_dir = self._youtube_downloads_path()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        existing = rumble_downloaded_file_for(
+            video.page_video_id, video.page_url, output_dir
+        )
+        if existing is not None:
+            self._sync_library_after_download(existing.parent)
+            self._library_panel.show_download_success(
+                video.title,
+                message=f"Already downloaded: {existing.name}",
+                path=existing,
+            )
+            self._show_toast(
+                f"Downloaded: {existing.name}",
+                duration_ms=5000,
+                corner="top-right",
+            )
+            return
+
+        self._downloading_rumble_url = video.page_url
+        self._downloading_rumble = video
+        self._library_panel.show_downloading(video.title)
+        self._download_thread, self._download_worker = start_rumble_download(
+            video=video,
+            output_dir=output_dir,
+            on_progress=self._on_youtube_download_progress,
+            on_finished=self._on_rumble_download_finished,
+            on_failed=self._on_rumble_download_failed,
+            on_cancelled=self._on_rumble_download_cancelled,
+            parent=self,
+        )
+        self._download_thread.finished.connect(self._on_online_download_thread_finished)
+
+    def _on_rumble_download_finished(self, path: Path, video: RumbleVideo) -> None:
+        self._folder_history.add(self._youtube_downloads_path())
+        self._refresh_recent_folders()
+        self._sync_library_after_download(path.parent)
+        self._library_panel.show_download_success(
+            video.title,
+            message=f"Saved: {path.name}",
+            path=path,
+        )
+        self._show_toast(
+            f"Downloaded: {path.name}",
+            duration_ms=5000,
+            corner="top-right",
+        )
+
+    def _on_rumble_download_failed(self, page_url: str, message: str) -> None:
+        title = self._downloading_rumble.title if self._downloading_rumble else page_url
+        self._library_panel.show_download_error(title, message)
+        self._show_toast(f"Download failed: {message}", duration_ms=6000)
+
+    def _on_rumble_download_cancelled(self, page_url: str) -> None:
+        if self._downloading_rumble_url != page_url:
+            return
+        self._library_panel.reset_download_status()
+        self._show_toast("Download cancelled", duration_ms=4000)
 
     def _on_youtube_download_cancel_requested(self) -> None:
         worker = self._download_worker
@@ -2042,11 +2417,13 @@ class MainWindow(QWidget):
         self._library_panel.show_download_error(title, message)
         self._show_toast(f"Download failed: {message}", duration_ms=6000)
 
-    def _on_youtube_download_thread_finished(self) -> None:
+    def _on_online_download_thread_finished(self) -> None:
         self._download_thread = None
         self._download_worker = None
         self._downloading_video_id = None
         self._downloading_video = None
+        self._downloading_rumble_url = None
+        self._downloading_rumble = None
 
     def _on_song_selected(self, index: int) -> None:
         if not self._ensure_vlc():
@@ -2693,6 +3070,9 @@ class MainWindow(QWidget):
 
     def _on_end_reached(self) -> None:
         # Defer so libvlc can finish tearing down the previous media before set_media().
+        if self._youtube_vlc_playback_active():
+            QTimer.singleShot(50, self._finish_youtube_playback)
+            return
         QTimer.singleShot(50, self._advance_to_next_track)
 
     def _advance_to_next_track(self) -> bool:
@@ -2706,6 +3086,10 @@ class MainWindow(QWidget):
 
     def _on_playback_error(self, message: str) -> None:
         logger.warning("Playback error: %s", message)
+        if self._youtube_vlc_playback_active():
+            self._show_toast(message, duration_ms=6000)
+            self._finish_youtube_playback()
+            return
         if self._advance_to_next_track():
             return
         QMessageBox.warning(
@@ -2800,7 +3184,13 @@ class MainWindow(QWidget):
         self._folder_queues.set(self._folder, queue=queue, current=current)
 
     def _on_play(self) -> None:
-        if self._media_mode == MediaSourceMode.YOUTUBE:
+        if self._media_mode == MediaSourceMode.RUMBLE:
+            if self._rumble_player is not None:
+                self._rumble_player.activate_playback()
+            self._controls.set_playing(True)
+            self._sync_sleep_inhibition()
+            return
+        if self._media_mode == MediaSourceMode.YOUTUBE and not self._youtube_vlc_playback_active():
             return
         if self._vlc is None:
             return
@@ -2816,7 +3206,13 @@ class MainWindow(QWidget):
         self._sync_sleep_inhibition()
 
     def _on_pause(self) -> None:
-        if self._media_mode == MediaSourceMode.YOUTUBE:
+        if self._media_mode == MediaSourceMode.RUMBLE:
+            if self._rumble_player is not None:
+                self._rumble_player.pause_playback()
+            self._controls.set_playing(False)
+            self._sync_sleep_inhibition()
+            return
+        if self._media_mode == MediaSourceMode.YOUTUBE and not self._youtube_vlc_playback_active():
             return
         if self._vlc is not None:
             self._vlc.pause()
@@ -2825,7 +3221,14 @@ class MainWindow(QWidget):
         self._sync_sleep_inhibition()
 
     def _toggle_play_pause(self) -> None:
-        if self._media_mode == MediaSourceMode.YOUTUBE:
+        if self._media_mode == MediaSourceMode.RUMBLE:
+            if self._rumble_player is not None:
+                self._rumble_player.toggle_playback()
+            was_playing = self._controls._play_pause_btn.toolTip().startswith("Pause")
+            self._controls.set_playing(not was_playing)
+            self._sync_sleep_inhibition()
+            return
+        if self._media_mode == MediaSourceMode.YOUTUBE and not self._youtube_vlc_playback_active():
             return
         if self._vlc is not None and self._vlc.is_playing():
             self._on_pause()
@@ -2863,15 +3266,35 @@ class MainWindow(QWidget):
 
     def _on_stop(self) -> None:
         if self._media_mode == MediaSourceMode.YOUTUBE:
+            self._cancel_youtube_stream()
             self._youtube_stopped = True
+            self._youtube_vlc_active = False
             self._current_youtube = None
             self._current_queue_item = None
             if self._youtube_player is not None:
                 self._youtube_player.stop()
+            if self._vlc is not None:
+                self._vlc.stop()
             self._controls.set_playing(False)
+            self._stop_seek_updates()
+            self._seek_bar.reset()
+            self._hide_status_message()
             self._update_queue_display()
             self._update_history_display()
             self._show_status_message("Search for another song")
+            self._show_controls()
+            self._sync_sleep_inhibition()
+            return
+        if self._media_mode == MediaSourceMode.RUMBLE:
+            self._stop_rumble_playback()
+            self._current_queue_item = None
+            self._controls.set_playing(False)
+            self._stop_seek_updates()
+            self._seek_bar.reset()
+            self._hide_status_message()
+            self._update_queue_display()
+            self._update_history_display()
+            self._show_status_message("Paste another YouTube or Rumble URL")
             self._show_controls()
             self._sync_sleep_inhibition()
             return
@@ -2890,14 +3313,18 @@ class MainWindow(QWidget):
         self._sync_sleep_inhibition()
 
     def _on_rewind(self) -> None:
-        if self._media_mode == MediaSourceMode.YOUTUBE:
+        if self._media_mode == MediaSourceMode.RUMBLE:
+            return
+        if self._media_mode == MediaSourceMode.YOUTUBE and not self._youtube_vlc_playback_active():
             return
         if self._vlc is not None and not self._stopped:
             self._vlc.seek_relative(-SEEK_STEP_MS)
         self._show_overlay()
 
     def _on_forward(self) -> None:
-        if self._media_mode == MediaSourceMode.YOUTUBE:
+        if self._media_mode == MediaSourceMode.RUMBLE:
+            return
+        if self._media_mode == MediaSourceMode.YOUTUBE and not self._youtube_vlc_playback_active():
             return
         if self._vlc is not None and not self._stopped:
             self._vlc.seek_relative(SEEK_STEP_MS)
@@ -2908,7 +3335,7 @@ class MainWindow(QWidget):
         if volume > 0 and self._settings.muted:
             self._settings.muted = False
         self._settings.save()
-        if self._media_mode == MediaSourceMode.YOUTUBE:
+        if self._media_mode == MediaSourceMode.YOUTUBE and not self._youtube_vlc_active:
             if self._youtube_player is not None:
                 self._youtube_player.set_volume(volume)
                 if not self._settings.muted:
@@ -2923,7 +3350,7 @@ class MainWindow(QWidget):
     def _on_mute_toggled(self) -> None:
         self._settings.muted = not self._settings.muted
         self._settings.save()
-        if self._media_mode == MediaSourceMode.YOUTUBE:
+        if self._media_mode == MediaSourceMode.YOUTUBE and not self._youtube_vlc_active:
             if self._youtube_player is not None:
                 self._youtube_player.set_mute(self._settings.muted)
         elif self._vlc is not None:
@@ -2935,10 +3362,14 @@ class MainWindow(QWidget):
             if not self._advance_playback():
                 self._finish_youtube_playback()
             return
+        if self._media_mode == MediaSourceMode.RUMBLE:
+            if not self._advance_playback():
+                self._finish_rumble_playback()
+            return
         self._advance_to_next_track()
 
     def _previous_track(self) -> None:
-        if self._media_mode == MediaSourceMode.YOUTUBE:
+        if self._media_mode in (MediaSourceMode.YOUTUBE, MediaSourceMode.RUMBLE):
             return
         if self._playlist.has_previous():
             self._playlist.previous()

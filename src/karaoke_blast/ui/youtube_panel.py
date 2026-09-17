@@ -342,17 +342,21 @@ class YouTubePanel(QWidget):
         self._url_status.setStyleSheet(_URL_ERROR_STYLE)
         self._url_status_close_btn.show()
 
-    def _video_from_url_field(self) -> YouTubeVideo | None:
-        video_id = extract_video_id(self._url_input.text())
+    def _video_from_youtube_text(self, text: str) -> YouTubeVideo | None:
+        video_id = extract_video_id(text)
         if video_id is None:
+            return None
+        label = text.strip() or video_id
+        return YouTubeVideo(video_id=video_id, title=label, channel="YouTube")
+
+    def _video_from_url_field(self) -> YouTubeVideo | None:
+        text = self._url_input.text().strip()
+        video = self._video_from_youtube_text(text)
+        if video is None:
             self._show_url_error("Enter a valid YouTube URL or video ID.")
             return None
         self._clear_url_status()
-        return YouTubeVideo(
-            video_id=video_id,
-            title=self._url_input.text().strip() or video_id,
-            channel="YouTube",
-        )
+        return video
 
     def _play_from_url(self) -> None:
         video = self._video_from_url_field()

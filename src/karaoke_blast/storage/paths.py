@@ -23,6 +23,11 @@ def default_downloads_dir() -> Path:
     return path
 
 
+def default_youtube_cookies_file() -> Path:
+    """Netscape cookies.txt for yt-dlp (export from the browser)."""
+    return config_dir() / "youtube_cookies.txt"
+
+
 def is_default_downloads_dir(path: Path) -> bool:
     """Return True when *path* is the built-in YouTube downloads folder."""
     return path.resolve() == default_downloads_dir().resolve()
