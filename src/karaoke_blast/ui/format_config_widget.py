@@ -20,12 +20,12 @@ from karaoke_blast.utils.filename_rename import (
     CASING_NONE,
     CASING_TITLE,
     CASING_UPPER,
+    DEFAULT_KARAOKE_FORMAT,
+    FilenameFormat,
+    SLOT_COUNT,
     SLOT_KIND_ADDITIONAL,
     SLOT_KIND_ARTIST,
     SLOT_KIND_SONG,
-    SLOT_KINDS,
-    DEFAULT_KARAOKE_FORMAT,
-    FilenameFormat,
     format_preview,
 )
 
@@ -124,8 +124,8 @@ class FormatConfigWidget(QWidget):
         self._label_fields: dict[int, VisibleSpaceLineEdit] = {}
         self._hint_fields: dict[int, VisibleSpaceLineEdit] = {}
         self._hint_fixed_boxes: dict[int, QCheckBox] = {}
-        self._casing_combos: dict[str, QComboBox] = {}
-        self._casing_kind_labels: dict[str, QLabel] = {}
+        self._casing_combos: dict[int, QComboBox] = {}
+        self._casing_slot_labels: dict[int, QLabel] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -148,20 +148,20 @@ class FormatConfigWidget(QWidget):
 
         casing_row = QHBoxLayout()
         casing_row.setSpacing(12)
-        for kind in SLOT_KINDS:
+        for slot_index in range(SLOT_COUNT):
             kind_col = QHBoxLayout()
             kind_col.setSpacing(6)
-            kind_label = QLabel()
-            kind_label.setStyleSheet(_CASING_LABEL_STYLE)
-            self._casing_kind_labels[kind] = kind_label
-            kind_col.addWidget(kind_label)
+            slot_label = QLabel()
+            slot_label.setStyleSheet(_CASING_LABEL_STYLE)
+            self._casing_slot_labels[slot_index] = slot_label
+            kind_col.addWidget(slot_label)
             combo = QComboBox()
             combo.setStyleSheet(_COMBO_STYLE)
             combo.setFixedWidth(120)
             for mode, label in _CASING_OPTIONS:
                 combo.addItem(label, mode)
             combo.activated.connect(self._on_field_changed)
-            self._casing_combos[kind] = combo
+            self._casing_combos[slot_index] = combo
             kind_col.addWidget(combo)
             casing_row.addLayout(kind_col)
         casing_row.addStretch()
@@ -195,8 +195,8 @@ class FormatConfigWidget(QWidget):
         self._building = False
 
     def _sync_casing_combos(self) -> None:
-        for kind, combo in self._casing_combos.items():
-            mode = self._format.casing.get(kind, CASING_NONE)
+        for slot_index, combo in self._casing_combos.items():
+            mode = self._format.casing_for_slot(slot_index)
             index = combo.findData(mode)
             combo.setCurrentIndex(index if index >= 0 else 0)
 
@@ -317,6 +317,7 @@ class FormatConfigWidget(QWidget):
         self._sync_from_fields()
         slots = self._format.slots
         slots[index], slots[new_index] = slots[new_index], slots[index]
+        self._format.swap_slot_casing(index, new_index)
         self._schedule_rebuild()
 
     def _on_field_changed(self, *_args) -> None:
@@ -347,14 +348,14 @@ class FormatConfigWidget(QWidget):
         for index, fixed_box in self._hint_fixed_boxes.items():
             self._format.slots[index].hint_fixed = fixed_box.isChecked()
 
-        for kind, combo in self._casing_combos.items():
+        for slot_index, combo in self._casing_combos.items():
             mode = combo.currentData()
-            if mode in CASING_MODES:
-                self._format.casing[kind] = mode
+            if mode in CASING_MODES and slot_index < len(self._format.casing):
+                self._format.casing[slot_index] = mode
 
     def _update_casing_labels(self) -> None:
-        for kind, label_widget in self._casing_kind_labels.items():
-            label_widget.setText(self._format.casing_label_for_kind(kind))
+        for slot_index, label_widget in self._casing_slot_labels.items():
+            label_widget.setText(self._format.casing_label_for_slot(slot_index))
 
     def _update_preview(self) -> None:
         self._preview_label.setText(f"Pattern: {format_preview(self._format)}")

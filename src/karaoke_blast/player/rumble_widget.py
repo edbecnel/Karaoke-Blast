@@ -16,7 +16,7 @@ from PyQt6.QtWebEngineCore import (
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import QWidget
 
-from karaoke_blast.services.youtube_cookies import resolved_youtube_cookies_file
+from karaoke_blast.services.rumble_cookies import resolved_rumble_cookies_file
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class _RumbleRefererInterceptor(QWebEngineUrlRequestInterceptor):
 
 
 def _install_browser_cookies(profile: QWebEngineProfile) -> None:
-    path = resolved_youtube_cookies_file()
+    path = resolved_rumble_cookies_file()
     if path is None:
         return
     jar = http.cookiejar.MozillaCookieJar(str(path))

@@ -18,7 +18,10 @@ from PyQt6.QtWidgets import (
 )
 
 from karaoke_blast.services.youtube_cookies import cookies_folder, youtube_cookies_setup_page
-from karaoke_blast.storage.paths import default_youtube_cookies_file
+from karaoke_blast.storage.paths import (
+    default_rumble_cookies_file,
+    default_youtube_cookies_file,
+)
 
 from karaoke_blast.ui.checkbox_style import CHECKBOX_STYLE_WHITE_LABEL
 
@@ -123,25 +126,49 @@ class PreferencesDialog(QDialog):
 
         layout.addWidget(self._section_label("YouTube"))
 
-        cookies_path = default_youtube_cookies_file()
-        cookies_help = QLabel(
-            "For YouTube or Rumble downloads that fail with HTTP 403, export a Netscape "
-            "cookies.txt while signed in (visit each site, or combine domains in one file) "
-            "and save it as:"
+        youtube_cookies_path = default_youtube_cookies_file()
+        youtube_cookies_help = QLabel(
+            "For YouTube downloads that fail with HTTP 403, export a Netscape cookies.txt "
+            "from youtube.com while signed in and save it as:"
         )
-        cookies_help.setWordWrap(True)
-        cookies_help.setStyleSheet("color: #ccc; font-size: 12px; background: transparent;")
-        layout.addWidget(cookies_help)
+        youtube_cookies_help.setWordWrap(True)
+        youtube_cookies_help.setStyleSheet(
+            "color: #ccc; font-size: 12px; background: transparent;"
+        )
+        layout.addWidget(youtube_cookies_help)
 
-        cookies_path_label = QLabel(str(cookies_path))
-        cookies_path_label.setWordWrap(True)
-        cookies_path_label.setTextInteractionFlags(
+        youtube_cookies_path_label = QLabel(str(youtube_cookies_path))
+        youtube_cookies_path_label.setWordWrap(True)
+        youtube_cookies_path_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
-        cookies_path_label.setStyleSheet(
+        youtube_cookies_path_label.setStyleSheet(
             "color: #aaa; font-size: 11px; font-family: monospace; background: transparent;"
         )
-        layout.addWidget(cookies_path_label)
+        layout.addWidget(youtube_cookies_path_label)
+
+        layout.addWidget(self._section_label("Rumble"))
+
+        rumble_cookies_path = default_rumble_cookies_file()
+        rumble_cookies_help = QLabel(
+            "For Rumble playback and metadata, export cookies from rumble.com while signed in "
+            "and save as:"
+        )
+        rumble_cookies_help.setWordWrap(True)
+        rumble_cookies_help.setStyleSheet(
+            "color: #ccc; font-size: 12px; background: transparent;"
+        )
+        layout.addWidget(rumble_cookies_help)
+
+        rumble_cookies_path_label = QLabel(str(rumble_cookies_path))
+        rumble_cookies_path_label.setWordWrap(True)
+        rumble_cookies_path_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        rumble_cookies_path_label.setStyleSheet(
+            "color: #aaa; font-size: 11px; font-family: monospace; background: transparent;"
+        )
+        layout.addWidget(rumble_cookies_path_label)
 
         cookies_buttons = QHBoxLayout()
         open_folder_btn = QPushButton("Open folder…")

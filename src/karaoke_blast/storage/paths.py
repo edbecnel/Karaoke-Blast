@@ -28,6 +28,11 @@ def default_youtube_cookies_file() -> Path:
     return config_dir() / "youtube_cookies.txt"
 
 
+def default_rumble_cookies_file() -> Path:
+    """Netscape cookies.txt for Rumble (export from the browser while on rumble.com)."""
+    return config_dir() / "rumble_cookies.txt"
+
+
 def is_default_downloads_dir(path: Path) -> bool:
     """Return True when *path* is the built-in YouTube downloads folder."""
     return path.resolve() == default_downloads_dir().resolve()

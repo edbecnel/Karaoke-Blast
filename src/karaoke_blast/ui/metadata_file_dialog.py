@@ -419,7 +419,7 @@ class MetadataFileDialog(QDialog):
             elif slot_index in fixed:
                 initial = fixed[slot_index]
             if initial:
-                initial = cased_slot_text(initial, slot.kind, self._fmt)
+                initial = cased_slot_text(initial, slot_index, self._fmt)
                 field.blockSignals(True)
                 field.setText(initial)
                 field.blockSignals(False)
@@ -500,9 +500,8 @@ class MetadataFileDialog(QDialog):
         field = self._slot_fields.get(slot_index)
         if field is None:
             return
-        slot = self._fmt.slots[slot_index]
         if not field.isReadOnly():
-            apply_casing_to_field(field, slot.kind, self._fmt)
+            apply_casing_to_field(field, slot_index, self._fmt)
         self._update_hint_button(slot_index)
         self._update_preview()
 

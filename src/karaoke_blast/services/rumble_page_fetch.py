@@ -7,7 +7,7 @@ import logging
 import time
 from pathlib import Path
 
-from karaoke_blast.storage.paths import default_youtube_cookies_file
+from karaoke_blast.services.rumble_cookies import resolved_rumble_cookies_file
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,8 @@ def _fetch_once(page_url: str, cookies: dict[str, str]) -> str | None:
 
 def fetch_rumble_page_html(page_url: str) -> str | None:
     """Return watch-page HTML, retrying through Cloudflare intermittency."""
-    jar = _load_cookie_jar(default_youtube_cookies_file())
+    path = resolved_rumble_cookies_file()
+    jar = _load_cookie_jar(path) if path is not None else None
     cookies = _cookies_for_request(jar)
 
     for attempt in range(_FETCH_ATTEMPTS):

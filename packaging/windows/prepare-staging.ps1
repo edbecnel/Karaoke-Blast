@@ -82,6 +82,13 @@ $venvPython = Join-Path $venvDir "Scripts\python.exe"
 & $venvPython -m pip install --upgrade pip wheel
 & $venvPython -m pip install $projectWheel.FullName
 
+$verifyScript = Join-Path $Root "packaging\common\verify-bundled-python-deps.py"
+Write-Host "Verifying bundled Python dependencies (curl_cffi, yt-dlp impersonation)..."
+& $venvPython $verifyScript
+if ($LASTEXITCODE -ne 0) {
+    throw "Bundled runtime dependency verification failed."
+}
+
 Write-Host "Downloading bundled ffmpeg..."
 Ensure-Dir $ffmpegDir
 $ffmpegZip = Join-Path $tmpDir "ffmpeg.zip"

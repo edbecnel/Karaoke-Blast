@@ -22,15 +22,11 @@ CASING_UPPER = "upper"
 
 CASING_MODES = (CASING_NONE, CASING_TITLE, CASING_UPPER)
 SLOT_KINDS = (SLOT_KIND_SONG, SLOT_KIND_ARTIST, SLOT_KIND_ADDITIONAL)
-DEFAULT_CASING: dict[str, str] = {
-    SLOT_KIND_SONG: CASING_NONE,
-    SLOT_KIND_ARTIST: CASING_NONE,
-    SLOT_KIND_ADDITIONAL: CASING_NONE,
-}
 
 DEFAULT_SEPARATORS = (" - ", " - ", " - ")
 SLOT_COUNT = 4
 SEPARATOR_COUNT = 3
+DEFAULT_SLOT_CASING: list[str] = [CASING_NONE] * SLOT_COUNT
 
 # Legacy keys for migration
 _LEGACY_DEFAULT_SLOT_NAMES = ("Song Name", "Artist Name")
@@ -71,24 +67,63 @@ class FormatSlot:
         return cls(kind=kind, label=label, enabled=enabled, hint=hint, hint_fixed=hint_fixed)
 
 
+def _coerce_slot_casing(
+    raw_casing: object,
+    slots: list[FormatSlot],
+) -> list[str]:
+    """Normalize persisted casing to one mode per slot index."""
+    normalized = list(DEFAULT_SLOT_CASING)
+    if isinstance(raw_casing, list):
+        for index, mode in enumerate(raw_casing[:SLOT_COUNT]):
+            if mode in CASING_MODES:
+                normalized[index] = str(mode)
+        return normalized
+    if isinstance(raw_casing, dict):
+        if any(str(key).isdigit() for key in raw_casing):
+            for index in range(SLOT_COUNT):
+                mode = raw_casing.get(str(index), raw_casing.get(index, CASING_NONE))
+                if mode in CASING_MODES:
+                    normalized[index] = str(mode)
+            return normalized
+        for index, slot in enumerate(slots[:SLOT_COUNT]):
+            mode = raw_casing.get(slot.kind, CASING_NONE)
+            if mode in CASING_MODES:
+                normalized[index] = str(mode)
+    return normalized
+
+
 @dataclass
 class FilenameFormat:
     """Configurable filename layout: four reorderable slots and three separators."""
 
     slots: list[FormatSlot] = field(default_factory=list)
     separators: list[str] = field(default_factory=lambda: list(DEFAULT_SEPARATORS))
-    casing: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_CASING))
+    casing: list[str] = field(default_factory=lambda: list(DEFAULT_SLOT_CASING))
 
     def __post_init__(self) -> None:
         self._normalize_shape()
 
     def _normalize_casing(self) -> None:
-        normalized = dict(DEFAULT_CASING)
-        for kind in SLOT_KINDS:
-            mode = self.casing.get(kind, CASING_NONE)
+        self.casing = _coerce_slot_casing(self.casing, self.slots)
+
+    def casing_for_slot(self, slot_index: int) -> str:
+        """Return the configured casing mode for *slot_index*."""
+        self._normalize_shape()
+        if 0 <= slot_index < len(self.casing):
+            mode = self.casing[slot_index]
             if mode in CASING_MODES:
-                normalized[kind] = mode
-        self.casing = normalized
+                return mode
+        return CASING_NONE
+
+    def swap_slot_casing(self, first_index: int, second_index: int) -> None:
+        """Swap casing settings when two slots are reordered."""
+        self._normalize_shape()
+        if not (0 <= first_index < SLOT_COUNT and 0 <= second_index < SLOT_COUNT):
+            return
+        self.casing[first_index], self.casing[second_index] = (
+            self.casing[second_index],
+            self.casing[first_index],
+        )
 
     def _normalize_shape(self) -> None:
         while len(self.slots) < SLOT_COUNT:
@@ -154,26 +189,19 @@ class FilenameFormat:
 
         return title_label, artist_label, comment_label
 
-    def casing_label_for_kind(self, kind: str) -> str:
-        """Return a display label for casing controls using configured slot labels."""
-        enabled_labels = [
-            slot.label for slot in self.slots if slot.kind == kind and slot.enabled
-        ]
-        if enabled_labels:
-            if len(enabled_labels) == 1:
-                return enabled_labels[0]
-            return " / ".join(enabled_labels)
-        for slot in self.slots:
-            if slot.kind == kind:
-                return slot.label
-        return kind
+    def casing_label_for_slot(self, slot_index: int) -> str:
+        """Return a display label for casing controls using the slot label."""
+        self._normalize_shape()
+        if 0 <= slot_index < len(self.slots):
+            return self.slots[slot_index].label
+        return f"Slot {slot_index + 1}"
 
     def to_dict(self) -> dict[str, object]:
         self._normalize_shape()
         return {
             "slots": [slot.to_dict() for slot in self.slots],
             "separators": list(self.separators),
-            "casing": dict(self.casing),
+            "casing": list(self.casing),
         }
 
     @classmethod
@@ -194,18 +222,12 @@ class FilenameFormat:
             for entry in raw_slots:
                 if isinstance(entry, dict):
                     slots.append(FormatSlot.from_dict(entry))
-        casing = dict(DEFAULT_CASING)
-        if isinstance(raw_casing, dict):
-            for kind in SLOT_KINDS:
-                mode = raw_casing.get(kind, CASING_NONE)
-                if mode in CASING_MODES:
-                    casing[kind] = str(mode)
         fmt = cls(
             slots=slots,
             separators=[str(sep) for sep in separators]
             if isinstance(separators, list)
             else list(DEFAULT_SEPARATORS),
-            casing=casing,
+            casing=_coerce_slot_casing(raw_casing, slots),
         )
         fmt._normalize_shape()
         return fmt
@@ -373,10 +395,9 @@ def apply_casing(value: str, mode: str) -> str:
     return value
 
 
-def apply_slot_casing(value: str, kind: str, fmt: FilenameFormat) -> str:
-    """Apply the configured casing for *kind* to *value*."""
-    fmt._normalize_shape()
-    mode = fmt.casing.get(kind, CASING_NONE)
+def apply_slot_casing(value: str, slot_index: int, fmt: FilenameFormat) -> str:
+    """Apply the configured casing for *slot_index* to *value*."""
+    mode = fmt.casing_for_slot(slot_index)
     return apply_casing(value, mode)
 
 
@@ -400,17 +421,15 @@ def compose_filename(slot_values: dict[int, str], fmt: FilenameFormat) -> str:
         return ""
 
     first_index, first_value = included[0]
-    first_slot = fmt.slots[first_index]
     result = apply_slot_casing(
         sanitize_slot_value(first_value),
-        first_slot.kind,
+        first_index,
         fmt,
     )
     for position in range(1, len(included)):
         index = included[position][0]
-        slot = fmt.slots[index]
         separator = fmt.separators[index - 1] if index > 0 else " - "
-        value = apply_slot_casing(sanitize_slot_value(included[position][1]), slot.kind, fmt)
+        value = apply_slot_casing(sanitize_slot_value(included[position][1]), index, fmt)
         result += separator + value
 
     return finalize_filename(result)

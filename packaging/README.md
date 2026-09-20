@@ -170,7 +170,12 @@ Requires network access (downloads Python standalone and ffmpeg). On Apple Silic
 | Windows | `%LOCALAPPDATA%\Programs\Karaoke Blast` | Start Menu → **Karaoke Blast** (runs `launcher.bat`) |
 | macOS | `/Applications/Karaoke Blast.app` | Double-click the app in Finder |
 
-Both bundles include a private Python runtime. **VLC** and **ffmpeg** are used from the system when present; otherwise:
+Both bundles include a private Python runtime with app dependencies from `pyproject.toml`
+(including **yt-dlp** and **curl_cffi** for Rumble browser impersonation). After `pip install`
+the app wheel, `packaging/common/verify-bundled-python-deps.py` runs and fails the build if
+impersonation support is missing.
+
+**VLC** and **ffmpeg** are used from the system when present; otherwise:
 
 - **Windows:** installer can install VLC via winget; ffmpeg is bundled in the app folder.
 - **macOS:** first launch may run `brew install --cask vlc`; ffmpeg is bundled in the app.
@@ -202,4 +207,5 @@ Both bundles include a private Python runtime. **VLC** and **ffmpeg** are used f
 | `packaging/macos/build-dmg.sh` | macOS `.app` + `.dmg` |
 | `packaging/macos/install-optional-deps.sh` | First-run VLC/ffmpeg on macOS |
 | `packaging/common/versions.env` | Python standalone and ffmpeg download versions |
+| `packaging/common/verify-bundled-python-deps.py` | Post-`pip install` check for curl_cffi / yt-dlp impersonation |
 | `.github/workflows/release.yml` | CI release builds |

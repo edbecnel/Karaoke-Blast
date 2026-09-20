@@ -106,7 +106,7 @@ def _slot_text(
     if not slot.enabled:
         return ""
     raw = slot_values.get(slot_index, "").strip()
-    return apply_slot_casing(raw, slot.kind, fmt)
+    return apply_slot_casing(raw, slot_index, fmt)
 
 
 def resolve_vlc_metadata(

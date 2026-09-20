@@ -125,8 +125,11 @@ QLineEdit {
 
 _SCROLL_STYLE = """
 QScrollArea {
-    background-color: transparent;
+    background-color: #1e1e2e;
     border: none;
+}
+QScrollArea > QWidget > QWidget {
+    background-color: #1e1e2e;
 }
 """
 
@@ -574,7 +577,7 @@ class RenameFileDialog(QDialog):
             elif slot_index in fixed:
                 initial = fixed[slot_index]
             if initial:
-                initial = cased_slot_text(initial, slot.kind, fmt)
+                initial = cased_slot_text(initial, slot_index, fmt)
                 field.blockSignals(True)
                 field.setText(initial)
                 field.blockSignals(False)
@@ -650,8 +653,7 @@ class RenameFileDialog(QDialog):
         for slot_index, field in self._slot_fields.items():
             if field.isReadOnly():
                 continue
-            slot = self._fmt.slots[slot_index]
-            apply_casing_to_field(field, slot.kind, self._fmt)
+            apply_casing_to_field(field, slot_index, self._fmt)
             self._update_hint_button(slot_index)
 
     def _schedule_format_structure_apply(self) -> None:
@@ -693,9 +695,8 @@ class RenameFileDialog(QDialog):
         if field is None:
             return
         fmt = self.format()
-        slot = fmt.slots[slot_index]
         if not field.isReadOnly():
-            apply_casing_to_field(field, slot.kind, fmt)
+            apply_casing_to_field(field, slot_index, fmt)
         self._update_hint_button(slot_index)
         self._update_preview()
 

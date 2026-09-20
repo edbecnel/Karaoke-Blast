@@ -103,6 +103,9 @@ RUNTIME_PY="$(runtime_python "$PYTHON_DIR")"
 "$RUNTIME_PY" -m pip install --upgrade pip wheel
 "$RUNTIME_PY" -m pip install "$PROJECT_WHEEL"
 
+log "Verifying bundled Python dependencies (curl_cffi, yt-dlp impersonation)..."
+"$RUNTIME_PY" "$ROOT/packaging/common/verify-bundled-python-deps.py"
+
 log "Downloading bundled ffmpeg..."
 ensure_dir "$FFMPEG_DIR"
 download "$FFMPEG_MACOS_URL" "$TMP/ffmpeg.zip"

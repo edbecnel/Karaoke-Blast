@@ -107,10 +107,14 @@ These are installed automatically into your virtualenv when you run Quick Start 
 | PyQt6 | Desktop UI |
 | PyQt6-WebEngine | Embedded YouTube player |
 | python-vlc | Local playback (requires VLC installed on the system) |
-| yt-dlp | YouTube search and download |
+| yt-dlp | YouTube search and download; Rumble metadata and downloads |
+| curl_cffi | Browser impersonation for Rumble (yt-dlp and page fetch) |
 | mutagen | Read/write media tags and metadata song-list labels |
 
-If you already have a virtualenv from an older checkout, re-run `pip install -e .` so newer dependencies (such as mutagen) are installed.
+If you already have a virtualenv from an older checkout, re-run `pip install -e .` so newer dependencies (such as curl_cffi or mutagen) are installed.
+
+Release installers bundle the same Python dependencies; the macOS and Windows build scripts run
+`packaging/common/verify-bundled-python-deps.py` after installing the app wheel.
 
 ## Quick Start
 
