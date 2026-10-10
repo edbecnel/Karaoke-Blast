@@ -71,6 +71,7 @@ from karaoke_blast.utils.sleep_inhibitor import SleepInhibitor
 from karaoke_blast.utils.display import display_name
 from karaoke_blast.utils.file_manager import move_path_to_trash, trash_action_label
 from karaoke_blast.utils.macos_app import bring_widgets_forward, wait_until
+from karaoke_blast.utils.window_stack import cursor_over_topmost_application_window
 from karaoke_blast.utils.resources import logo_default_window_size
 from karaoke_blast.utils.song_display import (
     DisplayFormat,
@@ -809,6 +810,7 @@ class MainWindow(QWidget):
                 self._seek_bar,
             )
             and self._stack.currentWidget() == self._player_page
+            and cursor_over_topmost_application_window(self)
         ):
             self._show_controls()
         return super().eventFilter(obj, event)
@@ -922,6 +924,8 @@ class MainWindow(QWidget):
         if not self._should_poll_controls_reveal():
             self._controls_reveal_timer.stop()
             return
+        if not cursor_over_topmost_application_window(self):
+            return
         local = self.mapFromGlobal(QCursor.pos())
         if not self.rect().contains(local):
             return
@@ -977,7 +981,10 @@ class MainWindow(QWidget):
 
     def mouseMoveEvent(self, event) -> None:
         super().mouseMoveEvent(event)
-        if self._stack.currentWidget() == self._player_page:
+        if (
+            self._stack.currentWidget() == self._player_page
+            and cursor_over_topmost_application_window(self)
+        ):
             self._show_controls()
 
     def _reposition_overlay(self) -> None:
