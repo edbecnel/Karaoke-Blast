@@ -5,6 +5,13 @@ from pathlib import Path
 from karaoke_blast.utils.video_scanner import scan_videos
 
 
+def test_scan_videos_includes_flv(tmp_path: Path) -> None:
+    flv = tmp_path / "legacy-karaoke.flv"
+    flv.write_bytes(b"video")
+
+    assert scan_videos(tmp_path) == [flv]
+
+
 def test_scan_videos_skips_macos_appledouble_files_by_default(tmp_path: Path) -> None:
     (tmp_path / "Episode 1.mp4").write_bytes(b"video")
     (tmp_path / "._Episode 1.mp4").write_bytes(b"metadata")

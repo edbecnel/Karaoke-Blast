@@ -125,7 +125,7 @@ pip install -e .
 python -m karaoke_blast
 ```
 
-Open a folder containing video or audio files (`.mp4`, `.mkv`, `.avi`, `.mov`, `.webm`, `.m4v`, `.mp3`, `.m4a`, `.aac`, `.flac`, `.wav`, `.ogg`, `.opus`, `.wma`) — including folders that only have media in subfolders — and the player opens in full screen. Recently opened folders appear on the startup screen for quick access. Right-click a recent folder for **Browse folder** (open in Finder or Explorer) or **Remove from List**.
+Open a folder containing video or audio files (`.mp4`, `.mkv`, `.avi`, `.mov`, `.webm`, `.m4v`, `.flv`, `.mp3`, `.m4a`, `.aac`, `.flac`, `.wav`, `.ogg`, `.opus`, `.wma`) — including folders that only have media in subfolders — and the player opens in full screen. Recently opened folders appear on the startup screen for quick access. Right-click a recent folder for **Browse folder** (open in Finder or Explorer) or **Remove from List**.
 
 You can also click **Search YouTube** on the startup screen to find and play karaoke videos online without downloading them first.
 
