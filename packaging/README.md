@@ -178,7 +178,7 @@ impersonation support is missing.
 **VLC** and **ffmpeg** are used from the system when present; otherwise:
 
 - **Windows:** installer can install VLC via winget; ffmpeg is bundled in the app folder.
-- **macOS:** first launch may run `brew install --cask vlc`; ffmpeg is bundled in the app.
+- **macOS:** first launch may run `brew install --cask vlc`; ffmpeg is bundled in the app (YouTube downloads and FLV compatibility remux).
 
 ---
 

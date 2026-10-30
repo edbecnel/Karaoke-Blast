@@ -2,6 +2,7 @@
 
 import json
 import logging
+import sys
 from pathlib import Path
 
 from karaoke_blast.storage.paths import config_dir, default_downloads_dir
@@ -58,6 +59,7 @@ class Settings:
         self.active_video_type_id: str = BUILTIN_ANY_ID
         self.library_flat_browse: bool = False
         self.hide_appledouble_files: bool = True
+        self.flv_compatibility_mode: bool = sys.platform == "darwin"
         self.load()
 
     def load(self) -> None:
@@ -144,6 +146,8 @@ class Settings:
                 self.library_flat_browse = data["library_flat_browse"]
             if isinstance(data.get("hide_appledouble_files"), bool):
                 self.hide_appledouble_files = data["hide_appledouble_files"]
+            if isinstance(data.get("flv_compatibility_mode"), bool):
+                self.flv_compatibility_mode = data["flv_compatibility_mode"]
             self._migrate_legacy_youtube_append_karaoke(data)
             self._migrate_legacy_youtube_downloads_dir(data)
             self._migrate_legacy_display_formats()
@@ -180,6 +184,7 @@ class Settings:
             "active_video_type_id": self.active_video_type_id,
             "library_flat_browse": self.library_flat_browse,
             "hide_appledouble_files": self.hide_appledouble_files,
+            "flv_compatibility_mode": self.flv_compatibility_mode,
         }
         try:
             _settings_file().write_text(

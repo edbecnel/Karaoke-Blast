@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 
 from PyQt6.QtCore import Qt, QUrl
@@ -12,15 +13,18 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from karaoke_blast.services.youtube_cookies import cookies_folder, youtube_cookies_setup_page
+from karaoke_blast.services.flv_compat import cache_total_bytes, clear_flv_compat_cache
 from karaoke_blast.storage.paths import (
     default_rumble_cookies_file,
     default_youtube_cookies_file,
+    flv_compat_cache_dir,
 )
 
 from karaoke_blast.ui.checkbox_style import CHECKBOX_STYLE_WHITE_LABEL
@@ -43,6 +47,7 @@ class PreferencesValues:
     filename_rename_auto_fill_slots: bool
     metadata_skip_tagged: bool
     metadata_auto_fill_slots: bool
+    flv_compatibility_mode: bool
 
 
 def build_preferences_values(
@@ -54,6 +59,7 @@ def build_preferences_values(
     filename_rename_auto_fill_slots: bool,
     metadata_skip_tagged: bool,
     metadata_auto_fill_slots: bool,
+    flv_compatibility_mode: bool,
 ) -> PreferencesValues:
     return PreferencesValues(
         hide_appledouble_files=hide_appledouble_files,
@@ -63,6 +69,7 @@ def build_preferences_values(
         filename_rename_auto_fill_slots=filename_rename_auto_fill_slots,
         metadata_skip_tagged=metadata_skip_tagged,
         metadata_auto_fill_slots=metadata_auto_fill_slots,
+        flv_compatibility_mode=flv_compatibility_mode,
     )
 
 
@@ -79,6 +86,8 @@ class PreferencesDialog(QDialog):
         filename_rename_auto_fill_slots: bool,
         metadata_skip_tagged: bool,
         metadata_auto_fill_slots: bool,
+        flv_compatibility_mode: bool = False,
+        active_flv_cache_path=None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -123,6 +132,45 @@ class PreferencesDialog(QDialog):
         self._controls_auto_hide_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
         self._controls_auto_hide_checkbox.setChecked(controls_auto_hide)
         layout.addWidget(self._controls_auto_hide_checkbox)
+
+        self._flv_compatibility_checkbox: QCheckBox | None = None
+        if sys.platform == "darwin":
+            layout.addWidget(self._section_label("FLV (macOS)"))
+            self._flv_compatibility_checkbox = QCheckBox(
+                "FLV Compatibility Mode (macOS)"
+            )
+            self._flv_compatibility_checkbox.setStyleSheet(CHECKBOX_STYLE_WHITE_LABEL)
+            self._flv_compatibility_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._flv_compatibility_checkbox.setToolTip(
+                "Remux compatible .flv files to MP4 in Karaoke Blast's cache (no re-encoding, "
+                "original files unchanged). Improves playback on macOS where FLV often freezes."
+            )
+            self._flv_compatibility_checkbox.setChecked(flv_compatibility_mode)
+            layout.addWidget(self._flv_compatibility_checkbox)
+
+            flv_cache_help = QLabel(
+                "Cached conversions are stored separately from your library:"
+            )
+            flv_cache_help.setWordWrap(True)
+            flv_cache_help.setStyleSheet(
+                "color: #ccc; font-size: 12px; background: transparent;"
+            )
+            layout.addWidget(flv_cache_help)
+            flv_cache_path_label = QLabel(str(flv_compat_cache_dir()))
+            flv_cache_path_label.setWordWrap(True)
+            flv_cache_path_label.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
+            flv_cache_path_label.setStyleSheet(
+                "color: #aaa; font-size: 11px; font-family: monospace; background: transparent;"
+            )
+            layout.addWidget(flv_cache_path_label)
+
+            clear_flv_btn = QPushButton("Clear FLV conversion cache…")
+            clear_flv_btn.clicked.connect(
+                lambda: self._confirm_clear_flv_cache(active_flv_cache_path)
+            )
+            layout.addWidget(clear_flv_btn)
 
         layout.addWidget(self._section_label("YouTube"))
 
@@ -235,7 +283,35 @@ class PreferencesDialog(QDialog):
         label.setStyleSheet(_SECTION_LABEL_STYLE)
         return label
 
+    def _confirm_clear_flv_cache(self, active_flv_cache_path) -> None:
+        from pathlib import Path
+
+        exclude = frozenset()
+        if active_flv_cache_path is not None:
+            exclude = frozenset({Path(active_flv_cache_path)})
+        size_mb = cache_total_bytes() / (1024 * 1024)
+        answer = QMessageBox.question(
+            self,
+            "Clear FLV cache",
+            f"Remove cached FLV conversions ({size_mb:.1f} MB)?\n\n"
+            "Files currently playing from the cache are kept.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        removed, skipped = clear_flv_compat_cache(exclude_paths=exclude)
+        QMessageBox.information(
+            self,
+            "FLV cache cleared",
+            f"Removed {removed} cached conversion(s)."
+            + (f" Skipped {skipped} in use." if skipped else ""),
+        )
+
     def values(self) -> PreferencesValues:
+        flv_mode = False
+        if self._flv_compatibility_checkbox is not None:
+            flv_mode = self._flv_compatibility_checkbox.isChecked()
         return build_preferences_values(
             hide_appledouble_files=self._hide_appledouble_checkbox.isChecked(),
             library_flat_browse=self._library_flat_browse_checkbox.isChecked(),
@@ -244,4 +320,5 @@ class PreferencesDialog(QDialog):
             filename_rename_auto_fill_slots=self._rename_auto_fill_checkbox.isChecked(),
             metadata_skip_tagged=self._metadata_skip_tagged_checkbox.isChecked(),
             metadata_auto_fill_slots=self._metadata_auto_fill_checkbox.isChecked(),
+            flv_compatibility_mode=flv_mode,
         )

@@ -23,6 +23,13 @@ def default_downloads_dir() -> Path:
     return path
 
 
+def flv_compat_cache_dir() -> Path:
+    """Application-managed cache for macOS FLV remux (stream copy to MP4)."""
+    path = config_dir() / "flv-compat-cache"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def default_youtube_cookies_file() -> Path:
     """Netscape cookies.txt for yt-dlp (export from the browser)."""
     return config_dir() / "youtube_cookies.txt"

@@ -12,6 +12,7 @@ def test_build_preferences_values_round_trip() -> None:
         filename_rename_auto_fill_slots=False,
         metadata_skip_tagged=True,
         metadata_auto_fill_slots=False,
+        flv_compatibility_mode=True,
     )
 
     assert values == PreferencesValues(
@@ -22,6 +23,7 @@ def test_build_preferences_values_round_trip() -> None:
         filename_rename_auto_fill_slots=False,
         metadata_skip_tagged=True,
         metadata_auto_fill_slots=False,
+        flv_compatibility_mode=True,
     )
 
 
@@ -34,6 +36,7 @@ def test_build_preferences_values_reflects_toggled_values() -> None:
         filename_rename_auto_fill_slots=True,
         metadata_skip_tagged=False,
         metadata_auto_fill_slots=True,
+        flv_compatibility_mode=False,
     )
 
     assert values == PreferencesValues(
@@ -44,4 +47,5 @@ def test_build_preferences_values_reflects_toggled_values() -> None:
         filename_rename_auto_fill_slots=True,
         metadata_skip_tagged=False,
         metadata_auto_fill_slots=True,
+        flv_compatibility_mode=False,
     )

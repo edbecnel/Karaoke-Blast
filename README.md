@@ -27,7 +27,7 @@ Download the latest installers from [GitHub Releases](https://github.com/edbecne
 |---|---|---|
 | Karaoke Blast + Python | Running the app | Yes (always) |
 | VLC | Local videos and downloaded YouTube files | Only if missing (optional winget step) |
-| ffmpeg | YouTube downloads | Bundled in app folder if not on PATH |
+| ffmpeg | YouTube downloads; macOS FLV compatibility remux | Bundled in app folder if not on PATH |
 
 YouTube streaming in the embedded player works without VLC.
 
@@ -52,7 +52,7 @@ YouTube streaming in the embedded player works without VLC.
 The installers always ship Karaoke Blast and Python. **VLC** and **ffmpeg** are installed or bundled only when they are not already on your computer:
 
 - **VLC** — required for local file playback. The Windows installer can install it via winget when missing. On macOS, first launch tries Homebrew (`brew install --cask vlc`) if VLC is not found.
-- **ffmpeg** — required for YouTube downloads. If ffmpeg is not on PATH, the installer bundles a copy inside the app directory.
+- **ffmpeg** — required for YouTube downloads and (on macOS) remuxing compatible FLV files for playback. If ffmpeg is not on PATH, the installer bundles a copy inside the app directory.
 
 YouTube streaming works without VLC. Local folder playback and downloaded YouTube videos need VLC.
 
@@ -157,6 +157,17 @@ python -m karaoke_blast --folder /path/to/videos
 | `Q` | Quit |
 
 Move the mouse during playback to reveal the on-screen control bar. Use the play/pause toggle on the control bar, or press `Space`, to play and pause local files.
+
+### FLV on macOS (compatibility mode)
+
+Legacy `.flv` karaoke files often freeze in VLC on macOS while the same files play on Windows. **FLV Compatibility Mode** (macOS only, on by default) remuxes compatible FLV files to MP4 **without re-encoding** into an application cache, then plays the cached copy with libVLC. Your original library files are not modified, renamed, or deleted.
+
+- Toggle the mode under **Preferences → FLV Compatibility Mode (macOS)**.
+- Cached files live under `~/Library/Application Support/Karaoke Blast/flv-compat-cache/`. Use **Clear FLV conversion cache…** in Preferences to reclaim disk space (the file currently playing is kept).
+- Requires **ffmpeg** (the same bundled or system ffmpeg used for YouTube downloads). If ffmpeg is unavailable, Karaoke Blast plays the original FLV and shows a warning that playback may freeze.
+- FLV files with codecs that cannot be copied into MP4 (for example VP6) are not transcoded; you get a clear error instead.
+
+**Acceptance:** Product Owner verification on a previously failing FLV is required before treating macOS FLV playback as fully verified.
 
 ## Library Panel
 

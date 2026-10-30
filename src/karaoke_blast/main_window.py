@@ -43,6 +43,14 @@ from karaoke_blast.services.youtube_stream import (
     YouTubeStreamPlayback,
     start_youtube_stream,
 )
+from karaoke_blast.services.flv_compat import (
+    FlvCompatProbeError,
+    FlvCompatUnsupported,
+    FlvPlaybackAction,
+    plan_flv_playback,
+    probe_flv_for_remux,
+)
+from karaoke_blast.services.flv_prepare import start_flv_prepare
 from karaoke_blast.storage.downloads_folder_history import DownloadsFolderHistory
 from karaoke_blast.storage.folder_history import FolderHistory
 from karaoke_blast.storage.folder_queues import FolderQueues
@@ -165,6 +173,10 @@ class MainWindow(QWidget):
         self._stream_worker = None
         self._rumble_prepare_thread: QThread | None = None
         self._rumble_prepare_worker = None
+        self._flv_prepare_thread: QThread | None = None
+        self._flv_prepare_worker = None
+        self._flv_prepare_generation = 0
+        self._active_flv_cache_path: Path | None = None
         self._youtube_vlc_active = False
 
         self._stack = QStackedWidget()
@@ -1531,7 +1543,109 @@ class MainWindow(QWidget):
         self._reposition_overlay()
         self._overlay_timer.start(duration_ms)
 
+    def _cancel_flv_prepare(self) -> None:
+        self._flv_prepare_generation += 1
+        worker = self._flv_prepare_worker
+        if worker is not None:
+            worker.request_cancel()
+        thread = self._flv_prepare_thread
+        if thread is not None and thread.isRunning():
+            thread.quit()
+        self._flv_prepare_worker = None
+        self._flv_prepare_thread = None
+
+    def _launch_local_vlc_playback(self, source: Path) -> bool:
+        """Start or prepare VLC playback for a local file. Returns True if playback started."""
+        if self._vlc is None:
+            return False
+        self._cancel_flv_prepare()
+        generation = self._flv_prepare_generation
+
+        plan = plan_flv_playback(
+            source,
+            compatibility_enabled=self._settings.flv_compatibility_mode,
+        )
+        if plan.user_message:
+            self._show_toast(plan.user_message, duration_ms=8000)
+
+        if plan.action in (FlvPlaybackAction.PLAY_DIRECT, FlvPlaybackAction.PLAY_CACHED):
+            vlc_path = plan.vlc_path or source
+            self._active_flv_cache_path = (
+                vlc_path.resolve()
+                if plan.action == FlvPlaybackAction.PLAY_CACHED
+                else None
+            )
+            self._vlc.play(vlc_path)
+            self._controls.set_playing(True)
+            return True
+
+        try:
+            probe_flv_for_remux(source)
+        except FlvCompatUnsupported as exc:
+            self._show_toast(str(exc), duration_ms=8000)
+            self._controls.set_playing(False)
+            return False
+        except FlvCompatProbeError as exc:
+            self._show_toast(str(exc), duration_ms=6000)
+            self._controls.set_playing(False)
+            return False
+
+        self._show_status_message(
+            f"Preparing {display_name(source)} for playback…",
+        )
+        self._controls.set_playing(False)
+        self._stop_seek_updates()
+        thread, worker = start_flv_prepare(
+            source=source,
+            on_finished=lambda playback, original: self._on_flv_prepare_finished(
+                playback, original, generation
+            ),
+            on_failed=lambda original, message: self._on_flv_prepare_failed(
+                original, message, generation
+            ),
+            parent=self,
+        )
+        self._flv_prepare_thread = thread
+        self._flv_prepare_worker = worker
+        return False
+
+    def _on_flv_prepare_finished(self, playback_path: object, source: object, generation: int) -> None:
+        self._flv_prepare_worker = None
+        self._flv_prepare_thread = None
+        if generation != self._flv_prepare_generation:
+            return
+        original = Path(source)
+        cached = Path(playback_path)
+        if not _is_playable_file(original):
+            self._show_toast(
+                f'"{display_name(original)}" was removed before playback could start.',
+                duration_ms=6000,
+            )
+            self._controls.set_playing(False)
+            self._hide_status_message()
+            return
+        self._active_flv_cache_path = cached.resolve()
+        if self._vlc is None:
+            return
+        self._hide_status_message()
+        self._vlc.play(cached)
+        self._controls.set_playing(True)
+        self._apply_saved_audio()
+        self._start_seek_updates()
+        self._sync_sleep_inhibition()
+
+    def _on_flv_prepare_failed(self, source: object, message: str, generation: int) -> None:
+        self._flv_prepare_worker = None
+        self._flv_prepare_thread = None
+        if generation != self._flv_prepare_generation:
+            return
+        logger.warning("FLV prepare failed for %s: %s", source, message)
+        self._show_toast(message, duration_ms=8000)
+        self._controls.set_playing(False)
+        self._hide_status_message()
+
     def _freeze_local_playback(self) -> None:
+        self._cancel_flv_prepare()
         if self._vlc is not None:
             self._vlc.stop()
         self._stopped = True
@@ -1539,6 +1653,7 @@ class MainWindow(QWidget):
         self._stop_seek_updates()
         self._seek_bar.reset()
         self._clear_audio_title()
+        self._active_flv_cache_path = None
         self._sync_sleep_inhibition()
 
     def _enter_player_page(self, *, tab: str = "local") -> None:
@@ -2038,8 +2153,15 @@ class MainWindow(QWidget):
             self._clear_audio_title()
         self._show_overlay()
         self._show_controls()
-        self._vlc.play(current)
-        self._controls.set_playing(True)
+        started = self._launch_local_vlc_playback(current)
+        if not started:
+            self._play_history.add_local(current)
+            self._update_history_display()
+            self._library_panel.set_current_index(self._playlist.index)
+            self._update_queue_display()
+            self._save_folder_state()
+            self._raise_ui_layers()
+            return
         self._play_history.add_local(current)
         self._update_history_display()
         self._apply_saved_audio()
@@ -2076,8 +2198,14 @@ class MainWindow(QWidget):
             self._clear_audio_title()
         self._show_overlay_for_path(path)
         self._show_controls()
-        self._vlc.play(path)
-        self._controls.set_playing(True)
+        started = self._launch_local_vlc_playback(path)
+        if not started:
+            self._play_history.add_local(path)
+            self._update_history_display()
+            self._library_panel.clear_current_index()
+            self._update_queue_display()
+            self._raise_ui_layers()
+            return
         self._play_history.add_local(path)
         self._update_history_display()
         self._apply_saved_audio()
@@ -2571,6 +2699,8 @@ class MainWindow(QWidget):
             filename_rename_auto_fill_slots=self._settings.filename_rename_auto_fill_slots,
             metadata_skip_tagged=self._settings.metadata_skip_tagged,
             metadata_auto_fill_slots=self._settings.metadata_auto_fill_slots,
+            flv_compatibility_mode=self._settings.flv_compatibility_mode,
+            active_flv_cache_path=self._active_flv_cache_path,
             parent=self,
         )
         anchor = self._library_panel if self._stack.currentWidget() == self._player_page else None
@@ -2589,6 +2719,7 @@ class MainWindow(QWidget):
         self._settings.filename_rename_auto_fill_slots = values.filename_rename_auto_fill_slots
         self._settings.metadata_skip_tagged = values.metadata_skip_tagged
         self._settings.metadata_auto_fill_slots = values.metadata_auto_fill_slots
+        self._settings.flv_compatibility_mode = values.flv_compatibility_mode
         self._settings.save()
 
         self._sync_controls_auto_hide(values.controls_auto_hide)
@@ -3308,12 +3439,15 @@ class MainWindow(QWidget):
         self._stopped = True
         self._external_path = None
         self._current_queue_item = None
+        self._cancel_flv_prepare()
         if self._vlc is not None:
             self._vlc.stop()
         self._controls.set_playing(False)
         self._stop_seek_updates()
         self._seek_bar.reset()
         self._clear_audio_title()
+        self._active_flv_cache_path = None
+        self._hide_status_message()
         self._update_queue_display()
         self._update_history_display()
         self._show_controls()
